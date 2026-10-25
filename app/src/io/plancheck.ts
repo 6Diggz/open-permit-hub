@@ -17,7 +17,7 @@ export interface CheckItem { id: string; state: ItemState; confidence: Confidenc
 export type SheetKind = 'cover' | 'site' | 'floor' | 'existing' | 'elevation' | 'section' | 'roof' | 'foundation' | 'framing' | 'electrical' | 'plumbing' | 'mechanical' | 'energy' | 'notes' | 'structural' | 'details';
 export interface Sheet { page: number; id: string | null; kinds: SheetKind[]; scales: string[]; chars: number }
 export interface Dim { page: number; inches: number; text: string }
-export interface WindowSize { page: number; w: number; h: number; text: string }
+export interface WindowSize { page: number; w: number; h: number; text: string; ctx: string }
 export interface PlanCheck {
   pages: number; textPages: number; chars: number; scanned: boolean;
   sheets: Sheet[]; title: Partial<Record<TitleField, Hit>>; codes: { editions: Hit[]; sections: string[] };
@@ -127,15 +127,47 @@ const INLINE: [TitleField, RegExp][] = [
 ];
 const ADDRESS = /\b\d{2,6}\s+(?:[NSEW]\.?\s+)?[A-Za-z0-9.' ]{2,30}?\s(?:st|street|ave|avenue|blvd|boulevard|dr|drive|rd|road|pl|place|way|ln|lane|ct|court|ter|terrace|cir|circle)\b\.?/i;
 
-/** r5plan-01: a note that says the thing is not there. "No gas" is the all-electric note itself, so it is not a negation. */
-// r6logic-01: no bare "not": code-minimum wording ("not less than", "shall not be"), double negatives ("not non-rated", "not N/A")
-// and "not required" (an answer, e.g. sprinklers) are mentions. Only "not provided/shown/included", N/A, TBD, by others, see
-// engineer, non-rated, a leading "NO <item>" and a trailing ": NO" negate.
-const NEG = /\b(not provided|not shown|not included|n\/a|none|tbd|t\.b\.d\.|see (?:structural |the )?(?:engineer|engineering|structural|s-sheets)|by others|non[- ]rated)\b|^\s*no\s|^\s*not\s|:\s*no\.?\s*$/i;
-const NOT_NEG = /\bno gas\b|\bnot\s+(?:less|more|greater|smaller|larger|exceed(?:ing)?|to exceed|over|under)\b|\bshall not\b|\bnot\s+(?:non[- ]rated|n\/a)\b|\bnot required\b/gi;
-export const negated = (t: string) => NEG.test(t.replace(NOT_NEG, ' '));
+/** r7-01 (replaces the r5plan-01 / r6logic-01 regex swing): one clause-scoped classifier, driven by a labeled corpus
+ * (src/test/r7/negation-corpus.test.ts, 80+ rows). Any change here must keep the whole corpus green.
+ * provided = the note says the thing is there; not = it says it is absent (N/A, TBD, omitted, by owner, not installed...);
+ * ambiguous = a bare "not" or a hedge we can't read ("where required", "verify") -> Mentioned, check the wording, never High. */
+export type NoteIntent = 'provided' | 'not' | 'ambiguous';
+// Compliant constructions: code minimums and double negatives. Removed before anything else is read.
+const COMPLIANT = /\bnot\s+(?:less|more|greater|smaller|larger|exceed(?:ing)?|to exceed|over|under|non[- ]rated|na)\b|\bshall not be\s+(?:less|more|greater|smaller|larger|battery|located|installed (?:within|closer|more|less))\b|\bnone (?:removed|omitted|deferred)\b|\bno gas\b/gi;
+// Absence phrases (read only inside the item's own clause).
+const ABSENT = /\bnot (?:be )?(?:provided|shown|included|installed|applicable|required|used|proposed|available|part of|yet|in contract|designed)\b|\b(?:do|does|did|will|shall) not\b|\bnot\s*$|^\s*(?:note\s*:\s*)?not\s|\bna\b|\bnic\b|\bnone\b|\btbd\b|\bpending\b|\bomit(?:ted)?\b|\bexclud(?:ed|e)\b|\bdeferred\b|\bto be (?:provided|determined|added|installed) later\b|\blater\b|\bby (?:owner|others)\b|\bwithout\b|\bsee (?:structural |the )?(?:engineer|engineering|structural|s-sheets)\b|\bnon[- ]rated\b|\bno\b(?!\s*\.?\s*\d)/i;
+const HEDGE = /\bnot\b|\b(?:where|if|when) (?:required|needed|applicable)\b|\bif any\b|\boptional\b|\bverify\b|\balternate\b|\bmay be\b/i;
+const tidy = (t: string) => t.replace(/\bn\.\s?i\.\s?c\.?/gi, 'NIC').replace(/\bt\.\s?b\.\s?d\.?/gi, 'TBD').replace(/\bn\s?\/\s?a\b|\bn\.a\./gi, 'NA').replace(/\bw\/o\b/gi, 'without').replace(/\bnot in contract\b/gi, 'NIC');
+/** Classify what a note says about one item. `item` picks the clause that names it; `notRequiredOk` keeps "not required" a mention (III.E.4 sprinklers). */
+export function noteIntent(text: string, item?: RegExp, notRequiredOk = false): NoteIntent {
+  let t = tidy(text).replace(COMPLIANT, ' ');
+  if (notRequiredOk) t = t.replace(/\bnot (?:be )?required\b[^;.,]*/gi, ' ');
+  const cl = t.split(/;|,|\.(?=\s|$)/).map(c => c.trim()).filter(Boolean);
+  const re = item ? new RegExp(item.source, item.flags.replace('g', '')) : null;
+  let i = re ? cl.findIndex(c => re.test(c)) : -1;
+  const scope: string[] = [];
+  if (i < 0) scope.push(t); else {
+    scope.push(cl[i]);
+    // "SMOKE ALARMS, NOT PROVIDED": a bare item clause is answered by the clause right after it.
+    const rest = cl[i].replace(re!, '').replace(/\bnote\b|[:\-–—]/gi, '').trim();
+    if (!/[a-z0-9]/i.test(rest) && cl[i + 1]) scope.push(cl[i + 1]);
+  }
+  const s = scope.join(' : ');
+  if (ABSENT.test(s)) return 'not';
+  if (HEDGE.test(s)) return 'ambiguous';
+  return 'provided';
+}
+export const negated = (t: string, item?: RegExp) => noteIntent(t, item) === 'not';
 const clip = (s: string, n = 90) => (s.length > n ? s.slice(0, n - 1) + '…' : s);
 
+/** r7-02: the words that belong to one window size: its parentheses if it sits inside some, else its sentence without other parenthetical asides. */
+function sizeCtx(line: string, at: number, len: number): string {
+  const open = line.lastIndexOf('(', at), close = line.lastIndexOf(')', at);
+  if (open > close) { const end = line.indexOf(')', at + len); return line.slice(open + 1, end < 0 ? undefined : end); }
+  let a = 0; for (const m of line.slice(0, at).matchAll(/[.;]\s/g)) a = m.index! + 2;
+  const nx = line.slice(at + len).search(/[.;](?:\s|$)/); const b = nx < 0 ? line.length : at + len + nx;
+  return line.slice(a, b).replace(/\([^)]{4,}\)/g, ' ');
+}
 export function analyze(pagesIn: PageText[], totalPages = pagesIn.length): PlanCheck {
   const pages = pagesIn.map(p => ({ page: p.page, lines: p.lines.map(normalize).filter(Boolean) }));
   const chars = pages.reduce((n, p) => n + p.lines.join(' ').length, 0);
@@ -202,7 +234,7 @@ export function analyze(pagesIn: PageText[], totalPages = pagesIn.length): PlanC
     if (/window|egress|escape|opening|net clear|\bw\d|\bclr\.?/i.test(l.text)) {
       for (const m of l.text.matchAll(/(\d)\s*'\s*-?\s*(\d{1,2})?\s*"?\s*[xX]\s*(\d)\s*'\s*-?\s*(\d{1,2})?\s*"?|\b(\d{2})\s*"?\s*[xX]\s*(\d{2})\s*"?/g)) {
         const w = m[5] ? Number(m[5]) : Number(m[1]) * 12 + Number(m[2] ?? 0), h = m[6] ? Number(m[6]) : Number(m[3]) * 12 + Number(m[4] ?? 0);
-        if (w >= 12 && w <= 144 && h >= 12 && h <= 120) windows.push({ page: l.page, w, h, text: clip(l.text) });
+        if (w >= 12 && w <= 144 && h >= 12 && h <= 120) windows.push({ page: l.page, w, h, text: clip(l.text), ctx: sizeCtx(l.text, m.index!, m[0].length) });
       }
     }
   }
@@ -213,10 +245,13 @@ export function analyze(pagesIn: PageText[], totalPages = pagesIn.length): PlanC
   const add = (id: string, state: ItemState, confidence: Confidence, evidence: Hit[], why: { en: string; es: string }, attention?: { en: string; es: string }) =>
     items.push({ id, state, confidence: state === 'missing' ? 'low' : confidence, pages: uniq(evidence), evidence: evidence.slice(0, 4), why, ...(attention ? { attention } : {}) });
   const kw = (id: string, re: RegExp, enWhat: string, esWhat: string, strong?: RegExp) => {
-    const all_ = find(re); const neg = all_.filter(x => negated(x.text)); const h = all_.filter(x => !negated(x.text)); const s = strong ? h.filter(x => strong.test(x.text)) : [];
+    const all_ = find(re).map(x => ({ x, k: noteIntent(x.text, re, id === 'III.E.4') }));
+    const neg = all_.filter(a => a.k === 'not').map(a => a.x); const h = all_.filter(a => a.k !== 'not').map(a => a.x);
+    const s = strong ? all_.filter(a => a.k === 'provided' && strong.test(a.x.text)).map(a => a.x) : []; // ambiguous wording is never High
+    const vague = h.length > 0 && all_.every(a => a.k !== 'provided');
     if (!h.length && neg.length) return add(id, 'negated', 'medium', neg, { en: `${enWhat[0].toUpperCase() + enWhat.slice(1)} is mentioned, but the note says it is not provided (for example N/A, TBD or see engineer).`, es: `Se menciona ${esWhat}, pero la nota dice que no se incluye (por ejemplo N/A, TBD o ver ingeniero).` });
     if (!h.length) return add(id, 'missing', 'low', [], { en: `No note about ${enWhat} was found in the text.`, es: `No se encontró una nota sobre ${esWhat} en el texto.` });
-    add(id, 'addressed', s.length ? 'high' : 'medium', s.length ? s : h, s.length ? { en: `A specific note about ${enWhat} was found.`, es: `Se encontró una nota específica sobre ${esWhat}.` } : { en: `${enWhat[0].toUpperCase() + enWhat.slice(1)} is mentioned. Check the note says enough.`, es: `Se menciona ${esWhat}. Revise que la nota diga lo suficiente.` });
+    add(id, 'addressed', s.length ? 'high' : 'medium', s.length ? s : h, s.length ? { en: `A specific note about ${enWhat} was found.`, es: `Se encontró una nota específica sobre ${esWhat}.` } : vague ? { en: `${enWhat[0].toUpperCase() + enWhat.slice(1)} is mentioned, but the wording is unclear (for example "where required" or a bare "not"). Check the wording.`, es: `Se menciona ${esWhat}, pero la redacción no es clara (por ejemplo "donde se requiera" o un "no" suelto). Revise la redacción.` } : { en: `${enWhat[0].toUpperCase() + enWhat.slice(1)} is mentioned. Check the note says enough.`, es: `Se menciona ${esWhat}. Revise que la nota diga lo suficiente.` });
   };
   const sheetHit = (k: SheetKind): Hit[] => kindPages(k).map(page => ({ page, text: (sheets.find(s => s.page === page)!.id ?? '') + ' ' + k }));
   const P1 = pages[0]?.page ?? 1;
@@ -268,10 +303,12 @@ export function analyze(pagesIn: PageText[], totalPages = pagesIn.length): PlanC
   // III.F.1 escape windows (sizes checked against the numbers on the sheet: 24" high, 20" wide, 5.7 sq ft, 5.0 at grade)
   { const h = find(/\b(egress|escape|emergency escape)\b/i); // r6logic-02: only sizes on an egress-tagged line count; on an egress page, untagged sizes count unless tagged bath/obscure/(E)/remove.
     const tagged = windows.filter(w => /egress|escape|\be\.?w\.?\b/i.test(w.text));
-    const ew = tagged.length ? tagged : windows.filter(w => h.some(x => x.page === w.page) && !/\bbath|obscure|\(e\)|remov/i.test(w.text));
+    // r7-02: each size is judged on its own words (its sentence, or its parentheses): (E), removed, demolished, rough opening, bath, obscure drop out.
+    const NOT_ESCAPE = /\bbath|obscure|\(e\)|\bexist(?:ing|\.)|remov|demo(?:lish|\b)|rough opening|\br\.?\s?o\.?(?=\s|\)|$)/i;
+    const ew = (tagged.length ? tagged : windows.filter(w => h.some(x => x.page === w.page))).filter(w => !NOT_ESCAPE.test(w.ctx));
     const E = PARAMS.egress; const bad = (w: WindowSize) => w.w < E.minWidthIn || w.h < E.minHeightIn || (w.w * w.h) / 144 < E.gradeSqFt;
-    const small = ew.every(bad) ? ew : []; // conflict only when no escape-window size passes
-    add('III.F.1', !h.length ? (windows.length ? 'partial' : 'missing') : ew.length ? (small.length ? 'conflict' : 'addressed') : 'partial', h.length && ew.length ? 'medium' : 'low', [...h.slice(0, 2), ...ew.slice(0, 2).map(w => ({ page: w.page, text: `${w.w}" x ${w.h}" — ${w.text}` }))],
+    const small = ew.filter(bad); // every bedroom needs its own escape opening (CRC R310.1): any proposed size that fails conflicts
+    add('III.F.1', !h.length ? (windows.length ? 'partial' : 'missing') : ew.length ? (small.length ? 'conflict' : 'addressed') : 'partial', h.length && ew.length ? 'medium' : 'low', [...h.slice(0, 2), ...(small.length ? small : ew).slice(0, 2).map(w => ({ page: w.page, text: `${w.w}" x ${w.h}" — ${w.text}` }))],
       !h.length ? (windows.length ? { en: `${windows.length} window sizes found, but no note says which is the escape window.`, es: `Se encontraron ${windows.length} medidas de ventanas, pero ninguna nota dice cuál es la de escape.` } : { en: 'No escape window note or window size was found.', es: 'No se encontró nota de ventana de escape ni medidas de ventanas.' })
         : ew.length ? { en: `Escape window note with ${ew.length} size${ew.length > 1 ? 's' : ''} read from the text.`, es: `Nota de ventana de escape con ${ew.length} medida${ew.length > 1 ? 's' : ''} leída${ew.length > 1 ? 's' : ''} del texto.` } : { en: 'Escape windows are mentioned, but no size was read next to them.', es: 'Se mencionan ventanas de escape, pero no se leyó una medida junto a ellas.' },
       small.length ? { en: `A size read as ${small[0].w}" x ${small[0].h}" (page ${small[0].page}) is under 20" wide, 24" high or 5.0 sq ft. Check whether it is the clear opening.`, es: `Una medida leída como ${small[0].w}" x ${small[0].h}" (página ${small[0].page}) tiene menos de 20" de ancho, 24" de alto o 5.0 pies². Revise si es la abertura libre.` } : undefined); }
