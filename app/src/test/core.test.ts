@@ -70,7 +70,7 @@ describe('rules (golden cases)', () => {
   });
   it('fee line uses interior livable sq ft and flags the 750 band', () => {
     const p = demoProject(); p.adu.interiorLivableSqFt = 755;
-    const r = byId(evaluate(p, RULES, PACK_ID), 'FEE-01'); expect(r.msg.en).toContain('scaled'); expect(r.next?.en).toContain('750');
+    const r = byId(evaluate(p, RULES, PACK_ID), 'FEE-01'); expect(r.msg.en).toContain('Impact fee: estimate, verify with LADBS'); expect(r.next?.en).toContain('750');
   });
   it('demo lot cannot export', () => { const p = demoProject(); expect(exportBlockers(p, evaluate(p, RULES, PACK_ID)).length).toBeGreaterThan(0); });
   it('rules vest on application date', () => { const p = demoProject(); p.applicationDate = '2025-06-01'; expect(evaluate(p, RULES, PACK_ID).results.length).toBe(0); });
@@ -98,7 +98,7 @@ describe('QA regressions', () => {
   it('F04/F05 burn area unknown is UNKNOWN; yes removes auto passes', () => { const p = demoProject(); p.site.flags.fireRebuild = 'unknown'; expect(byId(evaluate(p, RULES, PACK_ID), 'HAZ-05').status).toBe('UNKNOWN'); p.site.flags.fireRebuild = 'yes'; const r = evaluate(p, RULES, PACK_ID); expect(r.results.filter(x => x.status === 'PASS' && x.rule.module !== 'core').length).toBe(0); expect(r.overall).not.toBe('READY_FOR_PREPARER'); });
   it('F06 transit height is 18 ft unless roof pitch matches', () => { const p = demoProject(); p.adu.mode = 'youadu'; p.site.flags.transitHalfMile = 'yes'; p.adu.heightMm = ft(19); p.adu.roofPitchMatches = 'no'; expect(byId(evaluate(p, RULES, PACK_ID), 'HGT-01').status).toBe('FAIL'); p.adu.roofPitchMatches = 'yes'; expect(byId(evaluate(p, RULES, PACK_ID), 'HGT-01').status).toBe('PASS'); });
   it('F07/F08 nonsense numbers and off-lot geometry block READY', () => { const p = demoProject(); p.adu.hosePullFt = -5; expect(byId(evaluate(p, RULES, PACK_ID), 'GEO-01').status).toBe('UNKNOWN'); const q = demoProject(); q.adu.footprint = rect(ft(100), ft(100), ft(20), ft(20)); const r = evaluate(q, RULES, PACK_ID); expect(byId(r, 'GEO-01').status).toBe('FAIL'); expect(r.overall).toBe('FIX_ISSUES'); });
-  it('F11 exactly 750 sq ft is not exempt', () => { const p = demoProject(); p.adu.interiorLivableSqFt = 750; expect(byId(evaluate(p, RULES, PACK_ID), 'FEE-01').msg.en).toContain('scaled'); });
+  it('F11 exactly 750 sq ft is not exempt', () => { const p = demoProject(); p.adu.interiorLivableSqFt = 750; expect(byId(evaluate(p, RULES, PACK_ID), 'FEE-01').msg.en).toContain('Impact fee: estimate, verify with LADBS'); });
   it('F14 unsupported old version gives a clear error', () => { expect(() => migrate({ ...demoProject(), version: 0 })).toThrow(/unsupported version/); });
   it('F18 citation guard catches lowercase and long ids', () => { expect(validateCitations('per ADU-123 and set-02', RULES)).toEqual(['ADU-123']); });
 });

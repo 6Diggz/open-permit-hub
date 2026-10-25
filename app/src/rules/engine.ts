@@ -4,12 +4,14 @@ import { SAFETY_MODULES } from '../core/model';
 export type Status = 'PASS' | 'FAIL' | 'UNKNOWN' | 'NOT_CHECKED' | 'INFO';
 export type L = { en: string; es: string };
 export interface Cite { code: string; url?: string; verified: boolean }
-export interface Outcome { status: Exclude<Status, 'NOT_CHECKED'>; msg: L; next?: L; values?: Record<string, string | number> }
+export interface Outcome { status: Status; msg: L; next?: L; values?: Record<string, string | number> }
 export interface Rule {
   id: string; version: string; module: string; severity: 'critical' | 'major' | 'minor';
   title: L; cites: Cite[]; effectiveFrom: string; effectiveTo?: string;
   /** city: checked by LADBS (unknown blocks export). info: listed on cover only (PR03). */
   kind: 'city' | 'info';
+  /** Health-and-safety rule: still enforced in AB 2533 legalization mode (Gov. Code §66332). */
+  hs?: boolean;
   /** When true for this project, no other rule may show an automatic PASS. */
   suspendsAutoPass?: (p: Project) => boolean;
   applies: (p: Project) => boolean;
@@ -35,6 +37,9 @@ export function evaluate(p: Project, rules: Rule[], packId: string, today = new 
     const d = p.dismissed.find(x => x.ruleId === r.id);
     results.push({ rule: r, ...o, dismissed: d && r.severity !== 'critical' ? d.reason : undefined });
   }
+  // AB 2533 legalization (Gov. Code §66332): the city may deny only over health and safety. Non-safety rules become notes.
+  if (p.adu.legalization) results.forEach(r => { if (!r.rule.hs && r.rule.module !== 'core' && r.rule.kind === 'city' && r.status !== 'PASS' && r.status !== 'NOT_CHECKED') {
+    r.status = 'INFO'; r.next = { en: 'Legalization (AB 2533): the city can\'t deny a pre-2020 unit over this unless it is needed for health and safety (Gov. Code §66332). Your preparer confirms.', es: 'Legalización (AB 2533): la ciudad no puede negar una unidad anterior a 2020 por esto salvo por salud y seguridad (Código de Gobierno §66332). Su preparador confirma.' }; } });
   // Burn-area / suspend rules: no automatic passes (F05). A rule with suspendsAutoPass that returns INFO turns PASS into INFO.
   const suspend = results.some(r => r.rule.suspendsAutoPass?.(p));
   if (suspend) results.forEach(r => { if (r.status === 'PASS' && r.rule.module !== 'core') { r.status = 'INFO'; r.next = { en: 'Special rebuild rules apply here. Confirm this item with the rebuild center.', es: 'Aplican reglas especiales de reconstrucción. Confirme con el centro de reconstrucción.' }; } });

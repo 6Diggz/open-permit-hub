@@ -15,7 +15,7 @@ export function migrate(raw: any): Project {
   p.adu.heightMm = num(p.adu.heightMm) ?? 3657.6; p.adu.ceilingHeightMm = num(p.adu.ceilingHeightMm); p.adu.hosePullFt = num(p.adu.hosePullFt);
   p.adu.interiorLivableSqFt = num(p.adu.interiorLivableSqFt); p.adu.addedAreaSqFt = num(p.adu.addedAreaSqFt) ?? 0;
   const base = blankProject();
-  return { ...base, ...p, site: { ...base.site, ...p.site, flags: { ...base.site.flags, ...p.site?.flags } }, adu: { ...base.adu, ...p.adu }, people: { ...base.people, ...p.people }, modules: { ...base.modules, ...p.modules }, confirmed: { lot: true, house: true, adu: true, ...p.confirmed } };
+  return { ...base, ...p, site: { ...base.site, ...p.site, flags: { ...base.site.flags, ...p.site?.flags } }, adu: { ...base.adu, ...p.adu }, people: { ...base.people, ...p.people }, modules: { ...base.modules, ...p.modules }, sheet: { ...(p.sheet ?? {}) }, docs: { ...(p.docs ?? {}) }, confirmed: { lot: true, house: true, adu: true, ...p.confirmed } };
 }
 export const serialize = (p: Project) => JSON.stringify({ ...p, updatedAt: new Date().toISOString() }, null, 1);
 

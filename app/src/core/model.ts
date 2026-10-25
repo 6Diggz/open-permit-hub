@@ -23,7 +23,7 @@ export interface Project {
     flags: {
       hillside: Tri; vhfhsz: Tri; hpoz: Tri; coastal: Tri; methane: Tri; fireRebuild: Tri;
       transitHalfMile: Tri; easementsKnown: Tri; anyUnitRented: Tri; primarySprinklered: Tri;
-      slopeOver10: Tri;
+      slopeOver10: Tri; dwpEasement10ft: Tri;
     };
   };
   adu: {
@@ -32,7 +32,19 @@ export interface Project {
     addedAreaSqFt: number; removesGarageDoorWall: Tri; ratedWallPlanned: Tri; sprinklered: Tri;
     hosePullFt: number | null; windows: Window[]; roofPitchMatches: Tri; bedrooms: number;
     smokeCoPlanned: Tri; allElectric: Tri;
+    /** Garage path (sheet II-C detached, II-G attached). */
+    garageAttachment: 'detached' | 'attached' | 'unknown'; staysInsideWalls: Tri; addedForIngressOnly: Tri;
+    /** AB 2533 legalization of a pre-2020 unpermitted unit (Gov. Code §66332). */
+    legalization: boolean;
+    slabVaporBarrier: Tri; openingsNearLine: Tri; smokeHardwired: Tri;
+    panelAmps: number | null; separateGasMeter: Tri;
+    /** Setbacks as written on the floor plan sheet, to compare with the site plan. */
+    floorPlanSideSetbackMm: number | null; floorPlanRearSetbackMm: number | null;
   };
+  /** Answers to correction-sheet "ask" items: yes = shown on plans / handled, no = not yet, na = does not apply. */
+  sheet: Record<string, 'yes' | 'no' | 'na'>;
+  /** Correction-sheet "doc" items the user has attached. */
+  docs: Record<string, boolean>;
   people: { ownerName: string; preparerRole: Role; preparerName: string; preparerLicense: string; language: 'en' | 'es' };
   modules: Record<string, boolean>;
   dismissed: { ruleId: string; reason: string; at: string; ruleVersion: string }[];
@@ -64,14 +76,18 @@ export function blankProject(): Project {
       address: '', apn: '', jurisdiction: 'unknown', lotSource: 'manual', lotUncertaintyMm: ft(2),
       lot: rect(0, 0, ft(50), ft(130)), streetEdge: 0,
       primary: rect(ft(10), ft(20), ft(30), ft(45)), primaryHeightMm: ft(16),
-      flags: { hillside: 'unknown', vhfhsz: 'unknown', hpoz: 'unknown', coastal: 'unknown', methane: 'unknown', fireRebuild: 'unknown', transitHalfMile: 'unknown', easementsKnown: 'unknown', anyUnitRented: 'unknown', primarySprinklered: 'unknown', slopeOver10: 'unknown' },
+      flags: { hillside: 'unknown', vhfhsz: 'unknown', hpoz: 'unknown', coastal: 'unknown', methane: 'unknown', fireRebuild: 'unknown', transitHalfMile: 'unknown', easementsKnown: 'unknown', anyUnitRented: 'unknown', primarySprinklered: 'unknown', slopeOver10: 'unknown', dwpEasement10ft: 'unknown' },
     },
     adu: {
       mode: 'conversion', footprint: rect(ft(15), ft(100), ft(20), ft(20)), heightMm: ft(12), interiorLivableSqFt: null,
       ceilingHeightMm: null, existingStructurePermitted: 'unknown', builtBefore2020: 'unknown', addedAreaSqFt: 0,
       removesGarageDoorWall: 'unknown', ratedWallPlanned: 'unknown', sprinklered: 'unknown', hosePullFt: null,
       roofPitchMatches: 'unknown', windows: [], bedrooms: 1, smokeCoPlanned: 'unknown', allElectric: 'unknown',
+      garageAttachment: 'unknown', staysInsideWalls: 'unknown', addedForIngressOnly: 'unknown', legalization: false,
+      slabVaporBarrier: 'unknown', openingsNearLine: 'unknown', smokeHardwired: 'unknown', panelAmps: null, separateGasMeter: 'unknown',
+      floorPlanSideSetbackMm: null, floorPlanRearSetbackMm: null,
     },
+    sheet: {}, docs: {},
     people: { ownerName: '', preparerRole: 'owner', preparerName: '', preparerLicense: '', language: 'en' },
     modules: Object.fromEntries(MODULES.map(m => [m.id, true])),
     dismissed: [], confirmed: { lot: false, house: false, adu: false },
@@ -83,8 +99,8 @@ export function demoProject(): Project {
   const p = blankProject(); p.confirmed = { lot: true, house: true, adu: true };
   p.name = 'Demo lot (not a real address)';
   p.site.address = '123 Example St (demo)'; p.site.apn = '0000-000-000'; p.site.jurisdiction = 'la-city';
-  p.site.flags = { ...p.site.flags, hillside: 'no', vhfhsz: 'no', hpoz: 'no', coastal: 'no', methane: 'no', fireRebuild: 'no', transitHalfMile: 'no', anyUnitRented: 'no', primarySprinklered: 'no', slopeOver10: 'no' };
-  p.adu = { ...p.adu, interiorLivableSqFt: 380, ceilingHeightMm: inch(96), existingStructurePermitted: 'yes', builtBefore2020: 'yes', removesGarageDoorWall: 'yes', ratedWallPlanned: 'unknown', sprinklered: 'no', hosePullFt: 120, smokeCoPlanned: 'yes', allElectric: 'yes',
+  p.site.flags = { ...p.site.flags, hillside: 'no', vhfhsz: 'no', hpoz: 'no', coastal: 'no', methane: 'no', fireRebuild: 'no', transitHalfMile: 'no', anyUnitRented: 'no', primarySprinklered: 'no', slopeOver10: 'no', dwpEasement10ft: 'no' };
+  p.adu = { ...p.adu, interiorLivableSqFt: 380, ceilingHeightMm: inch(96), existingStructurePermitted: 'yes', builtBefore2020: 'yes', removesGarageDoorWall: 'yes', ratedWallPlanned: 'unknown', sprinklered: 'no', hosePullFt: 120, smokeCoPlanned: 'yes', allElectric: 'yes', garageAttachment: 'detached', staysInsideWalls: 'yes', smokeHardwired: 'yes', slabVaporBarrier: 'unknown',
     windows: [{ id: 'w1', room: 'Bedroom', sleeping: true, clearWidthMm: inch(24), clearHeightMm: inch(36), sillMm: inch(40), gradeFloor: true }] };
   p.adu.footprint = [{ x: ft(46), y: ft(108) }, { x: ft(66), y: ft(108) }, { x: ft(66), y: ft(128) }, { x: ft(46), y: ft(128) }].map(q => ({ x: q.x - ft(18), y: q.y }));
   return p;

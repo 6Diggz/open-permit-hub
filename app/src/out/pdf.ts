@@ -4,6 +4,8 @@ import type { Report } from '../rules/engine';
 import { bbox, clearanceToEdge } from '../core/geom';
 import { MM_PER_FT, fmtFtIn, fmtSqFt } from '../core/units';
 import { area } from '../core/geom';
+import { readiness, scoreLine } from '../rules/readiness';
+import { RULE_ITEMS } from '../rules/ladbs-adu-2025';
 
 const INK = rgb(0.12, 0.14, 0.18), MUTE = rgb(0.42, 0.45, 0.5), RED = rgb(0.72, 0.16, 0.12), GREEN = rgb(0.1, 0.45, 0.25), AMBER = rgb(0.68, 0.45, 0.02);
 const PT_PER_IN = 72;
@@ -68,7 +70,7 @@ async function sitePlanSheet(doc: PDFDocument, p: Project, kind: Kind) {
 export async function sheetsPDF(p: Project, kind: Kind) { const d = await PDFDocument.create(); d.setTitle(`${p.name} - site plan`); await sitePlanSheet(d, p, kind); return d.save(); }
 
 const STAT: Record<string, [string, string, ReturnType<typeof rgb>]> = {
-  PASS: ['Pass', 'Cumple', GREEN], FAIL: ['Fix', 'Corregir', RED], UNKNOWN: ['Need info', 'Falta info', AMBER], NOT_CHECKED: ['NOT CHECKED - module off', 'NO REVISADO', MUTE], INFO: ['Note', 'Nota', MUTE],
+  PASS: ['Pass', 'Cumple', GREEN], FAIL: ['Fix', 'Corregir', RED], UNKNOWN: ['Need info', 'Falta info', AMBER], NOT_CHECKED: ['NOT CHECKED', 'NO REVISADO', MUTE], INFO: ['Note', 'Nota', MUTE],
 };
 export async function reportPDF(p: Project, rep: Report, lang: 'en' | 'es' = p.people.language) {
   const doc = await PDFDocument.create(); doc.setTitle(`${p.name} - check report`);
@@ -80,13 +82,14 @@ export async function reportPDF(p: Project, rep: Report, lang: 'en' | 'es' = p.p
   line(p.name, 20, fb); line(`${p.site.address || '-'}   APN ${p.site.apn || '-'}`, 10, f, MUTE); y -= 6;
   const ov = { READY_FOR_PREPARER: es ? 'Listo para su preparador' : 'Ready for your preparer', FIX_ISSUES: es ? 'Hay cosas que corregir' : 'Issues to fix', INCOMPLETE: es ? 'Incompleto: falta información' : 'Incomplete: information missing', NOT_SUPPORTED: es ? 'Dirección no soportada' : 'Address not supported' }[rep.overall];
   line(ov, 16, fb, rep.overall === 'READY_FOR_PREPARER' ? GREEN : rep.overall === 'FIX_ISSUES' ? RED : AMBER);
-  line(`${es ? 'Reglas vigentes al' : 'Rules as of'} ${rep.vestDate}   ${rep.pack}   ${es ? 'Aprobado' : 'Pass'} ${rep.counts.PASS} / ${es ? 'Corregir' : 'Fix'} ${rep.counts.FAIL} / ${es ? 'Falta info' : 'Need info'} ${rep.counts.UNKNOWN} / ${es ? 'No revisado' : 'Not checked'} ${rep.counts.NOT_CHECKED}`, 9, f, MUTE); y -= 8;
+  line(`${es ? 'Reglas vigentes al' : 'Rules as of'} ${rep.vestDate}   ${rep.pack}   ${es ? 'Aprobado' : 'Pass'} ${rep.counts.PASS} / ${es ? 'Corregir' : 'Fix'} ${rep.counts.FAIL} / ${es ? 'Falta info' : 'Need info'} ${rep.counts.UNKNOWN} / ${es ? 'No revisado' : 'Not checked'} ${rep.counts.NOT_CHECKED}`, 9, f, MUTE);
+  line(scoreLine(readiness(p, rep), es) + ` - LADBS PC/STR/Corr.Lst.20A Rev 10/01/2025`, 10, fb, INK); y -= 8;
   const order = ['FAIL', 'UNKNOWN', 'NOT_CHECKED', 'INFO', 'PASS'];
   for (const r of [...rep.results].sort((a, b) => order.indexOf(a.status) - order.indexOf(b.status))) {
     const [en, sp, c] = STAT[r.status]; line(`${es ? sp : en}   ${r.rule.id}  ${r.rule.title[lang]}`, 11, fb, c);
     line(r.msg[lang], 10, f, INK, 12); if (r.next) line((es ? 'Siguiente paso: ' : 'Next step: ') + r.next[lang], 10, f, INK, 12);
     if (r.dismissed) line(`Dismissed by user: ${r.dismissed}`, 9, f, AMBER, 12);
-    line(r.rule.cites.map(c2 => c2.code + (c2.verified ? '' : ' [citation pending verification]')).join('; '), 8, f, MUTE, 12); y -= 6;
+    line(r.rule.cites.map(c2 => c2.code + (c2.verified ? '' : ' [citation pending verification]')).join('; ') + (RULE_ITEMS[r.rule.id]?.length ? `; ${es ? 'hoja' : 'sheet'} ${RULE_ITEMS[r.rule.id].join(', ')}` : ''), 8, f, MUTE, 12); y -= 6;
   }
   y -= 6; line(es ? 'Esta herramienta no aprueba planos. Solo la ciudad aprueba. Es gratis; si alguien le cobra por "permisos garantizados", repórtelo.' : 'This tool does not approve plans. Only the city does. It is free; if someone charges you for "guaranteed permits", report it.', 9, f, MUTE);
   return doc.save();

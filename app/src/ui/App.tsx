@@ -10,6 +10,8 @@ import { Plan } from './Plan';
 import { CleanFix } from './CleanFix';
 import { ask, AskHost } from './Ask';
 import { autoFit } from '../rules/fit';
+import { readiness, scoreLine, applies as itemApplies } from '../rules/readiness';
+import { CATALOG, RULE_ITEMS } from '../rules/ladbs-adu-2025';
 import { tr, type Lang } from './i18n';
 import { ES } from './es';
 let LANG: Lang = 'en';
@@ -108,7 +110,7 @@ export default function App() {
       </main>
 
       <aside className="side" aria-label={L("Check results")}>
-        <InspectionCard report={report} lang={lang} />
+        <InspectionCard report={report} lang={lang} score={scoreLine(readiness(p, report), lang === 'es')} />
         <ResultList results={report.results} lang={lang} />
       </aside>
     </div>
@@ -199,6 +201,7 @@ function LotStep({ p, update }: { p: Project; update: U; lang: Lang }) {
       <Q id="q-slope" label={L("Lot slopes more than 10%?")} value={f.slopeOver10} onChange={v => update(d => { d.site.flags.slopeOver10 = v; })} />
       <Q id="q-spk" label={L("Does the main house have fire sprinklers?")} value={f.primarySprinklered} onChange={v => update(d => { d.site.flags.primarySprinklered = v; })} />
       <Q id="q-rent" label={L("Is any unit on the lot rented now?")} value={f.anyUnitRented} onChange={v => update(d => { d.site.flags.anyUnitRented = v; })} />
+      <Q id="q-dwp" label={L("Is the garage within 10 ft of a DWP easement or power line?")} value={f.dwpEasement10ft} onChange={v => update(d => { d.site.flags.dwpEasement10ft = v; })} />
       <Q id="q-ease" label={L("Have you checked easements in your title report?")} value={f.easementsKnown} onChange={v => update(d => { d.site.flags.easementsKnown = v; })} />
     </div>
   </>;
@@ -215,6 +218,12 @@ function GarageStep({ p, update }: { p: Project; update: U }) {
         <button aria-pressed={a.mode === 'youadu'} onClick={() => update(d => { d.adu.mode = 'youadu'; })}>{L("New ADU from the city's free plan")}</button>
       </div>
       <span className="help">{a.mode === 'youadu' ? L("Uses the city-owned YOU-ADU plan footprint. Plans from design firms must be bought from the firm; we link to them instead.") : L("Converting inside the existing walls keeps the existing setbacks if the garage was permitted.")}</span></div>
+    {a.mode === 'conversion' && <div className="field"><label id="att">{L("Is the garage attached to the house?")}</label>
+      <div className="tri" role="group" aria-labelledby="att">
+        <button aria-pressed={a.garageAttachment === 'detached'} onClick={() => update(d => { d.adu.garageAttachment = 'detached'; })}>{L("Detached")}</button>
+        <button aria-pressed={a.garageAttachment === 'attached'} onClick={() => update(d => { d.adu.garageAttachment = 'attached'; })}>{L("Attached")}</button>
+        <button aria-pressed={a.garageAttachment === 'unknown'} onClick={() => update(d => { d.adu.garageAttachment = 'unknown'; })}>{tr(LANG, 'unknown')}</button>
+      </div><span className="help">{L("The city uses sheet II-C for detached garages and II-G for attached ones.")}</span></div>}
     {a.mode === 'youadu' && <div><button className="btn" onClick={() => { const r = autoFit(p); setScanMsg(r.why); if (r.footprint) update(d => { d.adu.footprint = r.footprint!; }); }}>{L("Fit it on my lot")}</button> <span role="status" className="help">{scanMsg}</span></div>}
     {a.mode === 'youadu' && <p className="lead"><a href="https://dbs.lacity.gov/services/plan-review-permitting/standard-plan-program" target="_blank" rel="noreferrer">{L("See the LA Standard Plan list")}</a>. Enter the footprint from the plan sheet below.</p>}
     <div className="grid2">
@@ -232,11 +241,22 @@ function GarageStep({ p, update }: { p: Project; update: U }) {
       {a.mode === 'conversion' && <Q id="q-perm" label={L("Was the garage built with a permit?")} value={a.existingStructurePermitted} onChange={v => update(d => { d.adu.existingStructurePermitted = v; })} help={L("Check LADBS permit records for the address.")} />}
       {a.mode === 'conversion' && <Q id="q-2020" label={L("Was it built before 2020?")} value={a.builtBefore2020} onChange={v => update(d => { d.adu.builtBefore2020 = v; })} />}
       {a.mode === 'conversion' && <Q id="q-door" label={L("Will you fill in or change the garage door opening?")} value={a.removesGarageDoorWall} onChange={v => update(d => { d.adu.removesGarageDoorWall = v; })} />}
+      {a.mode === 'conversion' && <Q id="q-inside" label={L("Does the ADU stay inside the existing walls?")} value={a.staysInsideWalls} onChange={v => update(d => { d.adu.staysInsideWalls = v; })} />}
+      {a.mode === 'conversion' && a.addedAreaSqFt > 0 && <Q id="q-ingress" label={L("Is the added area only for the entry?")} value={a.addedForIngressOnly} onChange={v => update(d => { d.adu.addedForIngressOnly = v; })} />}
+      <Q id="q-slab" label={L("Does the slab have a vapor barrier, or will you add an approved epoxy coating?")} value={a.slabVaporBarrier} onChange={v => update(d => { d.adu.slabVaporBarrier = v; })} />
+      <Q id="q-open" label={L("Any windows, doors or vents in walls under 5 ft from the property line?")} value={a.openingsNearLine} onChange={v => update(d => { d.adu.openingsNearLine = v; })} />
       <Q id="q-rated" label={L("Do you plan a 1-hour fire-rated wall where it is close to the line?")} value={a.ratedWallPlanned} onChange={v => update(d => { d.adu.ratedWallPlanned = v; })} />
       {a.mode === 'youadu' && <Q id="q-pitch" label={L("Does the ADU roof pitch match the main house?")} value={a.roofPitchMatches} onChange={v => update(d => { d.adu.roofPitchMatches = v; })} />}
       <Q id="q-aspk" label={L("Will the ADU have fire sprinklers?")} value={a.sprinklered} onChange={v => update(d => { d.adu.sprinklered = v; })} />
       <Q id="q-elec" label={L("All-electric (no gas)?")} value={a.allElectric} onChange={v => update(d => { d.adu.allElectric = v; })} />
+      {a.allElectric !== 'yes' && <Q id="q-gasm" label={L("Will the ADU have its own gas meter?")} value={a.separateGasMeter} onChange={v => update(d => { d.adu.separateGasMeter = v; })} />}
     </div>
+    <div className="grid2">
+      <Len allowZero id="fps" label={L("Side setback written on the floor plan")} mm={a.floorPlanSideSetbackMm} onChange={v => update(d => { d.adu.floorPlanSideSetbackMm = v; })} help={L("We compare it with the site plan.")} />
+      <Len allowZero id="fpr" label={L("Rear setback written on the floor plan")} mm={a.floorPlanRearSetbackMm} onChange={v => update(d => { d.adu.floorPlanRearSetbackMm = v; })} help={L("We compare it with the site plan.")} />
+      <Num id="amps" label={L("Main electrical panel size (amps)")} value={a.panelAmps} onChange={v => update(d => { d.adu.panelAmps = v; })} help={L("Printed on the main breaker.")} />
+    </div>
+    {a.mode === 'conversion' && <div className="mods"><label><input type="checkbox" checked={a.legalization} onChange={e => update(d => { d.adu.legalization = e.target.checked; })} /> {L("Legalize an unpermitted unit built before 2020 (AB 2533)")}</label></div>}
     <h2>{L("Import a scan (optional)")}</h2>
     <p className="lead">{L("Scan the inside with Polycam (GLTF) or an app that exports Apple RoomPlan JSON. You can always type sizes instead.")}</p>
     <div className="grid2">
@@ -261,7 +281,8 @@ function RoomsStep({ p, update }: { p: Project; update: U }) {
     <h2>{L("Rooms, windows and alarms")}</h2>
     <p className="lead">{L("Every bedroom needs a window you can climb out of. Measure the clear opening when the window is fully open, not the size on the label.")}</p>
     <div className="grid2"><Num id="beds" label={L("Bedrooms")} value={a.bedrooms} onChange={v => update(d => { d.adu.bedrooms = v ?? 0; })} />
-      <Q id="q-alarm" label={L("Smoke and CO alarms shown on the plan?")} value={a.smokeCoPlanned} onChange={v => update(d => { d.adu.smokeCoPlanned = v; })} /></div>
+      <Q id="q-alarm" label={L("Smoke and CO alarms shown on the plan?")} value={a.smokeCoPlanned} onChange={v => update(d => { d.adu.smokeCoPlanned = v; })} />
+      <Q id="q-hw" label={L("Are smoke alarms hardwired with battery backup?")} value={a.smokeHardwired} onChange={v => update(d => { d.adu.smokeHardwired = v; })} /></div>
     {a.windows.map((w, i) => <fieldset key={w.id} className="grid2" style={{ border: '1px solid var(--rule)', padding: 12 }}>
       <legend>Window {i + 1}</legend>
       <div className="field"><label htmlFor={`wr${i}`}>{L("Room")}</label><input id={`wr${i}`} value={w.room} onChange={e => setW(i, { room: e.target.value })} /></div>
@@ -281,6 +302,7 @@ function ChecksStep({ p, update, report, lang }: { p: Project; update: U; report
     <h2>{L("Checks")}</h2>
     <p className="lead">{L("Turn off a group only if someone else is handling it. Anything off prints as \"not checked\" on every export. Safety groups must be on to export.")}</p>
     <div className="mods">{MODULES.map(m => <label key={m.id}><input type="checkbox" checked={p.modules[m.id]} onChange={e => update(d => { d.modules[m.id] = e.target.checked; })} /> {m.label}{m.safety ? ' (safety)' : ''}</label>)}</div>
+    <SheetItems p={p} update={update} report={report} lang={lang} />
     <h2>{L("Notes you've dismissed")}</h2>
     {p.dismissed.length === 0 ? <p className="lead">{L("None. You can dismiss a minor or major item with a reason. Critical items can't be dismissed.")}</p> :
       <ul>{p.dismissed.map(x => <li key={x.ruleId}>{x.ruleId}: {x.reason} <button className="btn quiet" onClick={() => update(d => { d.dismissed = d.dismissed.filter(y => y.ruleId !== x.ruleId); })}>{L("Restore")}</button></li>)}</ul>}
@@ -330,13 +352,39 @@ function ExportStep({ p, update, report, lang }: { p: Project; update: U; report
   </>;
 }
 
-function InspectionCard({ report, lang }: { report: Report; lang: Lang }) {
+function SheetItems({ p, update, report, lang }: { p: Project; update: U; report: Report; lang: Lang }) {
+  const rd = readiness(p, report); const linked = new Set(Object.values(RULE_ITEMS).flat());
+  const open = CATALOG.filter(i => itemApplies(i, p) && !linked.has(i.id) && i.mode !== 'auto');
+  const docs = open.filter(i => i.mode === 'doc'), asks = open.filter(i => i.mode === 'ask');
+  const setA = (id: string, v: 'yes' | 'no' | 'na' | undefined) => update(d => { if (v) d.sheet[id] = v; else delete d.sheet[id]; });
+  return <>
+    <h2>{L("LADBS correction sheet")}</h2>
+    <p className="lead">{scoreLine(rd, lang === 'es')}. {L("Form PC/STR/Corr.Lst.20A, Rev 10/01/2025.")}</p>
+    <h2>{L("Documents to attach")}</h2>
+    <div className="mods">
+      <label><input type="checkbox" checked={!!p.docs['NRG.CF1R']} onChange={e => update(d => { d.docs['NRG.CF1R'] = e.target.checked; })} /> III.H.9 {L("Title 24 CF1R energy certificate")}</label>
+      <label><input type="checkbox" checked={!!p.docs['NRG.HERS']} onChange={e => update(d => { d.docs['NRG.HERS'] = e.target.checked; })} /> III.H.9 {L("HERS field verification")}</label>
+      {docs.map(i => <label key={i.id}><input type="checkbox" checked={!!p.docs[i.id]} onChange={e => update(d => { d.docs[i.id] = e.target.checked; })} /> {i.id} {i.summary[lang]}</label>)}
+    </div>
+    <h2>{L("Shown on your plans?")}</h2>
+    {asks.map(i => <div className="field" key={i.id}><label id={'si-' + i.id}>{i.id} {i.summary[lang]}</label>
+      <div className="tri" role="group" aria-labelledby={'si-' + i.id}>
+        <button type="button" aria-pressed={p.sheet[i.id] === 'yes'} onClick={() => setA(i.id, 'yes')}>{tr(LANG, 'yes')}</button>
+        <button type="button" aria-pressed={p.sheet[i.id] === 'no'} onClick={() => setA(i.id, 'no')}>{tr(LANG, 'no')}</button>
+        <button type="button" aria-pressed={p.sheet[i.id] === 'na'} onClick={() => setA(i.id, 'na')}>{L("Doesn't apply")}</button>
+        <button type="button" aria-pressed={!p.sheet[i.id]} onClick={() => setA(i.id, undefined)}>{tr(LANG, 'unknown')}</button>
+      </div></div>)}
+  </>;
+}
+
+function InspectionCard({ report, lang, score }: { report: Report; lang: Lang; score?: string }) {
   const v = { READY_FOR_PREPARER: lang === 'es' ? 'Listo para su preparador' : 'Ready for your preparer', FIX_ISSUES: lang === 'es' ? 'Hay cosas que corregir' : 'Some things need fixing', INCOMPLETE: lang === 'es' ? 'Falta información' : 'Some answers are missing', NOT_SUPPORTED: lang === 'es' ? 'Dirección no soportada' : 'Address not supported yet' }[report.overall];
   const c = report.counts;
   return <section className="card" aria-live="polite">
     <h3>{lang === 'es' ? 'Tarjeta de revisión' : 'Check card'}</h3>
     <div className="verdict">{v}</div>
     <div className="sub">{lang === 'es' ? 'Revisión por software, no de la ciudad' : 'Software check, not a city review'} · {lang === 'es' ? 'reglas al' : 'rules as of'} {report.vestDate}</div>
+    {score && <div className="sub">{score}</div>}
     <div className="punch"><div><b>{c.FAIL}</b>{lang === 'es' ? 'Corregir' : 'Fix'}</div><div><b>{c.UNKNOWN}</b>{lang === 'es' ? 'Falta info' : 'Need info'}</div><div><b>{c.PASS}</b>{lang === 'es' ? 'Cumple' : 'Pass'}</div><div><b>{c.NOT_CHECKED}</b>{lang === 'es' ? 'Apagado' : 'Off'}</div></div>
   </section>;
 }
@@ -348,7 +396,7 @@ function ResultList({ results, lang }: { results: Result[]; lang: Lang }) {
       <div className="head"><span className="tag">{label[r.status]}</span><span className="title">{r.rule.title[lang]}</span></div>
       <p>{r.msg[lang]}</p>{r.next && <p className="next"><strong>{lang === 'es' ? 'Siguiente: ' : 'Next: '}</strong>{r.next[lang]}</p>}
       {r.dismissed && <p className="pending">Dismissed: {r.dismissed}</p>}
-      <p className="cite">{r.rule.id} · {r.rule.cites.map(c => c.code).join('; ')}{r.rule.cites.some(c => !c.verified) && <span className="pending"> · citation being verified</span>}</p>
+      <p className="cite">{r.rule.id} · {r.rule.cites.map(c => c.code).join('; ')}{RULE_ITEMS[r.rule.id]?.length ? ` · ${lang === 'es' ? 'hoja LADBS' : 'LADBS sheet'} ${RULE_ITEMS[r.rule.id].join(', ')}` : ''}{r.rule.cites.some(c => !c.verified) && <span className="pending"> · citation being verified</span>}</p>
     </li>)}</ul>;
 }
 
