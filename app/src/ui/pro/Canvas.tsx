@@ -6,9 +6,10 @@ import { bbox, translate, type Poly, type Pt } from '../../core/geom';
 import { ft, inch } from '../../core/units';
 import { footLocal, clampMove, roomFits } from '../../core/rooms';
 import { type Ent, entDist, inWindow, arcPt, cloudPts, entSnaps, entSegs } from '../../core/cad';
-import { draft, annoScaleFor, fitScale, fmtArch, readable, lwPx, MIN_TEXT_PX, DIMSTY, PEN, type Drawing, LAYERS, SCALES } from './drafting';
+import { draft, annoScaleFor, fmtArch, readable, lwPx, MIN_TEXT_PX, DIMSTY, PEN, LAYERS, SCALES } from './drafting';
 import { layoutPins, obstacles, type PinOut } from './pins';
 import { Graphics, lwDisp } from './graphics';
+import { screenSheet, type Sheet, type Marker } from '../../out/sheet';
 import { lockedLayerAt, fit, zoomAt, viewBox, gridPaths, snapPoint, snapSet, ortho, polar, hitTest, selOutline, selKey, isAxisRect, dragCorner, toUnits, type Cam, type Sel, type Snap } from './view';
 import { dimGeom } from './cmd';
 import type { Issue } from './issues';
@@ -106,16 +107,9 @@ export const Canvas = forwardRef<CanvasApi, CanvasProps>(function Canvas(P0, ref
   const anno = useMemo(() => (cam && !paper ? annoScaleFor(cam.k) : SCALES[6]), [cam?.k, paper]); // eslint-disable-line react-hooks/exhaustive-deps
   const userDims = useMemo(() => ents.filter(e => e.t === 'dim' && e.pts.length >= 2).map(e => ({ a: e.pts[0], b: e.pts[1] })), [ents]);
   const site = useMemo(() => draft(p, { anno: anno.k * 25.4, es, userDims }), [p, anno.k, es, P0.units, userDims]); // eslint-disable-line react-hooks/exhaustive-deps
-  const sheetDef = useMemo(() => {
-    if (!paper) return null;
-    const fb = bbox(p.adu.footprint); const pad = ft(6);
-    const win = sheet === 'a2' ? { minX: fb.minX - pad, maxX: fb.maxX + pad, minY: -(fb.maxY + pad), maxY: -(fb.minY - pad) } : site.extents;
-    const vw = 28, vh = 21; const sc = fitScale(win.maxX - win.minX, win.maxY - win.minY, vw, vh);
-    const mmPerIn = sc.k * 25.4; const cx = (win.minX + win.maxX) / 2, cy = (win.minY + win.maxY) / 2;
-    return { sc, model: { x: cx - (vw / 2) * mmPerIn, y: cy - (vh / 2) * mmPerIn, w: vw * mmPerIn, h: vh * mmPerIn }, vp: { x: 1, y: 1.5, w: vw, h: vh } };
-  }, [paper, sheet, p, site.extents]);
-  const sheetDraw = useMemo(() => (sheetDef ? draft(p, { anno: sheetDef.sc.k * 25.4, es, userDims, detail: sheet === 'a2' ? 'plan' : undefined }) : null), [sheetDef, p, es, P0.units, userDims]); // eslint-disable-line react-hooks/exhaustive-deps
-  const extents = useMemo(() => { if (paper) return { minX: 0, minY: 0, maxX: 36, maxY: 24 }; const e = { ...site.extents }; for (const x of ents) for (const q of x.pts) { e.minX = Math.min(e.minX, q.x - ft(2)); e.maxX = Math.max(e.maxX, q.x + ft(2)); e.minY = Math.min(e.minY, -q.y - ft(2)); e.maxY = Math.max(e.maxY, -q.y + ft(2)); } return e; }, [paper, site.extents, ents]);
+  const sheetModel = useMemo(() => (paper ? screenSheet(p, sheet as 'a1' | 'a2' | 'g2', { es, userDims, markers: P0.issues.filter(i => i.at && i.n).map((i): Marker => ({ key: 'issue:' + i.id, n: String(i.n), at: i.at!, tone: i.status === 'FAIL' ? 'fix' as const : 'need' as const, text: `${i.r.rule.id} ${i.r.rule.title[es ? 'es' : 'en']}` }))
+    .concat(p.markup.pins.map(x => ({ key: 'pin:' + x.id, n: 'R' + x.n, at: { x: x.x, y: x.y }, tone: x.status === 'open' ? 'rev' as const : 'done' as const, text: x.comment || '(no text)' }))) }) : null), [paper, sheet, p, es, P0.units, userDims, P0.issues]); // eslint-disable-line react-hooks/exhaustive-deps
+  const extents = useMemo(() => { if (paper) return { minX: 0, minY: 0, maxX: sheetModel?.w ?? 36, maxY: sheetModel?.h ?? 24 }; const e = { ...site.extents }; for (const x of ents) for (const q of x.pts) { e.minX = Math.min(e.minX, q.x - ft(2)); e.maxX = Math.max(e.maxX, q.x + ft(2)); e.minY = Math.min(e.minY, -q.y - ft(2)); e.maxY = Math.max(e.maxY, -q.y + ft(2)); } return e; }, [paper, site.extents, ents, sheetModel?.w]);
   /** Zoom extents: the whole drawing with a margin (px) so dims at the edge are never cut off. */
   const fitCam = () => fit(extents, size.w, size.h, paper ? 20 : isTouch() ? 36 : 32);
   /** Zoom to the ADU with its dimensions: the default model view, since that is the work. */
@@ -138,7 +132,7 @@ export const Canvas = forwardRef<CanvasApi, CanvasProps>(function Canvas(P0, ref
     zoomTo, zoomBy: f => setCamU(zoomAt(c, f, size.w / 2, size.h / 2, size.w, size.h, kMin, kMax)),
     zoomWindow: () => { zoomWin.current = true; P0.say(L('Drag a window to zoom to.')); },
   }));
-  useEffect(() => { P0.onScale(paper && sheetDef ? sheetDef.sc.label : anno.label, annoMm); }, [anno.label, paper, sheetDef]); // eslint-disable-line react-hooks/exhaustive-deps
+  useEffect(() => { P0.onScale(paper && sheetModel ? (sheetModel.vps[0]?.scale.label ?? '') : anno.label, annoMm); }, [anno.label, paper, sheetModel]); // eslint-disable-line react-hooks/exhaustive-deps
 
   const hostRect = useRef<DOMRect | null>(null);
   const local = (e: { clientX: number; clientY: number }) => { const r = (drag.current?.kind === 'pan' && hostRect.current) || host.current!.getBoundingClientRect(); return { sx: e.clientX - r.left, sy: e.clientY - r.top }; };
@@ -172,7 +166,7 @@ export const Canvas = forwardRef<CanvasApi, CanvasProps>(function Canvas(P0, ref
     if (!out.length) return [];
     const on = (l: string) => allLayers[l]?.on !== false;
     const entSeg = ents.filter(e => on(e.layer)).flatMap(e => entSegs(e).map(([a, b]) => [a.x * c.k, -a.y * c.k, b.x * c.k, -b.y * c.k] as [number, number, number, number]));
-    const entTxt = ents.filter(e => on(e.layer) && (e.t === 'text' || e.t === 'leader' || e.t === 'dim')).map(e => { const q = e.t === 'leader' ? e.pts[e.pts.length - 1] : e.pts[0]; const th = (e.h ?? annoMm) * c.k; const w = Math.max(1, (e.text ?? '00000000').length) * th * 0.62; return { x0: q.x * c.k - (e.t === 'leader' ? 0 : 0), y0: -q.y * c.k - th * 1.2, x1: q.x * c.k + w + th * 1.5, y1: -q.y * c.k + th * 1.2 }; });
+    const entTxt = ents.filter(e => on(e.layer) && (e.t === 'text' || e.t === 'leader' || e.t === 'dim')).map(e => { const q = e.t === 'leader' ? e.pts[e.pts.length - 1] : e.pts[0]; const th = (e.h ?? annoMm) * c.k; const w = Math.max(1, (e.text ?? '00000000').length) * th * 0.62; return { x0: q.x * c.k - (e.t === 'leader' ? 0 : 0), y0: -q.y * c.k - th * 1.2, x1: q.x * c.k + w + th * 1.5, y1: -q.y * c.k + th * 1.2 }; ; }).concat(ents.filter(e => on(e.layer) && e.t === 'dim' && e.pts.length >= 2).map(e => { const g = dimGeom(e); const th = annoMm * c.k; const w = (e.text ?? fmtArch(g.len)).length * th * 0.7 + th; const mx = ((g.A.x + g.B.x) / 2) * c.k, my = (-(g.A.y + g.B.y) / 2) * c.k; const r = Math.max(w / 2, th * 1.6); return { x0: mx - r, y0: my - r, x1: mx + r, y1: my + r }; }));
     const obs = obstacles(site, c.k, on, MIN_TEXT_PX, { segs: entSeg, rects: entTxt });
     const placed = layoutPins(out.map(o => ({ key: o.key, ax: o.at.x * c.k, ay: -o.at.y * c.k })), obs, pinR);
     return placed.map((q, i) => ({ ...q, mx: out[i].at.x, my: out[i].at.y, n: out[i].n, cls: out[i].cls, label: out[i].label }));
@@ -297,7 +291,7 @@ export const Canvas = forwardRef<CanvasApi, CanvasProps>(function Canvas(P0, ref
       aria-label={`${L('Drawing')}: ${sheet === 'model' ? L('Model') : sheet.toUpperCase()}`} aria-description={desc}
       onPointerDown={onDown} onPointerMove={onMove} onPointerUp={onUp} onPointerCancel={onUp} onPointerLeave={() => { setCursor(null); setHover(null); P0.onCursor(null); }} onKeyDown={onKey} onContextMenu={e => e.preventDefault()}
       data-k={k.toFixed(5)} data-cx={c.cx.toFixed(1)} data-cy={c.cy.toFixed(1)}>
-      {paper && sheetDef && sheetDraw ? <SheetFrame p={p} es={es} sheet={sheet} def={sheetDef} d={sheetDraw} layers={allLayers} colors={colors} lwt={lwt} k={k} issues={P0.issues} /> : <>
+      {paper && sheetModel ? <SheetSvg sh={sheetModel} k={kBucket} /> : <>
         {gp && <g aria-hidden className="grid"><path d={gp.minor} className="g-mi" vectorEffect="non-scaling-stroke" /><path d={gp.major} className="g-ma" vectorEffect="non-scaling-stroke" /></g>}
         <Graphics d={site} layers={layers} lwt={lwt} k={kBucket} disp={lwDisp(anno.k)} />
         <CadGraphics ents={ents} layers={allLayers} colors={colors} lwt={lwt} h={annoMm} k={kBucket} />
@@ -318,37 +312,19 @@ export const Canvas = forwardRef<CanvasApi, CanvasProps>(function Canvas(P0, ref
   </div>;
 });
 
-/** Paper space: a 36" x 24" sheet with border, title block and a scaled viewport onto the model. Paper is always white. */
-function SheetFrame({ p, es, sheet, def, d, layers, colors, lwt, issues }: { p: Project; es: boolean; sheet: SheetId; def: { sc: { label: string; k: number }; model: { x: number; y: number; w: number; h: number }; vp: { x: number; y: number; w: number; h: number } }; d: Drawing; layers: Record<string, LayerState>; colors: Record<string, number>; lwt: boolean; k?: number; issues: Issue[] }) {
-  const title = sheet === 'a1' ? (es ? 'PLANO DEL SITIO' : 'SITE PLAN') : sheet === 'a2' ? (es ? 'PLANTA' : 'FLOOR PLAN') : (es ? 'MARCAS DE REVISIÓN' : 'REVIEW MARKUP');
-  const no = sheet === 'a1' ? 'A-1' : sheet === 'a2' ? 'A-2' : 'G-2'; const h = def.sc.k * 25.4 * (3 / 32);
-  const tb = 30; const row = (y: number, label: string, value: string) => <g><line x1={tb} y1={y - 0.3} x2={35.5} y2={y - 0.3} className="pp-thin" vectorEffect="non-scaling-stroke" /><text x={tb + 0.2} y={y} fontSize={0.13} className="pp-l">{label}</text><text x={tb + 0.2} y={y + 0.42} fontSize={0.24} className="pp-v">{value}</text></g>;
-  const open = issues.filter(i => i.n);
-  return <g className="paper">
-    <rect x={0} y={0} width={36} height={24} className="pp-sheet" />
-    <rect x={0.5} y={0.5} width={35} height={23} className="pp-border" vectorEffect="non-scaling-stroke" />
-    <line x1={tb} y1={0.5} x2={tb} y2={23.5} className="pp-border" vectorEffect="non-scaling-stroke" />
-    <svg x={def.vp.x} y={def.vp.y} width={def.vp.w} height={def.vp.h} viewBox={`${def.model.x} ${def.model.y} ${def.model.w} ${def.model.h}`} className="pp-vp">
-      <Graphics d={d} layers={sheet === 'g2' ? layers : { ...layers, 'G-ANNO-REDL': { on: false, locked: false } }} lwt={lwt} k={Infinity} />
-      <CadGraphics ents={p.cad?.ents ?? []} layers={layers} colors={colors} lwt={lwt} h={h} />
-      {sheet === 'g2' && open.map(i => i.at && <g key={i.id} className={i.status === 'FAIL' ? 'pin fix' : 'pin need'}><circle cx={i.at.x} cy={-i.at.y} r={def.sc.k * 25.4 * 0.16} /><text x={i.at.x} y={-i.at.y} fontSize={def.sc.k * 25.4 * 0.17} textAnchor="middle" dominantBaseline="central">{i.n}</text></g>)}
-      {sheet === 'g2' && p.markup.pins.map(x => <g key={x.id} className={x.status === 'open' ? 'pin rev' : 'pin done'}><circle cx={x.x} cy={-x.y} r={def.sc.k * 25.4 * 0.16} /><text x={x.x} y={-x.y} fontSize={def.sc.k * 25.4 * 0.14} textAnchor="middle" dominantBaseline="central">R{x.n}</text></g>)}
-    </svg>
-    <circle cx={def.vp.x + 0.35} cy={def.vp.y + def.vp.h + 0.55} r={0.3} className="pp-border" vectorEffect="non-scaling-stroke" /><text x={def.vp.x + 0.35} y={def.vp.y + def.vp.h + 0.55} fontSize={0.22} textAnchor="middle" dominantBaseline="central" className="pp-v b">1</text>
-    <text x={def.vp.x + 0.85} y={def.vp.y + def.vp.h + 0.55} fontSize={0.3} className="pp-v b">{title}</text>
-    <text x={def.vp.x + 0.85} y={def.vp.y + def.vp.h + 0.9} fontSize={0.18} className="pp-l">{(es ? 'ESCALA: ' : 'SCALE: ') + def.sc.label}</text>
-    {row(1.1, es ? 'PROYECTO' : 'PROJECT', (p.name || '').slice(0, 34))}
-    {row(2.0, es ? 'DIRECCIÓN' : 'ADDRESS', (p.site.address || (es ? 'Sin dirección' : 'No address yet')).slice(0, 34))}
-    {row(2.9, 'APN', p.site.apn || '—')}
-    {row(3.8, es ? 'ZONA' : 'ZONE', p.site.zone || '—')}
-    {row(4.7, es ? 'PREPARADO POR' : 'PREPARED BY', p.people.preparerName || (es ? 'Sin nombre' : 'Not named yet'))}
-    {sheet !== 'g2' && d.keynotes.length > 0 && <g data-legend="keynotes"><text x={tb + 0.2} y={6} fontSize={0.16} className="pp-v b">{es ? 'NOTAS CLAVE' : 'KEYNOTES'}</text>
-      {d.keynotes.map((kn, i) => { const y = 6.45 + i * 0.4, cx = tb + 0.38; return <g key={kn.n}><path d={`M${Array.from({ length: 6 }, (_, j) => `${(cx + Math.cos(j * Math.PI / 3) * 0.14).toFixed(3)} ${(y - 0.05 + Math.sin(j * Math.PI / 3) * 0.14).toFixed(3)}`).join('L')}Z`} className="pp-thin" vectorEffect="non-scaling-stroke" fill="none" /><text x={cx} y={y - 0.05} fontSize={0.12} textAnchor="middle" dominantBaseline="central" className="pp-v b">{kn.n}</text><text x={tb + 0.65} y={y} fontSize={0.13} className="pp-v">{kn.text.slice(0, 48)}</text></g>; })}</g>}
-    {sheet === 'g2' && <g>{[...open.slice(0, 18).map(i => `${i.n}. ${i.r.rule.id} ${i.r.rule.title[es ? 'es' : 'en']}`), ...p.markup.pins.slice(0, 12).map(x => `R${x.n}. ${x.comment || '—'}`)].map((s, i) => <text key={i} x={tb + 0.2} y={6 + i * 0.36} fontSize={0.16} className="pp-v">{s.slice(0, 44)}</text>)}</g>}
-    <text x={tb + 0.2} y={20.7} fontSize={0.15} className="pp-l">{es ? 'BORRADOR. REVISIÓN POR SOFTWARE, NO DE LA CIUDAD.' : 'DRAFT. SOFTWARE CHECK, NOT A CITY REVIEW.'}</text>
-    <line x1={tb} y1={21.2} x2={35.5} y2={21.2} className="pp-border" vectorEffect="non-scaling-stroke" />
-    <text x={tb + 0.2} y={21.6} fontSize={0.13} className="pp-l">{es ? 'HOJA' : 'SHEET'}</text>
-    <text x={tb + 0.15} y={23.1} fontSize={1.2} className="pp-v b">{no}</text>
+const SH_TONE: Record<string, string> = { ink: '#16181b', exst: '#737a84', fix: '#c0261a', mute: '#5c6066', red: '#c0261a', green: '#1a7340', amber: '#ad7300' };
+const SH_FILL: Record<string, string> = { poche: '#4a4f57', exst: '#e4e6e9', bg: '#ffffff', ink: '#16181b', red: '#c0261a', green: '#1a7340', amber: '#ad7300' };
+const SH_DASH: Record<string, number[]> = { phantom: [0.3, 0.06, 0.06, 0.06, 0.06, 0.06], hidden: [0.1, 0.05], demo: [0.06, 0.04] };
+/** Paper space: the sheet model (out/sheet.ts) drawn as is, in paper inches: the same geometry the PDF prints. Paper is always white. */
+const SheetSvg = memo(function SheetSvg({ sh, k }: { sh: Sheet; k: number }) {
+  return <g className="paper" data-sheet={sh.no} data-w={sh.w} data-h={sh.h} data-scale={sh.vps[0]?.scale.label ?? ''}>
+    <rect x={0} y={0} width={sh.w} height={sh.h} className="pp-sheet" />
+    {sh.items.map((it, i) => it.k === 'p'
+      ? (it.stroke === false && (!it.fill || it.fill === 'none') ? null : <path key={i} d={it.d} data-layer={it.layer} data-g={it.g} fill={it.fill && it.fill !== 'none' ? SH_FILL[it.fill] : 'none'} stroke={it.stroke === false ? 'none' : SH_TONE[it.tone ?? 'ink']}
+        strokeWidth={Math.max(0.6, (it.lw / 25.4) * k)} vectorEffect="non-scaling-stroke" strokeDasharray={it.dash ? SH_DASH[it.dash].map(v => v * k).join(' ') : undefined} strokeLinecap="round" strokeLinejoin="round" />)
+      : <text key={i} x={it.x} y={it.y} fontSize={it.h} textAnchor={it.anchor ?? 'start'} transform={it.rot ? `rotate(${it.rot.toFixed(2)} ${it.x} ${it.y})` : undefined} className="sh-tx" fontWeight={it.bold ? 700 : 400}
+        fill={it.white ? '#fff' : SH_TONE[it.tone ?? 'ink']} data-layer={it.layer} data-g={it.g} data-field={it.field}>{it.s}</text>)}
+    {sh.dims.map((x, i) => <g key={'d' + i} data-dim={`${x.a.x.toFixed(0)},${x.a.y.toFixed(0)},${x.b.x.toFixed(0)},${x.b.y.toFixed(0)}`} data-src="sheet" />)}
   </g>;
-}
+});
 export { LAYERS };

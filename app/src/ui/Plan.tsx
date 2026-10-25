@@ -14,7 +14,7 @@ export function Plan({ p, onMove, es = false, pins }: { p: Project; es?: boolean
   const [pxW, setPxW] = useState(560);
   useEffect(() => { const el = svg.current; if (!el || typeof ResizeObserver === 'undefined') return; const ro = new ResizeObserver(() => { if (el.clientWidth > 0) setPxW(el.clientWidth); }); ro.observe(el); return () => ro.disconnect(); }, []);
   const roughK = pxW / (b.maxX - b.minX + ft(60)); const anno = annoScaleFor(roughK, 11);
-  const dr = draft(p, { anno: anno.k * 25.4, es, detail: 'site' });
+  const dr = draft(p, { anno: anno.k * 25.4, es, detail: 'site', sheetAnno: true });
   const ex = dr.extents; const full = { x: ex.minX, y: ex.minY, w: ex.maxX - ex.minX, h: ex.maxY - ex.minY };
   // y up in model -> flip for SVG (the drawing's screen frame)
   const Y = (y: number) => -y;

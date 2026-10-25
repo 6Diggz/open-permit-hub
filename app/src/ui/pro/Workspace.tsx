@@ -280,6 +280,7 @@ export function Workspace(W: WorkspaceProps) {
         <div className="pw-ph-title"><h1>{crumbs[0]}</h1><div className="sub">{L(SHEETS.find(s => s.id === sheet)!.en)} · {online ? W.saveText : L('Offline · saved on this device')}</div></div>
         <button type="button" className="pw-btn primary" onClick={() => setPanel('export')}>{L('Export')}</button>
       </header>
+      {sheetTabs}
       <div className="pw-ph-canvas">{canvas}{empty}<span className="pw-scale-chip" aria-label={`${L('Scale')}: ${scale}`}>{scale}</span>{st.name && <div className="pw-ph-prompt" role="status">{prompt}<button type="button" className="pw-btn" onClick={() => run(cmdEnter(st, ctx(), null))}>{L('Done')}</button><button type="button" className="pw-btn" onClick={cancel}>{L('Cancel')}</button></div>}{sel1 && sheetUp === 'peek' && !st.name && <div className="pw-chip" aria-hidden>{sel1}</div>}</div>
       {W.banners}
       <section className={`pw-sheet pw-sheet-${sheetUp}`} aria-label={L('Inspector')}>
@@ -289,6 +290,7 @@ export function Workspace(W: WorkspaceProps) {
         <nav className="pw-ph-tools" aria-label={L('Tools')}>
           <button type="button" aria-pressed={!st.name && tool === 'select'} onClick={() => pickRail('select')}><Icon n="select" />{L('Select')}</button>
           <button type="button" aria-pressed={st.name === 'DIST'} onClick={() => pickRail('measure')}><Icon n="measure" />{L('Measure')}</button>
+          <button type="button" aria-pressed={st.name === 'LINE'} onClick={() => { if (st.name) run(cmdEsc(ctx())); begin('LINE'); }}><Icon n="line" />{L('Line')}</button>
           <button type="button" aria-pressed={tab === 'checks' && sheetUp !== 'peek'} onClick={() => { setTab('checks'); setSheetUp('half'); }}><Icon n="checks" />{L('Checks')}</button>
           <button type="button" aria-pressed={tab === 'props' && sheetUp !== 'peek'} onClick={() => { setTab('props'); setSheetUp('half'); }}><Icon n="details" />{L('Details')}</button>
           <button type="button" onClick={() => setPalette(true)}><Icon n="more" />{L('More')}</button>

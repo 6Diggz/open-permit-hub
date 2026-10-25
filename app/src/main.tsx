@@ -2,6 +2,7 @@ import { StrictMode, useEffect, useState } from 'react';
 import { createRoot } from 'react-dom/client';
 import '@fontsource/public-sans/400.css';
 import '@fontsource/public-sans/600.css';
+import '@fontsource/public-sans/700.css'; // sheet text: the same bold the PDF embeds (one width table)
 import '@fontsource/public-sans/800.css';
 import './ui/styles.css';
 import App from './ui/App';

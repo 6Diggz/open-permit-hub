@@ -226,3 +226,8 @@
 [dir="rtl"] .pw-panel { right: auto; left: 340px; }
 .ms svg * { pointer-events: none; } /* hit testing is done in code (view.ts), so the browser never hit-tests thousands of paths */
 .ms .paper .pp-thin { stroke: #c4c7cc; stroke-width: 1; }
+
+.ms .paper text.sh-tx { font-family: 'Public Sans', Arial, sans-serif; letter-spacing: 0; stroke: none; }
+.pw-phone .pw-sheets { overflow-x: auto; height: 40px; scrollbar-width: none; } .pw-phone .pw-sheets button { min-width: 64px; white-space: nowrap; }
+.pw-phone > .pw-sheets { position: absolute; left: 0; right: 0; top: 64px; z-index: 4; }
+.pw-phone > .pw-sheets ~ .pw-ph-canvas { top: 104px; }

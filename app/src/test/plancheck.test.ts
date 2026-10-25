@@ -46,7 +46,7 @@ describe('plan-set pre-check: fixtures', () => {
     const p = demoProject(); p.people.ownerName = 'Maria Lopez';
     const c = await read(await sheetsPDF(p, 'draft'));
     expect(c.pages).toBe(3); expect(c.scanned).toBe(false); // r3market-06: A-0 is the 8.5x11 plot plan page
-    expect(c.sheets.map(s => s.id)).toEqual(['A-1', 'A-2', 'A-0']); expect(c.sheets[2].kinds).toContain('site');
+    expect(c.sheets.map(s => s.id)).toEqual(['A-1', 'A-2', 'A-1.1']); // NCS numbering: the letter plot plan is A-1.1, no A-0 expect(c.sheets[2].kinds).toContain('site');
     expect(c.sheets[0].kinds).toContain('site'); expect(c.sheets[1].kinds).toContain('floor'); expect(c.sheets[0].scales.length).toBeGreaterThan(0);
     expect(c.title.apn?.text).toBe('0000-000-000'); expect(c.title.address?.text).toContain('123 Example St'); expect(c.title.owner?.text).toBe('Maria Lopez');
     expect(c.title.occupancy?.text).toMatch(/R-3/); expect(c.title.type?.text).toMatch(/Type V-B/i);

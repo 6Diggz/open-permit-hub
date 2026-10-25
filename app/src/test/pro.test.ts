@@ -5,6 +5,7 @@ import { readFileSync } from 'node:fs';
 import { demoProject, blankProject, type Project } from '../core/model';
 import { ft, inch } from '../core/units';
 import { bbox, rect } from '../core/geom';
+import { buildSheets } from '../out/sheet';
 import { draft, fmtArch, garageDoorEdge, offsetInward, annoScaleFor, fitScale, LAYERS, readable, setUnits } from '../ui/pro/drafting';
 import { fit, zoomAt, gridStep, snapPoint, snapSet, ortho, polar, hitTest, isAxisRect, dragCorner } from '../ui/pro/view';
 import { sanitizeCad, arc3, trimLine, extendLine, offsetEnt, mapEnt, mirrorF, rotF, inWindow, crossParams, type Ent, DEFAULT_CAD } from '../core/cad';
@@ -65,9 +66,12 @@ describe('drafting graphics from the model', () => {
     expect(dims).toContain(`2'-0"`); expect(d.prims.some(x => x.layer === 'A-ANNO-DIMS' && x.tone === 'fix')).toBe(true);
   });
   it('north arrow is a standard filled arrow, plan north up when not set (never "N ?" on the sheet); a scale bar is drawn', () => {
-    expect(d.texts.some(t => /N \?|NOT SET/.test(t.s))).toBe(false); expect(d.texts.filter(t => t.s === 'N').length).toBe(1);
-    const q = structuredClone(p); q.site.northDeg = 90; expect(draft(q, { anno: 96 * 25.4 }).texts.some(t => t.s === 'N')).toBe(true);
-    expect(d.prims.some(x => x.layer === 'A-ANNO-SYMB' && x.fill === 'ink')).toBe(true);
+    // Sheet annotation lives on the sheets (review 2 #7): the model has no north arrow; the A-1 sheet has one and a graphic scale.
+    expect(d.texts.some(t => t.s === 'N' || /N \?|NOT SET/.test(t.s))).toBe(false);
+    const a1 = buildSheets(p)[0]; const tx = a1.items.filter(x => x.k === 't') as { s: string }[];
+    expect(tx.filter(t => t.s === 'N').length).toBe(1); expect(tx.some(t => /N \?|NOT SET/.test(t.s))).toBe(false); expect(tx.some(t => t.s === 'FEET')).toBe(true);
+    expect(a1.items.some(x => x.k === 'p' && x.layer === 'A-ANNO-SYMB' && x.fill === 'ink')).toBe(true);
+    const q = structuredClone(p); q.site.northDeg = 90; expect(JSON.stringify(buildSheets(q)[0].items.filter(x => x.layer === 'A-ANNO-SYMB'))).not.toBe(JSON.stringify(a1.items.filter(x => x.layer === 'A-ANNO-SYMB')));
   });
   it('text never reads upside down or top to bottom', () => {
     expect(readable({ x: -1, y: 0 })).toBeCloseTo(0); expect(readable({ x: 0, y: -1 })).toBeCloseTo(-90); expect(readable({ x: 0, y: 1 })).toBeCloseTo(-90);
@@ -282,9 +286,9 @@ describe('check pin layout (pins.ts)', () => {
     const d = draft(p, { anno: 96 * 25.4, userDims: [{ a: b, b: a }] }); const keys = d.dims.map(x => [x.a, x.b].map(q => `${Math.round(q.x)},${Math.round(q.y)}`).sort().join('|'));
     expect(new Set(keys).size).toBe(keys.length); expect(d.dims.some(x => (x.a.x === a.x && x.a.y === a.y && x.b.x === b.x) || (x.a.x === b.x && x.b.x === a.x && x.a.y === a.y))).toBe(false); void w;
   });
-  it('text heights follow the plotted standard: notes and dims 3/32", room names 1/8"', () => {
+  it('text heights follow the plotted standard: notes and dims 1/8" (LADBS I.C.3 minimum), room names 5/32"', () => {
     const A = 48 * 25.4; const q = demoProject(); q.adu.rooms = [{ id: 'b', name: 'Bed', use: 'sleeping', shape: 'rect', poly: rect(inch(6), inch(6), F(10), F(10)), tape: { w: null, d: null }, ceilingMm: null, openings: [] }];
-    const d = draft(q, { anno: A }); expect(d.texts.find(t => t.s === 'BED')!.h).toBeCloseTo(A / 8); expect(d.texts.filter(t => t.layer === 'A-ANNO-DIMS').every(t => Math.abs(t.h - A * 3 / 32) < 1e-6)).toBe(true);
+    const d = draft(q, { anno: A }); expect(d.texts.find(t => t.s === 'BED')!.h).toBeCloseTo(A * 5 / 32); expect(d.texts.filter(t => t.layer === 'A-ANNO-DIMS').every(t => Math.abs(t.h - A / 8) < 1e-6)).toBe(true);
     expect(d.texts.filter(t => t.layer === 'A-ANNO-DIMS').every(t => t.mask)).toBe(true);
   });
   it('pen table: cut walls heavier than existing, existing heavier than dims; LWT honors it', async () => {
