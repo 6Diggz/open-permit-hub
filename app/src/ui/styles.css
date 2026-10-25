@@ -118,3 +118,5 @@ a { color: var(--link); }
 .card a { color: var(--card-ink); }
 /* Touch: every on/off box is a full-row target at least 44 px tall, with a 22 px box (r3people-03). */
 @media (pointer: coarse) { .mods label { display: flex; align-items: center; gap: 10px; min-height: 44px; } .mods input[type="checkbox"] { width: 22px; height: 22px; flex: none; margin: 0; } }
+/* Phones: all six steps stay on screen (they wrap) instead of sitting off to the right with no cue (r3people-13). */
+@media (max-width: 600px) { .rail { flex-wrap: wrap; overflow-x: visible; row-gap: 4px; } .rail .brand { flex-basis: 100%; } .rail .step { flex: 1 1 30%; min-width: 0; } }

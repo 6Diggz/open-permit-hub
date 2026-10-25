@@ -27,7 +27,11 @@ self.addEventListener('fetch', e => {
 
 /** files: paths relative to the site root (no leading slash). Returns the service worker source. */
 export function buildServiceWorker(files: string[], indexHtml: string): { source: string; version: string; precache: string[] } {
-  const precache = ['./', ...[...new Set(files)].filter(f => f !== 'sw.js' && !f.endsWith('.map')).sort().map(f => './' + f)];
+  // A .woff font is skipped when the same font ships as .woff2 (every supported browser uses woff2). The CAD WASM stays:
+  // the DXF 2018 export and Clean and Fix must work offline after one visit (qa-07).
+  const set = new Set(files); const stem = (f: string) => f.replace(/-[A-Za-z0-9_-]{8}(?=\.woff$)/, '').replace(/\.woff$/, '');
+  const w2 = new Set([...set].filter(f => f.endsWith('.woff2')).map(f => f.replace(/-[A-Za-z0-9_-]{8}(?=\.woff2$)/, '').replace(/\.woff2$/, '')));
+  const precache = ['./', ...[...set].filter(f => f !== 'sw.js' && !f.endsWith('.map') && !(f.endsWith('.woff') && w2.has(stem(f)))).sort().map(f => './' + f)];
   const version = createHash('sha256').update(precache.join('\n')).update(indexHtml).digest('hex').slice(0, 12);
   const source = SW_TEMPLATE.replace('__VERSION__', JSON.stringify(version)).replace('__PRECACHE__', JSON.stringify(precache));
   return { source, version, precache };
