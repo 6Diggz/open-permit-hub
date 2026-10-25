@@ -36,7 +36,7 @@ export interface ParcelFill {
   /** Lot outline in the local frame (mm, street edge first, lot above it), or null if the parcel layer failed. */
   lot: Poly | null; widthMm: number | null; depthMm: number | null;
   /** The street was found but no parcel carries this house number. */ noParcelMatch?: boolean;
-  apn: string; zone: string; jurisdiction: 'la-city' | 'other' | 'unknown'; cityName: string;
+  apn: string; zone: string; jurisdiction: 'la-city' | 'la-county' | 'other' | 'unknown'; cityName: string;
   flags: { hillside: Tri3; vhfhsz: Tri3; coastal: Tri3; hpoz: Tri3 };
   /** Sources that did not answer (their fields stay as they were). */
   failed: SourceKey[];
@@ -58,7 +58,7 @@ export interface ParcelFill {
   /** Inside the 2025 Palisades Fire perimeter (Eaton is in the county, outside LA City). */
   palisades?: Tri3;
 }
-export type ParcelError = 'offline' | 'empty' | 'not-found' | 'zip-mismatch' | 'direction-mismatch' | 'network' | 'no-parcel';
+export type ParcelError = 'offline' | 'empty' | 'not-found' | 'zip-mismatch' | 'direction-mismatch' | 'suffix-mismatch' | 'city-mismatch' | 'network' | 'no-parcel';
 export type ParcelOutcome = { ok: true; fill: ParcelFill } | { ok: false; error: ParcelError; detail?: string };
 
 /** "1234 W 52nd St, Los Angeles, CA 90037" -> street "1234 W 52nd St", zip "90037". */
@@ -165,6 +165,29 @@ export const ringToLot = (ring: number[][], street: { x: number; y: number }): P
 export function streetDir(addr: string): string {
   return String(addr ?? '').toUpperCase().replace(/^U(?=\d)/, '').match(/^\s*\d+[A-Z]?(?:-\d+)?\s+([NSEW])\.?\s+\S/)?.[1] ?? '';
 }
+/** "500 W Manchester Blvd" -> "BLVD". Empty when the street has no type word. */
+const SUFFIX: Record<string, string> = { AVE: 'AVE', AVENUE: 'AVE', AV: 'AVE', ST: 'ST', STREET: 'ST', BLVD: 'BLVD', BOULEVARD: 'BLVD', DR: 'DR', DRIVE: 'DR', RD: 'RD', ROAD: 'RD', WAY: 'WAY', PL: 'PL', PLACE: 'PL',
+  LN: 'LN', LANE: 'LN', CT: 'CT', COURT: 'CT', TER: 'TER', TERRACE: 'TER', CIR: 'CIR', CIRCLE: 'CIR', HWY: 'HWY', HIGHWAY: 'HWY', PKWY: 'PKWY', PARKWAY: 'PKWY' };
+export function streetType(addr: string): string {
+  const w = String(addr ?? '').split(',')[0].toUpperCase().replace(/\./g, '').trim().split(/\s+/);
+  return w.length >= 3 ? SUFFIX[w[w.length - 1]] ?? '' : '';
+}
+/** Incorporated cities in LA County other than Los Angeles, plus common unincorporated place names. The city's street
+ * locator has many same-named streets ("Main St"), so an address that names one of these is never LA City. */
+const NOT_LA = new Set(['agoura hills', 'alhambra', 'arcadia', 'artesia', 'avalon', 'azusa', 'baldwin park', 'bell', 'bell gardens', 'bellflower', 'beverly hills', 'bradbury', 'burbank', 'calabasas', 'carson', 'cerritos',
+  'claremont', 'commerce', 'city of commerce', 'compton', 'covina', 'cudahy', 'culver city', 'diamond bar', 'downey', 'duarte', 'el monte', 'el segundo', 'gardena', 'glendale', 'glendora', 'hawaiian gardens', 'hawthorne',
+  'hermosa beach', 'hidden hills', 'huntington park', 'industry', 'city of industry', 'inglewood', 'irwindale', 'la canada flintridge', 'la cañada flintridge', 'la habra heights', 'la mirada', 'la puente', 'la verne',
+  'lakewood', 'lancaster', 'lawndale', 'lomita', 'long beach', 'lynwood', 'malibu', 'manhattan beach', 'maywood', 'monrovia', 'montebello', 'monterey park', 'norwalk', 'palmdale', 'palos verdes estates', 'paramount',
+  'pasadena', 'pico rivera', 'pomona', 'rancho palos verdes', 'redondo beach', 'rolling hills', 'rolling hills estates', 'rosemead', 'san dimas', 'san fernando', 'san gabriel', 'san marino', 'santa clarita',
+  'santa fe springs', 'santa monica', 'sierra madre', 'signal hill', 'south el monte', 'south gate', 'south pasadena', 'temple city', 'torrance', 'vernon', 'walnut', 'west covina', 'west hollywood', 'westlake village', 'whittier',
+  'altadena', 'east los angeles', 'east la', 'view park', 'windsor hills', 'view park-windsor hills', 'ladera heights', 'marina del rey', 'topanga', 'florence', 'willowbrook', 'west athens', 'westmont', 'lennox',
+  'hacienda heights', 'rowland heights', 'stevenson ranch', 'castaic']);
+/** The place typed after the street ("2400 Main St, Santa Monica, CA" -> "santa monica"), or "" when none. */
+function typedPlace(raw: string): string {
+  const parts = raw.split(',').map(x => x.trim()).filter(Boolean); if (parts.length < 2) return '';
+  let i = parts.findIndex(x => /^(ca|calif(ornia)?)(\s+\d{5}(-\d{4})?)?$/i.test(x)); if (i < 0) i = parts.length;
+  return i >= 2 ? parts[i - 1].replace(/\s+\d{5}(-\d{4})?$/, '').trim().toLowerCase().replace(/\s+/g, ' ') : '';
+}
 /** Common names people type that the city's street list spells another way. */
 const ALIASES: [RegExp, string][] = [
   [/\b(?:avenida\s+)?cesar\s+(?:e\.?\s+)?chavez(?:\s+ave(?:nue)?)?\b/i, 'Cesar E Chavez Ave'],
@@ -245,6 +268,8 @@ export async function lookupParcel(address: string, opts: LookupOpts = {}): Prom
   if (opts.online === false) return { ok: false, error: 'offline' };
   const { street, zip } = splitAddress(address);
   if (!/\d/.test(street) || street.length < 5) return { ok: false, error: 'empty' };
+  // r4juris-01: the city locator only knows LA City streets, so "2400 Main St, Santa Monica" would match LA's own Main St.
+  const place = typedPlace(address); if (NOT_LA.has(place)) return { ok: false, error: 'city-mismatch', detail: place.replace(/\b\w/g, ch => ch.toUpperCase()) };
   const locate = async (st: string) => (await getJson(fetchFn, geocodeUrl(st, zip), opts.signal, T)).candidates ?? [];
   const good = (cs: Cand[], min: number) => cs.filter(c => c && Number.isFinite(c.score) && c.score >= min && c.location && Number.isFinite(c.location.x) && Number.isFinite(c.location.y) && typeof c.address === 'string');
   let all: Cand[];
@@ -257,6 +282,9 @@ export async function lookupParcel(address: string, opts: LookupOpts = {}): Prom
   // A typed N/S/E/W must match: "1232 W 52nd St" and "1232 E 52ND ST" are different houses miles apart.
   const td = streetDir(street);
   if (td) { const same = cands.filter(c => { const cd = streetDir(c.address); return !cd || cd === td; }); if (!same.length) return { ok: false, error: 'direction-mismatch', detail: cands[0].address }; cands = same; }
+  // r4juris-02: a typed street type must match too ("Manchester Blvd" is not "MANCHESTER AVE").
+  const tt = streetType(street);
+  if (tt) { const same = cands.filter(c => { const ct = streetType(c.address); return !ct || ct === tt; }); if (!same.length) return { ok: false, error: 'suffix-mismatch', detail: cands[0].address }; cands = same; }
   const c = cands[0]; const cz = c.address.match(/\b(9\d{4})\b/)?.[1] ?? '';
   if (zip && cz && cz !== zip) return { ok: false, error: 'zip-mismatch', detail: c.address };
   const failed: SourceKey[] = [];
@@ -308,7 +336,9 @@ export async function lookupParcel(address: string, opts: LookupOpts = {}): Prom
   if (zoning == null && zoning1a != null && z1a.length) fin.splice(fin.indexOf('zoning'), 1);
   const inCity = city == null ? null : city.length > 0;
   const otherCity = String((adjacent?.[0]?.attributes as Record<string, string> | undefined)?.CITYNAME ?? '').trim();
-  const jurisdiction = inCity === true ? 'la-city' : inCity === false ? 'other' : 'unknown';
+  // r4juris-03: outside LA City and not inside any neighboring city (both layers answered) is unincorporated LA County.
+  const county = inCity === false && adjacent != null && !otherCity;
+  const jurisdiction = inCity === true ? 'la-city' : county ? 'la-county' : inCity === false ? 'other' : 'unknown';
   const w = lot ? Math.hypot(lot[1].x - lot[0].x, lot[1].y - lot[0].y) : null; const d = lot ? Math.max(...lot.map(p => p.y)) : null;
   // Building outlines whose middle is on this lot, largest first (house, then garage).
   const bl: { poly: Poly; a: number }[] = [];
@@ -322,7 +352,7 @@ export async function lookupParcel(address: string, opts: LookupOpts = {}): Prom
   bl.sort((p1, p2) => p2.a - p1.a);
   return { ok: true, fill: {
     matched: String(c.address ?? '').slice(0, 120), zip: cz, at: (opts.now ?? new Date()).toISOString(), lot, widthMm: w, depthMm: d,
-    apn: condo ? '' : fmtApn(attr.BPP ?? '').slice(0, 40), zone: zl.map(z => z.slice(0, 40)).join(" / ").slice(0, 64), jurisdiction, cityName: (inCity ? 'Los Angeles' : otherCity).slice(0, 60),
+    apn: condo ? '' : fmtApn(attr.BPP ?? '').slice(0, 40), zone: zl.map(z => z.slice(0, 40)).join(" / ").slice(0, 64), jurisdiction, cityName: (inCity ? 'Los Angeles' : county ? 'Unincorporated LA County' : otherCity).slice(0, 60),
     flags: { hillside: tri(hillside), vhfhsz: tri(vhfhsz), coastal, hpoz: tri(hpoz) }, failed: fin, zimasPin: String(attr.PIND ?? '').slice(0, 40), multiPiece,
     northDeg: frame && lot ? frame.northDeg : null, condo, chapter1a, splitZone: zl.length > 1, noExactParcel, noParcelMatch,
     buildings: bl.map(b2 => b2.poly), palisades: tri(pal),

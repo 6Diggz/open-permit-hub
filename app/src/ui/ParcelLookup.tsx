@@ -17,10 +17,12 @@ const ERR: Record<ParcelError, string> = {
   'zip-mismatch': "The address matched a street with a different ZIP code. Check the ZIP code. You can enter the lot by hand below.",
   'direction-mismatch': "The city's street list has this house number only with a different street direction (N, S, E or W). That is a different house. Check the address. You can enter the lot by hand below.",
   network: 'The city map did not answer. Try again in a minute, or enter the lot by hand below.',
+  'suffix-mismatch': "The city's street list has this house number only with a different street type (like Ave instead of Blvd). That is a different street. Check the address. You can enter the lot by hand below.",
+  'city-mismatch': "This address is in another city, not the City of Los Angeles. The city's street list would match a different street with the same name, so it was not looked up. This tool's rules are for LA City only.",
   'no-parcel': 'The street was found but not this exact parcel. Enter the lot by hand below.',
 };
 
-type St = { k: 'idle' } | { k: 'loading' } | { k: 'error'; e: ParcelError; near?: string } | { k: 'done'; filled: string[]; matched: string; failed: string[]; multi: boolean; outside: string | null; condo: boolean; ch1a: boolean; split: boolean; noExact: boolean };
+type St = { k: 'idle' } | { k: 'loading' } | { k: 'error'; e: ParcelError; near?: string; inCity?: boolean } | { k: 'done'; filled: string[]; matched: string; failed: string[]; multi: boolean; outside: string | null; condo: boolean; ch1a: boolean; split: boolean; noExact: boolean };
 
 /** Opt-in parcel autofill. The address leaves the device only when the user taps "Look up", and the screen says so before. */
 export function ParcelLookup({ p, commit }: { p: Project; commit: (next: Project) => void }) {
@@ -33,11 +35,12 @@ export function ParcelLookup({ p, commit }: { p: Project; commit: (next: Project
       const r = await lookupParcel(p.site.address, { signal: c.signal, online: fetchFn ? true : navigator.onLine, fetch: fetchFn });
       if (c.signal.aborted) return;
       if (!r.ok) { setSt({ k: 'error', e: r.error === 'network' && !navigator.onLine ? 'offline' : r.error, near: r.error === 'network' ? undefined : r.detail }); return; }
-      if (r.fill.noParcelMatch) { setSt({ k: 'error', e: 'no-parcel' }); return; }
+      // r4cold-03: the street point is inside the LA City boundary even when no parcel matched, so set City (to verify).
+      if (r.fill.noParcelMatch) { const inCity = r.fill.jurisdiction === 'la-city'; if (inCity && p.site.jurisdiction === 'unknown') commit({ ...p, site: { ...p.site, jurisdiction: 'la-city' } }); setSt({ k: 'error', e: 'no-parcel', inCity }); return; }
       const { next, filled } = applyParcel(p, r.fill);
       if (!filled.length) { setSt({ k: 'error', e: r.fill.failed.length ? 'network' : 'no-parcel' }); return; }
       commit(next);
-      const outside = r.fill.jurisdiction === 'other' ? r.fill.cityName : null;
+      const outside = r.fill.jurisdiction === 'other' || r.fill.jurisdiction === 'la-county' ? r.fill.cityName : null;
       const yn = (v: string) => (v === 'yes' ? L('yes') : L('no'));
       const said: Record<MapField, string> = { lot: L(NAMES.lot), apn: `${L(NAMES.apn)} ${next.site.apn}`, zone: `${L(NAMES.zone)} ${next.site.zone}`, jurisdiction: `${L(NAMES.jurisdiction)}: ${r.fill.jurisdiction === 'la-city' ? 'Los Angeles' : r.fill.cityName || L('outside LA')}`,
         hillside: `${L(NAMES.hillside)}: ${yn(next.site.flags.hillside)}`, vhfhsz: `${L(NAMES.vhfhsz)}: ${yn(next.site.flags.vhfhsz)}`, coastal: `${L(NAMES.coastal)}: ${yn(next.site.flags.coastal)}`, hpoz: `${L(NAMES.hpoz)}: ${yn(next.site.flags.hpoz)}`,
@@ -55,7 +58,7 @@ export function ParcelLookup({ p, commit }: { p: Project; commit: (next: Project
     <div role="status" aria-live="polite" className="help">
       {st.k === 'idle' && !p.site.address.trim() && L('Type the address above first.')}
       {st.k === 'loading' && L('Asking the city map about this address...')}
-      {st.k === 'error' && <span style={{ color: 'var(--info-text)' }}>{L(ERR[st.e])}{st.near && <> {L('Closest match in the city list:')} <strong>{st.near.slice(0, 120)}</strong>.</>}</span>}
+      {st.k === 'error' && <span style={{ color: 'var(--info-text)' }}>{L(ERR[st.e])}{st.near && <> {L('Closest match in the city list:')} <strong>{st.near.slice(0, 120)}</strong>.</>}{st.inCity && <> {L('This street is inside the City of Los Angeles, so City was set to LA City. Verify it on your tax bill.')}</>}</span>}
       {st.k === 'done' && <>
         {L('Found')} <strong>{st.matched}</strong>. {L('Filled from the parcel map:')} {st.filled.join('; ')}. {L('Verify these on site. Change any value below; Undo puts back what you had.')}
         {st.failed.length > 0 && <> {L('These map layers did not answer, so enter them by hand:')} {st.failed.join(', ')}.</>}

@@ -175,7 +175,7 @@ export default function App() {
       </main>
 
       <aside className="side" aria-label={L("Check results")} tabIndex={0}>
-        <InspectionCard report={report} lang={lang} appDate={p.applicationDate} score={scoreLine(readiness(p, report), lang === 'es')} plain={plainAnswer(p, report)[lang === 'es' ? 'es' : 'en']} />
+        <InspectionCard report={report} lang={lang} appDate={p.applicationDate} score={scoreLine(readiness(p, report), lang === 'es')} plain={plainAnswer(p, report)[lang === 'es' ? 'es' : 'en']} likelyYes={plainAnswer(p, report).verdict === 'likely-yes'} />
         <ResultList results={report.results} lang={lang} />
       </aside>
     </div>
@@ -261,9 +261,10 @@ function LotStep({ p, update, replace }: { p: Project; update: U; lang: Lang; re
   return <>
     <h2>{L("The lot")}</h2>
     <p className="lead">{L("Enter the address. Tap Look up to fill in the lot from the city's parcel map, or check the parcel in ZIMAS and type it in.")}</p>
-    <div className="grid2">
+    {/* r4cold-01: address and Look up come first, full width; the rest sits on a top-aligned grid. */}
       <div className="field"><label htmlFor="addr">{L("Street address")}</label><input id="addr" value={p.site.address} onChange={e => update(d => { d.site.address = e.target.value; }, 'addr')} autoComplete="street-address" /><span className="help">{p.site.address ? <a href={zimas} target="_blank" rel="noreferrer">{L("Open this address in ZIMAS")}</a> : L("Used only on your sheets. It stays on this device.")}</span></div>
       <ParcelLookup p={p} commit={replace} />
+    <div className="grid2" style={{ alignItems: 'start' }}>
       <div className="field"><label htmlFor="apn">{L("Parcel number (APN)")}</label><input id="apn" value={p.site.apn} onChange={e => update(d => { d.site.apn = e.target.value; unmark(d, 'apn'); }, 'apn')} placeholder="1234-567-890" aria-describedby="apn-h" /><span className="help" id="apn-h">{tag('apn', L("The 10-digit number on your property tax bill."))}</span></div>
       <div className="field"><label htmlFor="legal">{L("Legal description (tract, block and lot)")}</label><input id="legal" value={p.site.legalDescription ?? ''} maxLength={300} onChange={e => update(d => { d.site.legalDescription = e.target.value; }, 'legal')} aria-describedby="legal-h" /><span className="help" id="legal-h">{L("On your deed or in ZIMAS under \"Legal\". Optional; the title sheet shows it.")}</span></div>
       <div className="field"><label htmlFor="zone">{L("Zone")}</label><input id="zone" value={p.site.zone} onChange={e => update(d => { d.site.zone = e.target.value; unmark(d, 'zone'); }, 'zone')} placeholder="R1-1" aria-describedby="zone-h" /><span className="help" id="zone-h">{tag('zone', L("Shown in ZIMAS, like R1-1. Printed on your site plan."))}</span></div>
@@ -272,7 +273,7 @@ function LotStep({ p, update, replace }: { p: Project; update: U; lang: Lang; re
         <span className="help" id="jur-h">{tag('jurisdiction', L("A \"Los Angeles\" mailing address is not always LA City. Pasadena, Long Beach, Glendale, Burbank and Santa Monica are separate cities, and East LA, View Park and Altadena are unincorporated county. ZIMAS shows if the lot is in LA City."))}</span></div>
     </div>
     {p.site.jurisdiction === 'la-city' && (() => { const c = addressCity(p.site.address); return c && c !== 'los angeles' && c !== 'la' ? <div className="mods"><label><input type="checkbox" checked={!!s.jurisdictionConfirmed} onChange={e => update(d => { d.site.jurisdictionConfirmed = e.target.checked; })} /> {L("I checked ZIMAS: this lot is in the City of Los Angeles")}</label></div> : null; })()}
-    {p.site.parcel && fromMap(p, 'jurisdiction') && p.site.jurisdiction === 'other' && <div className="banner warn" role="status">{L("The city map shows this lot is outside the City of Los Angeles")}{p.site.parcel.cityName ? ` (${p.site.parcel.cityName})` : ''}. {L("This tool's rules are for LA City only.")}</div>}
+    {p.site.parcel && fromMap(p, 'jurisdiction') && (p.site.jurisdiction === 'other' || p.site.jurisdiction === 'la-county') && <div className="banner warn" role="status">{L("The city map shows this lot is outside the City of Los Angeles")}{p.site.parcel.cityName ? ` (${p.site.parcel.cityName})` : ''}. {L("This tool's rules are for LA City only.")}</div>}
     <div className="grid2">
       {s.lot.length === 4 && (() => { const n = s.lot.length, l = (s.streetEdge + n - 1) % n, r = (s.streetEdge + 1) % n, rear = (s.streetEdge + 2) % n, ex = s.streetEdges ?? [];
         const v = ex.includes(l) ? 'left' : ex.includes(r) ? 'right' : ex.includes(rear) ? 'rear' : 'none';
@@ -512,9 +513,10 @@ function SheetItems({ p, update, report, lang }: { p: Project; update: U; report
   </>;
 }
 
-function InspectionCard({ report, lang, score, appDate = null, example, plain }: { report: Report; lang: Lang; score?: string; appDate?: string | null; example?: boolean; plain?: string }) {
+function InspectionCard({ report, lang, score, appDate = null, example, plain, likelyYes }: { report: Report; lang: Lang; score?: string; appDate?: string | null; example?: boolean; plain?: string; likelyYes?: boolean }) {
   const es = lang === 'es';
-  const v = { READY_FOR_PREPARER: es ? 'Listo para su preparador' : 'Ready for your preparer', FIX_ISSUES: es ? 'Hay cosas que corregir' : 'Some things need fixing', INCOMPLETE: es ? 'Falta información' : 'Some answers are missing', NOT_SUPPORTED: es ? 'Dirección no soportada' : 'Address not supported yet' }[report.overall];
+  // r4cold-02: a "Likely yes" plain answer must not sit under a "Some answers are missing" headline.
+  const v = likelyYes && report.overall === 'INCOMPLETE' ? (es ? `Probablemente sí · quedan ${report.counts.UNKNOWN} preguntas` : `Likely yes · ${report.counts.UNKNOWN} questions left`) : { READY_FOR_PREPARER: es ? 'Listo para su preparador' : 'Ready for your preparer', FIX_ISSUES: es ? 'Hay cosas que corregir' : 'Some things need fixing', INCOMPLETE: es ? 'Falta información' : 'Some answers are missing', NOT_SUPPORTED: es ? 'Dirección no soportada' : 'Address not supported yet' }[report.overall];
   const c = report.counts; const fr = rulesLine(appDate, report.pack, es);
   return <section className="card" aria-live="polite">
     {example ? <h2 className="card-h">{es ? 'Resultado de ejemplo (lote de demostración, no es su proyecto)' : 'Example result (demo lot, not your project)'}</h2> : <h3>{es ? 'Tarjeta de revisión' : 'Check card'}</h3>}
