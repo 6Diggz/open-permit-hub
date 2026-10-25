@@ -127,7 +127,7 @@ function sigBlock(pg: PDFPage, x: number, y: number, w: number, f: PDFFont, p: P
 
 /** Sheet A-2: floor plan data from the Rooms step (ADU outline at 1/4" = 1'-0", window schedule with escape tags, alarms, areas). */
 async function floorPlanSheet(doc: PDFDocument, p: Project, kind: Kind) {
-  const W = 36 * PT_PER_IN, H = 24 * PT_PER_IN; const pg = doc.addPage([W, H]);
+  const W = 36 * PT_PER_IN, H = 24 * PT_PER_IN; let pg = doc.addPage([W, H]); const first = pg;
   const f = await doc.embedFont(StandardFonts.Helvetica), fb = await doc.embedFont(StandardFonts.HelveticaBold);
   pg.drawRectangle({ x: 36, y: 36, width: W - 72, height: H - 72, borderColor: INK, borderWidth: 1.5 });
   const ab = bbox(p.adu.footprint); const k = (0.25 * PT_PER_IN) / MM_PER_FT; const ox = 108, oy = 260;
@@ -148,27 +148,32 @@ async function floorPlanSheet(doc: PDFDocument, p: Project, kind: Kind) {
   pg.drawText(`Scale 1/4" = 1'-0"   Outside ${fmtFtIn(ab.maxX - ab.minX)} x ${fmtFtIn(ab.maxY - ab.minY)} (${fmtSqFt(area(p.adu.footprint))})   Livable ${p.adu.interiorLivableSqFt ?? '-'} sq ft   Ceiling ${p.adu.ceilingHeightMm != null ? fmtFtIn(p.adu.ceilingHeightMm) : '-'}`, { x: ox, y: oy - 48, size: 11, font: f, color: INK });
   pg.drawText(p.adu.rooms.length ? 'Rooms, doors and windows as drawn in the app. Tape sizes marked (tape). Verify all sizes in the field.' : 'Room layout, doors and wall locations: drawn by your preparer. This sheet lists what you entered.', { x: ox, y: oy - 64, size: 10, font: f, color: MUTE });
   let y = H - 90; const x0 = W * 0.55; const q = withRooms(p);
+  // Long schedules continue on the next sheet instead of running off the page.
+  const need = (h: number) => { if (y - h >= 110) return; pg = doc.addPage([W, H]); pg.drawRectangle({ x: 36, y: 36, width: W - 72, height: H - 72, borderColor: INK, borderWidth: 1.5 });
+    pg.drawText(safe(`A-2 Floor plan data (continued)   ${p.site.address || p.name}`), { x: 60, y: 54, size: 10, font: f, color: INK });
+    if (kind === 'draft') pg.drawText('DRAFT - NOT FOR SUBMITTAL', { x: W * 0.2, y: H * 0.25, size: 96, font: fb, color: rgb(0.85, 0.2, 0.15), opacity: 0.13, rotate: degrees(28) });
+    y = H - 90; };
   if (p.adu.rooms.length) {
     pg.drawText('ROOM SCHEDULE', { x: x0, y, size: 16, font: fb, color: INK }); y -= 24;
     const rc = [0, 170, 250, 390, 470, 540]; ['Room', 'Use', 'Size', 'Area', 'Ceiling', 'Doors/Win'].forEach((h, i) => pg.drawText(h, { x: x0 + rc[i], y, size: 10, font: fb, color: INK })); y -= 16;
-    for (const r of p.adu.rooms) { const z = roomSize(r); const c = roomCeiling(p, r);
+    for (const r of p.adu.rooms) { need(16); const z = roomSize(r); const c = roomCeiling(p, r);
       [safe(r.name || '-').slice(0, 26), r.use, `${fmtFtIn(z.w)} x ${fmtFtIn(z.d)}`, fmtSqFt(roomArea(r)), c != null ? fmtFtIn(c) : '-', `${r.openings.filter(o => o.kind === 'door').length}/${r.openings.filter(o => o.kind === 'window').length}`].forEach((t, j) => pg.drawText(t, { x: x0 + rc[j], y, size: 10, font: f, color: INK })); y -= 14; if (y < 330) break; }
     y -= 20;
   }
-  pg.drawText('WINDOW SCHEDULE', { x: x0, y, size: 16, font: fb, color: INK }); y -= 24;
+  need(60); pg.drawText('WINDOW SCHEDULE', { x: x0, y, size: 16, font: fb, color: INK }); y -= 24;
   const head = ['#', 'Room', 'Clear W', 'Clear H', 'Sill', 'Escape', 'Net sq ft'];
   const cols = [0, 30, 210, 290, 370, 440, 520]; head.forEach((h, i) => pg.drawText(h, { x: x0 + cols[i], y, size: 10, font: fb, color: INK })); y -= 16;
-  q.adu.windows.forEach((w, i) => { const sq = w.clearWidthMm != null && w.clearHeightMm != null ? toSqFt(w.clearWidthMm * w.clearHeightMm).toFixed(1) : '-';
+  q.adu.windows.forEach((w, i) => { need(16); const sq = w.clearWidthMm != null && w.clearHeightMm != null ? toSqFt(w.clearWidthMm * w.clearHeightMm).toFixed(1) : '-';
     [String(i + 1), safe(w.room || '-').slice(0, 28), w.clearWidthMm != null ? fmtFtIn(w.clearWidthMm) : '-', w.clearHeightMm != null ? fmtFtIn(w.clearHeightMm) : '-', w.sillMm != null ? fmtFtIn(w.sillMm) : '-', w.sleeping ? 'EGRESS' : '-', sq].forEach((c, j) => pg.drawText(c, { x: x0 + cols[j], y, size: 10, font: f, color: INK })); y -= 14; });
   if (!q.adu.windows.length) { pg.drawText('No windows entered yet.', { x: x0, y, size: 10, font: f, color: MUTE }); y -= 14; }
-  y -= 20; pg.drawText('ROOMS AND SAFETY', { x: x0, y, size: 16, font: fb, color: INK }); y -= 20;
+  y -= 20; need(60); pg.drawText('ROOMS AND SAFETY', { x: x0, y, size: 16, font: fb, color: INK }); y -= 20;
   const tri = (v: string) => v === 'yes' ? 'Yes' : v === 'no' ? 'No' : 'Not answered';
   const rows: [string, string][] = [['Bedrooms', q.adu.bedrooms === 0 ? 'Studio (main room counts as a sleeping room unless stated)' : String(q.adu.bedrooms)], ['Smoke and CO alarms on plan', tri(p.adu.smokeCoPlanned)], ['Smoke alarms hardwired with battery backup', tri(p.adu.smokeHardwired)], ['Sprinklers', tri(p.adu.sprinklered)], ['All-electric', tri(p.adu.allElectric)], ['Slab vapor barrier or epoxy coating', tri(p.adu.slabVaporBarrier)]];
-  for (const [a, b] of rows) { pg.drawText(a, { x: x0, y, size: 10, font: f, color: MUTE }); pg.drawText(b, { x: x0 + 250, y, size: 10, font: fb, color: INK }); y -= 15; }
-  pg.drawText(safe(`A-2 Floor plan data   ${p.site.address || p.name}   ${PACK_ID}`), { x: 60, y: 54, size: 10, font: f, color: INK });
-  exampleBanner(pg, p, fb, H);
-  titleBlock(pg, p, 'FLOOR PLAN', 'A-2 Floor plan data', null, f, fb);
-  if (kind === 'draft') pg.drawText('DRAFT - NOT FOR SUBMITTAL', { x: W * 0.2, y: H * 0.25, size: 96, font: fb, color: rgb(0.85, 0.2, 0.15), opacity: 0.13, rotate: degrees(28) });
+  for (const [a, b] of rows) { need(15); pg.drawText(a, { x: x0, y, size: 10, font: f, color: MUTE }); pg.drawText(b, { x: x0 + 250, y, size: 10, font: fb, color: INK }); y -= 15; }
+  first.drawText(safe(`A-2 Floor plan data   ${p.site.address || p.name}   ${PACK_ID}`), { x: 60, y: 54, size: 10, font: f, color: INK });
+  exampleBanner(first, p, fb, H);
+  titleBlock(first, p, 'FLOOR PLAN', 'A-2 Floor plan data', null, f, fb);
+  if (kind === 'draft') first.drawText('DRAFT - NOT FOR SUBMITTAL', { x: W * 0.2, y: H * 0.25, size: 96, font: fb, color: rgb(0.85, 0.2, 0.15), opacity: 0.13, rotate: degrees(28) });
 }
 
 /** Sheet G-2: review markup. Numbered pins drawn on a small site plan, the pin list, and correction-letter responses. */

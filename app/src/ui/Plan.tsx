@@ -1,4 +1,4 @@
-import { useRef, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import type { Project } from '../core/model';
 import { bbox, clearanceToEdge, translate } from '../core/geom';
 import { fmtFtIn, ft, inch } from '../core/units';
@@ -19,6 +19,21 @@ export function Plan({ p, onMove, es = false, pins }: { p: Project; es?: boolean
   const toModel = (e: React.PointerEvent) => { const m = svg.current!.getScreenCTM()!.inverse(); const pt = new DOMPoint(e.clientX, e.clientY).matrixTransform(m); return { x: pt.x, y: Y(pt.y) }; };
   const fp = p.adu.footprint; const fb = bbox(fp); const fs = Math.min(s * 13, (fb.maxX - fb.minX) / 8);
   const dims = lot.map((a, i) => ({ i, d: clearanceToEdge(fp, lot, i), a, b: lot[(i + 1) % lot.length] }));
+  // Keyboard placing (WCAG 2.1.1): while a note is being placed, arrows move a crosshair (1 ft, Shift 10 ft) and Enter drops it.
+  const [cur, setCur] = useState<{ x: number; y: number } | null>(null);
+  const placing = pins?.placing ?? false;
+  useEffect(() => {
+    if (!placing || !pins) { setCur(null); return; }
+    const from = typeof placing === 'string' && placing !== 'new' ? p.markup.pins.find(x => x.id === placing) : undefined;
+    let c = from ? { x: from.x, y: from.y } : { x: (fb.minX + fb.maxX) / 2, y: (fb.minY + fb.maxY) / 2 }; setCur(c);
+    const on = (e: KeyboardEvent) => {
+      const t = e.target as HTMLElement | null; if (t && /^(INPUT|TEXTAREA|SELECT)$/.test(t.tagName)) return;
+      const st = e.shiftKey ? ft(10) : ft(1); const m: Record<string, [number, number]> = { ArrowLeft: [-st, 0], ArrowRight: [st, 0], ArrowUp: [0, st], ArrowDown: [0, -st] };
+      if (m[e.key]) { e.preventDefault(); e.stopPropagation(); c = { x: Math.max(b.minX - pad, Math.min(b.maxX + pad, c.x + m[e.key][0])), y: Math.max(b.minY - pad, Math.min(b.maxY + pad, c.y + m[e.key][1])) }; setCur(c); setLive(es ? 'Marca movida. Pulse Enter para colocar la nota.' : 'Marker moved. Press Enter to put the note here.'); }
+      else if (e.key === 'Enter') { e.preventDefault(); e.stopPropagation(); pins.onPlace(c.x, c.y); }
+    };
+    document.addEventListener('keydown', on, true); return () => document.removeEventListener('keydown', on, true);
+  }, [placing]); // eslint-disable-line react-hooks/exhaustive-deps
   const say = () => setLive(dims.filter(d => d.i !== p.site.streetEdge).map(d => fmtFtIn(d.d)).join(', '));
   const key = (e: React.KeyboardEvent) => {
     const step = e.shiftKey ? ft(1) : inch(6); const m: Record<string, [number, number]> = { ArrowLeft: [-step, 0], ArrowRight: [step, 0], ArrowUp: [0, step], ArrowDown: [0, -step] };
@@ -50,6 +65,7 @@ export function Plan({ p, onMove, es = false, pins }: { p: Project; es?: boolean
         <text x={(fb.minX + fb.maxX) / 2} y={Y((fb.minY + fb.maxY) / 2)} fontSize={fs} textAnchor="middle" fontWeight="800" fill="var(--ink)" pointerEvents="none">ADU</text>
         <text x={(fb.minX + fb.maxX) / 2} y={Y((fb.minY + fb.maxY) / 2) + fs * 1.3} fontSize={fs * 0.8} textAnchor="middle" fill="var(--ink)" pointerEvents="none">{fmtFtIn(fb.maxX - fb.minX)} x {fmtFtIn(fb.maxY - fb.minY)}</text>
         {p.adu.rooms.map(r => { const ob = bbox(fp); return <polygon key={r.id} points={pts(translate(r.poly, ob.minX, ob.minY))} fill="none" stroke="var(--pencil)" strokeWidth={s * 0.9} pointerEvents="none" />; })}
+        {cur && <g pointerEvents="none" aria-hidden><circle cx={cur.x} cy={Y(cur.y)} r={ps * 12} fill="none" stroke="var(--fix)" strokeWidth={ps * 2.5} /><line x1={cur.x - ps * 18} y1={Y(cur.y)} x2={cur.x + ps * 18} y2={Y(cur.y)} stroke="var(--fix)" strokeWidth={ps * 2} /><line x1={cur.x} y1={Y(cur.y) - ps * 18} x2={cur.x} y2={Y(cur.y) + ps * 18} stroke="var(--fix)" strokeWidth={ps * 2} /></g>}
         {pins && p.markup.pins.map(x => { const sel = x.id === pins.sel; const r = ps * (sel ? 13 : 10);
           return <g key={x.id} role="button" tabIndex={0} aria-pressed={sel} aria-label={`${es ? 'Nota' : 'Note'} ${x.n}, ${x.status === 'open' ? (es ? 'abierta' : 'open') : (es ? 'resuelta' : 'resolved')}: ${x.comment || (es ? 'sin texto' : 'no text')}`}
             style={{ cursor: 'pointer' }} onPointerDown={e => { if (pins.placing) return; e.stopPropagation(); pins.onSelect(sel ? null : x.id); }} onKeyDown={e => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); pins.onSelect(sel ? null : x.id); } }}>

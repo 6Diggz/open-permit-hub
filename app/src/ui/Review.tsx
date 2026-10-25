@@ -38,7 +38,7 @@ export function ReviewStep({ p, update, sel, setSel, placing, setPlacing, downlo
           <button type="button" className="btn primary" disabled={full} aria-pressed={placing === 'new'} onClick={() => { const on = placing !== 'new'; setPlacing(on ? 'new' : false); if (on) showPlan(); }}>{placing === 'new' ? L('Tap the plan to place it') : L('Place a pin on the plan')}</button>
           <button type="button" className="btn" disabled={full} onClick={() => { setPlacing(false); addPin(); }}>{L('Add a note at the ADU')}</button>
         </div>
-        <span className="help" role="status">{full ? `${MAX_PINS} ${L('notes')}: ${L('the most one project can hold. Resolve and delete old notes to add more.')}` : placing ? L('Tap or click the spot on the plan. Press Escape to stop.') : `${pins.length} ${L('notes')}: ${open} ${L('open')}, ${pins.length - open} ${L('resolved')}.`}</span></div>
+        <span className="help" role="status">{full ? `${MAX_PINS} ${L('notes')}: ${L('the most one project can hold. Resolve and delete old notes to add more.')}` : placing ? L('Tap or click the spot on the plan, or use the arrow keys and press Enter. Press Escape to stop.') : `${pins.length} ${L('notes')}: ${open} ${L('open')}, ${pins.length - open} ${L('resolved')}.`}</span></div>
     </div>
     {pins.length === 0 ? <p className="lead">{L('No notes yet. Place a pin on the plan, or paste a correction letter below.')}</p> :
       <div style={{ overflowX: 'auto' }} role="region" aria-label={L('Notes list')} tabIndex={0}>

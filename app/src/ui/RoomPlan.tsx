@@ -44,7 +44,7 @@ export function RoomPlan({ p, selected, onSelect, onChange, onRemove }: { p: Pro
     const v = m[e.key]; if (!v) return; e.preventDefault(); onSelect(r.id);
     let next: Poly;
     if (e.altKey) {
-      if (r.shape !== 'rect') { setLive(L('Alt+arrows resize rectangle rooms. Drag a corner to change a shaped room.')); return; }
+      if (r.shape !== 'rect') { setLive(L('Alt+arrows resize rectangle rooms. To change a shaped room, drag a corner, or press Tab to reach a corner and use the arrow keys.')); return; }
       if (r.tape.w != null && v[0] || r.tape.d != null && v[1]) { setLive(L('This size is tape-measured. Change it in the room details.')); return; }
       const b = bbox(r.poly); next = [{ x: b.minX, y: b.minY }, { x: b.maxX + v[0], y: b.minY }, { x: b.maxX + v[0], y: b.maxY + v[1] }, { x: b.minX, y: b.maxY + v[1] }];
       if (next[1].x - next[0].x < ft(2) || next[2].y - next[1].y < ft(2)) return;
@@ -76,7 +76,10 @@ export function RoomPlan({ p, selected, onSelect, onChange, onRemove }: { p: Pro
             <text x={cx} y={Y(cy) + fs * 1.95} fontSize={fs * 0.82} textAnchor="middle" fill="var(--pencil)" pointerEvents="none">{fmtSqFt(roomArea(r))}{z.taped ? ` · ${L('tape')}` : ''}</text>
             {sel && r.poly.map((v, i) => <g key={i}>
               <circle cx={v.x} cy={Y(v.y)} r={s * 6} fill="var(--sheet)" stroke="var(--ink)" strokeWidth={s * 2} pointerEvents="none" />
-              <circle cx={v.x} cy={Y(v.y)} r={s * 22} fill="transparent" style={{ cursor: 'nwse-resize', touchAction: 'none' }} aria-hidden
+              <circle cx={v.x} cy={Y(v.y)} r={s * 22} fill="transparent" style={{ cursor: 'nwse-resize', touchAction: 'none' }}
+                {...(r.shape !== 'rect' ? { tabIndex: 0, role: 'button', 'aria-label': `${L('Corner')} ${i + 1} / ${r.poly.length}, ${r.name || L('Room')}. ${L('Arrow keys move it 1 inch, Shift moves 1 foot.')}`,
+                  onKeyDown: (e: React.KeyboardEvent) => { const st = e.shiftKey ? ft(1) : inch(1); const m: Record<string, [number, number]> = { ArrowLeft: [-st, 0], ArrowRight: [st, 0], ArrowUp: [0, st], ArrowDown: [0, -st] }; const d = m[e.key]; if (!d) return; e.preventDefault(); e.stopPropagation();
+                    const next = reshape(r, r.poly, i, { x: v.x + d[0], y: v.y + d[1] }); if (tryPoly(r, next, 'room-corner-key-' + r.id + '-' + i)) setLive(describe({ ...r, poly: next })); else setLive(L('It would go outside the garage outline.')); } } : { 'aria-hidden': true })}
                 onPointerDown={e => { e.stopPropagation(); if (r.shape === 'rect' && (r.tape.w != null || r.tape.d != null)) { setLive(L('This size is tape-measured. Change it in the room details.')); return; } (e.target as Element).setPointerCapture(e.pointerId); drag.current = { id: r.id, mode: i, start: toModel(e), poly: r.poly }; }}
                 onPointerMove={e => { const d = drag.current; if (!d || d.id !== r.id || d.mode !== i) return; tryPoly(r, reshape(r, d.poly, i, toModel(e)), 'room-corner-' + r.id); }}
                 onPointerUp={() => { if (drag.current) setLive(describe(r)); drag.current = null; }} onPointerCancel={() => { drag.current = null; }} />

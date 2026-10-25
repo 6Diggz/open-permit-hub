@@ -64,13 +64,17 @@ export default function App() {
   if (p && !hist.current) hist.current = new History(p);
   setUiLang(lang);
 
-  // Saves are batched: a drag fires dozens of edits a second, but storage is written once it settles (300 ms),
+  // Saves are batched: a drag fires dozens of edits a second; the first edit is written at once and the rest once it settles (300 ms),
   // and right away when the tab is hidden or closed, or another project is opened.
   const pending = useRef<Project | null>(null); const saveTimer = useRef<number | undefined>(undefined);
-  const flushSave = () => { window.clearTimeout(saveTimer.current); const x = pending.current; pending.current = null; if (x) setSaveState(persist(x)); };
+  const flushSave = () => { const x = pending.current; pending.current = null; if (x) setSaveState(persist(x)); };
   useEffect(() => {
     if (pending.current && pending.current.id !== p?.id) flushSave();
-    if (!p) return; pending.current = p; window.clearTimeout(saveTimer.current); saveTimer.current = window.setTimeout(flushSave, 300);
+    if (!p) return;
+    // Leading edge: an edit after a quiet spell is saved at once (another tab or a reload sees it); edits in a burst are batched.
+    const quiet = () => { saveTimer.current = window.setTimeout(() => { saveTimer.current = undefined; flushSave(); }, 300); };
+    if (saveTimer.current === undefined) { setSaveState(persist(p)); quiet(); return; }
+    pending.current = p; window.clearTimeout(saveTimer.current); quiet();
   }, [p]); // eslint-disable-line react-hooks/exhaustive-deps
   useEffect(() => { const on = () => { if (document.visibilityState === 'hidden') flushSave(); }; window.addEventListener('pagehide', flushSave); document.addEventListener('visibilitychange', on);
     return () => { flushSave(); window.removeEventListener('pagehide', flushSave); document.removeEventListener('visibilitychange', on); }; }, []); // eslint-disable-line react-hooks/exhaustive-deps
