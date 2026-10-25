@@ -5,10 +5,11 @@
 // (north arrow, graphic scale, keynote legend, STREET label, drawing title, title block, schedules) lives only here.
 import type { Project } from '../core/model';
 import type { Pt } from '../core/geom';
-import { bbox, area, gap, clearanceToEdge } from '../core/geom';
+import { bbox, area } from '../core/geom';
 import { fmtSqFt, toSqFt } from '../core/units';
 import { withRooms, roomSize, roomArea, roomCeiling, roomAbs } from '../core/rooms';
 import { PACK, PACK_ID } from '../rules/pack';
+import { siteFacts } from '../core/sitefacts';
 import { missingGlyphNote } from './glyphs';
 import { draft, SCALES, textW, fmtArch, type Drawing, type DimRef, type Fill, type Dash } from '../ui/pro/drafting';
 
@@ -214,15 +215,7 @@ function streetLabel(sb: SB, vp: Viewport, d: Drawing, p: Project, es: boolean) 
   if (!d.street) return; const q = toPaper(vp, d.street.at); const st = streetOf(p.site.address); const s = st ? `${es ? 'CALLE' : 'STREET'}: ${st.toUpperCase()}` : es ? 'CALLE' : 'STREET';
   const r = (d.street.rot * Math.PI) / 180; sb.items.push({ k: 't', layer: 'A-ANNO-TEXT', x: q.x - Math.sin(r) * 0.36 * T2, y: q.y + Math.cos(r) * 0.36 * T2, h: T2, s, anchor: 'middle', rot: d.street.rot, bold: true });
 }
-function siteData(p: Project, es: boolean): [string, string][] {
-  const lot = p.site.lot; const st = new Set([p.site.streetEdge, ...(p.site.streetEdges ?? [])]); const out: [string, string][] = [];
-  const sa = lot[p.site.streetEdge], sbp = lot[(p.site.streetEdge + 1) % lot.length]; const su = { x: sbp.x - sa.x, y: sbp.y - sa.y };
-  const side = (i: number) => { const a = lot[i], b = lot[(i + 1) % lot.length]; const u = { x: b.x - a.x, y: b.y - a.y }; const cr = Math.abs(u.x * su.y - u.y * su.x) / ((Math.hypot(u.x, u.y) * Math.hypot(su.x, su.y)) || 1);
-    return cr < 0.5 ? (es ? 'TRASERO' : 'REAR') : (es ? 'LATERAL' : 'SIDE'); };
-  lot.forEach((_, i) => { if (st.has(i)) return; const d = clearanceToEdge(p.adu.footprint, lot, i); if (Number.isFinite(d)) out.push([`${es ? 'RETIRO DEL ADU' : 'ADU SETBACK'}, ${side(i)}`, fmtArch(d)]); });
-  const g = gap(p.adu.footprint, p.site.primary); if (g > 0 && Number.isFinite(g)) out.push([es ? 'SEPARACIÓN DE EDIFICIOS' : 'BUILDING SEPARATION', fmtArch(g)]);
-  return out;
-}
+function siteData(p: Project, es: boolean): [string, string][] { return siteFacts(p, es, fmtArch); }
 
 // ---------- the label pass ----------
 interface OBB { cx: number; cy: number; hw: number; hh: number; c: number; s: number }
@@ -232,14 +225,20 @@ export function textBox(t: SText): OBB {
   const x0 = t.anchor === 'middle' ? -w / 2 : t.anchor === 'end' ? -w : 0; const lx = x0 + w / 2, ly = (-ASC * t.h + DSC * t.h) / 2;
   return { cx: t.x + lx * c - ly * s, cy: t.y + lx * s + ly * c, hw: w / 2, hh: ((ASC + DSC) * t.h) / 2, c, s };
 }
+/** Plotted clear space every drawing label keeps from other labels and from linework that is not its own (1/32"):
+ * labels that merely touch read as one smudge at 1/32" = 1'-0". */
+export const CLEAR_IN = 1 / 32;
+const grow = (b: OBB, c: number): OBB => ({ ...b, hw: b.hw + c, hh: b.hh + c });
 const corners = (b: OBB) => [[-1, -1], [1, -1], [1, 1], [-1, 1]].map(([i, j]) => ({ x: b.cx + i * b.hw * b.c - j * b.hh * b.s, y: b.cy + i * b.hw * b.s + j * b.hh * b.c }));
 export function obbHit(a: OBB, b: OBB, eps = 0.005): boolean {
+  { const r = Math.hypot(a.hw, a.hh) + Math.hypot(b.hw, b.hh); const dx = a.cx - b.cx, dy = a.cy - b.cy; if (dx * dx + dy * dy > r * r) return false; } // far apart: cheap reject
   const axes = [{ x: a.c, y: a.s }, { x: -a.s, y: a.c }, { x: b.c, y: b.s }, { x: -b.s, y: b.c }]; const ca = corners(a), cb = corners(b);
   for (const ax of axes) { const pa = ca.map(q => q.x * ax.x + q.y * ax.y), pb = cb.map(q => q.x * ax.x + q.y * ax.y); if (Math.max(...pa) - eps <= Math.min(...pb) || Math.max(...pb) - eps <= Math.min(...pa)) return false; }
   return true;
 }
 /** Does segment p-q cross the box (shrunk by eps)? */
 export function segHit(b: OBB, x0: number, y0: number, x1: number, y1: number, eps = 0.005): boolean {
+  { const r = Math.hypot(b.hw, b.hh); if (Math.min(x0, x1) > b.cx + r || Math.max(x0, x1) < b.cx - r || Math.min(y0, y1) > b.cy + r || Math.max(y0, y1) < b.cy - r) return false; }
   const loc = (x: number, y: number) => { const dx = x - b.cx, dy = y - b.cy; return { u: dx * b.c + dy * b.s, v: -dx * b.s + dy * b.c }; };
   const A = loc(x0, y0), B = loc(x1, y1); const hw = b.hw - eps, hh = b.hh - eps; if (hw <= 0 || hh <= 0) return false;
   let t0 = 0, t1 = 1; const du = B.u - A.u, dv = B.v - A.v;
@@ -257,44 +256,62 @@ export function segs(d: string): [number, number, number, number][] {
 export function overlaps(sh: { items: SItem[] }): { a: string; b: string }[] {
   const T = sh.items.filter((x): x is SText => x.k === 't' && !!x.s.trim()); const P = sh.items.filter((x): x is SPath => x.k === 'p' && x.stroke !== false);
   const boxes = T.map(textBox); const S = P.map(p => ({ g: p.g, s: segs(p.d) })); const out: { a: string; b: string }[] = [];
-  T.forEach((t, i) => { for (let j = i + 1; j < T.length; j++) if (obbHit(boxes[i], boxes[j])) out.push({ a: t.s, b: T[j].s });
-    for (const p of S) { if (p.g && p.g === t.g && !p.g.startsWith('dim')) continue; if (p.s.some(q => segHit(boxes[i], ...q))) { out.push({ a: t.s, b: 'linework' }); break; } } });
+  T.forEach((t, i) => { const gi = t.fixed ? boxes[i] : grow(boxes[i], CLEAR_IN);
+    for (let j = i + 1; j < T.length; j++) if (!(t.g && t.g === T[j].g && !t.g.startsWith('dim') && !obbHit(boxes[i], boxes[j])) && obbHit(t.fixed && !T[j].fixed ? grow(boxes[i], CLEAR_IN) : gi, boxes[j])) out.push({ a: t.s, b: T[j].s });
+    for (const p of S) { const own = !!p.g && p.g === t.g; if (own && !p.g!.startsWith('dim')) continue; const b = own ? boxes[i] : gi; if (p.s.some(q => segHit(b, ...q))) { out.push({ a: t.s, b: 'linework' }); break; } } });
   return out;
 }
 /** Moves drawing labels off linework, borders and each other: dimension text slides along its line, then flips sides; other
  * labels (and whole tags) try spots around their place, with a leader when they end up away from it. Title-block and table
  * text never moves. `bounds`: where each viewport's labels must stay. */
-function labelPass(sb: SB) {
+function labelPass(sb: SB, maxR = 40, stuck?: Set<SText>) {
   const items = sb.items; const T = items.filter((x): x is SText => x.k === 't');
   const P = items.filter((x): x is SPath => x.k === 'p' && x.stroke !== false);
   const segOf = new Map(P.map(p => [p, segs(p.d)]));
-  const placed: OBB[] = []; const order = [...T].sort((a, b) => Number(!!b.fixed) - Number(!!a.fixed));
+  const bbOf = new Map<SPath, number[]>(); const bbx = (p: SPath) => { let b = bbOf.get(p); if (!b) { b = [Infinity, Infinity, -Infinity, -Infinity]; for (const [a, c, d2, e] of segOf.get(p)!) { b[0] = Math.min(b[0], a, d2); b[1] = Math.min(b[1], c, e); b[2] = Math.max(b[2], a, d2); b[3] = Math.max(b[3], c, e); } bbOf.set(p, b); } return b; };
+  const near = (p: SPath, o: OBB) => { const b = bbx(p); const r = Math.hypot(o.hw, o.hh); return !(b[0] > o.cx + r || b[2] < o.cx - r || b[1] > o.cy + r || b[3] < o.cy - r); };
+  const placed: OBB[] = []; const pri = (t: SText) => (t.fixed ? 0 : t.layer === 'A-AREA-IDEN' ? 1 : /^(P-FIXT|A-EQPM)$/.test(t.layer) ? 3 : 2); // room tags claim space before fixture labels
+  const order = [...T].sort((a, b) => pri(a) - pri(b));
   const inVp = (b: OBB) => { if (!sb.vps.length) return true; return sb.vps.some(v => corners(b).every(q => q.x >= v.x && q.x <= v.x + v.w && q.y >= v.y && q.y <= v.y + v.h)); };
-  const clear = (t: SText, b: OBB, skipG0: string | undefined, groupPaths: SPath[] = []) => { const skipG = skipG0?.startsWith('dim') ? undefined : skipG0; return !placed.some(q => obbHit(q, b)) && !P.some(p => (skipG && p.g === skipG) || groupPaths.includes(p) ? false : segOf.get(p)!.some(s => segHit(b, ...s))) && (t.fixed || inVp(b)); };
+  const clear = (t: SText, b: OBB, skipG0: string | undefined, groupPaths: SPath[] = []) => { const skipG = skipG0?.startsWith('dim') ? undefined : skipG0; const gb = grow(b, CLEAR_IN);
+    return !placed.some(q => obbHit(q, gb)) && !P.some(p => !near(p, gb) || (skipG && p.g === skipG) || groupPaths.includes(p) ? false : segOf.get(p)!.some(s => segHit(t.g && p.g === t.g ? b : gb, ...s))) && (t.fixed || inVp(b)); };
+  const fixedB = T.filter(o => o.fixed).map(o => [o, textBox(o)] as const);
+  const done = new Set<SText>(); const pByG = new Map<string, SPath[]>(); const tByG = new Map<string, SText[]>();
+  for (const p of P) if (p.g) pByG.set(p.g, [...(pByG.get(p.g) ?? []), p]); for (const t of T) if (t.g) tByG.set(t.g, [...(tByG.get(t.g) ?? []), t]);
   for (const t of order) {
+    if (done.has(t)) continue;
     if (t.fixed) { placed.push(textBox(t)); continue; }
-    const gPaths = t.g ? P.filter(p => p.g === t.g) : []; const tag = !!t.g && !t.slide && gPaths.length > 0; // a tag or keynote: the symbol moves with its text
+    const gPaths = t.g ? (pByG.get(t.g) ?? []) : []; const tag = !!t.g && !t.g.startsWith('dim') && !t.slide && gPaths.length > 0;
+    // the other texts of a tag (room name, number, area) move with it as one unit
+    const mates = tag ? (tByG.get(t.g!) ?? []).filter(o => o !== t && !o.fixed) : []; mates.forEach(m => done.add(m)); // a tag or keynote: the symbol moves with its text
     const try1 = (dx: number, dy: number) => { const c = { ...t, x: t.x + dx, y: t.y + dy }; const b = textBox(c); if (tag) { const moved = gPaths.map(p => ({ p, s: segOf.get(p)!.map(([a, b2, c2, d2]) => [a + dx, b2 + dy, c2 + dx, d2 + dy] as [number, number, number, number]) }));
         // the symbol must also be clear of other linework and text
-        const sym = moved.flatMap(m => m.s); const symHit = placed.some(q => sym.some(s => segHit(q, ...s))) || T.some(o => o !== t && o.g !== t.g && o.fixed && sym.some(s => segHit(textBox(o), ...s)));
+        const sym = moved.flatMap(m => m.s); let x0 = Infinity, y0 = Infinity, x1 = -Infinity, y1 = -Infinity; for (const q of sym) { x0 = Math.min(x0, q[0], q[2]); y0 = Math.min(y0, q[1], q[3]); x1 = Math.max(x1, q[0], q[2]); y1 = Math.max(y1, q[1], q[3]); }
+        const nb = (o: OBB) => { const r = Math.hypot(o.hw, o.hh); return !(o.cx - r > x1 || o.cx + r < x0 || o.cy - r > y1 || o.cy + r < y0); };
+        const symHit = placed.some(q => nb(q) && sym.some(s => segHit(q, ...s))) || fixedB.some(([o, ob]) => o.g !== t.g && nb(ob) && sym.some(s => segHit(ob, ...s)));
         if (symHit) return false; }
-      if (!tag && !t.slide && Math.hypot(dx, dy) > t.h * 2.2) { const tx = t.x, ty = t.y - t.h * 0.36; if (placed.some(q => segHit(q, b.cx, b.cy, tx, ty))) return false; }
+      if (!tag && !t.slide && !free && Math.hypot(dx, dy) > t.h * 2.2) { const tx = t.x, ty = t.y - t.h * 0.36; if (placed.some(q => segHit(grow(q, CLEAR_IN), b.cx, b.cy, tx, ty))) return false; }
+      if (mates.some(m => { const mb = textBox({ ...m, x: m.x + dx, y: m.y + dy }); return !clear(m, mb, t.g, gPaths) || obbHit(mb, b); })) return false;
       return clear(c, b, t.g, tag ? gPaths : []); };
+    let free = false; // a loose note (no group) that cannot get a clean leader moves without one
     let best: [number, number] | null = try1(0, 0) ? [0, 0] : null;
     if (!best && t.slide) { const L = 3; for (let k = 1; k <= 24 && !best; k++) for (const sg of [1, -1]) { const dd = sg * k * t.h * 0.5; if (k * t.h * 0.5 > L) break; if (try1(t.slide.x * dd, t.slide.y * dd)) { best = [t.slide.x * dd, t.slide.y * dd]; break; } }
       // other side of the dimension line
       if (!best) { const n = { x: -t.slide.y, y: t.slide.x }; const off = t.h * (ASC + DSC) + 0.04; for (let k = 0; k <= 16 && !best; k++) for (const sg of [1, -1]) { const dd = sg * k * t.h * 0.5; if (try1(n.x * off + t.slide.x * dd, n.y * off + t.slide.y * dd)) { best = [n.x * off + t.slide.x * dd, n.y * off + t.slide.y * dd]; break; } } } }
-    if (!best) { const step = t.h * 0.6; outer: for (let r = 1; r <= 40; r++) for (let a = 0; a < 16; a++) { const an = (a / 16) * Math.PI * 2; const dx = Math.cos(an) * step * r, dy = Math.sin(an) * step * r; if (try1(dx, dy)) { best = [dx, dy]; break outer; } } }
-    if (!best) { placed.push(textBox(t)); continue; } // left where it was: the overlap test reports it
+    if (!best) { const step = t.h * 0.6; outer: for (let r = 1; r <= maxR; r++) for (let a = 0; a < 16; a++) { const an = (a / 16) * Math.PI * 2; const dx = Math.cos(an) * step * r, dy = Math.sin(an) * step * r; if (try1(dx, dy)) { best = [dx, dy]; break outer; } } }
+    if (!best && !t.g) { free = true; const step = t.h * 0.6; outer2: for (let r = 1; r <= maxR; r++) for (let a = 0; a < 16; a++) { const an = (a / 16) * Math.PI * 2; const dx = Math.cos(an) * step * r, dy = Math.sin(an) * step * r; if (try1(dx, dy)) { best = [dx, dy]; break outer2; } } }
+    if (!best && stuck) { stuck.add(t); mates.forEach(m => stuck.add(m)); continue; } // model space: shown again when zoomed in
+    if (!best) { placed.push(textBox(t)); for (const m of mates) placed.push(textBox(m)); continue; } // left where it was: the overlap test reports it
     const [dx, dy] = best;
     if (dx || dy) { const t0 = { x: t.x, y: t.y }; t.x += dx; t.y += dy;
-      if (tag) for (const p of gPaths) { p.d = p.d.replace(/(-?[\d.]+) (-?[\d.]+)/g, (_, a, b) => `${f4(+a + dx)} ${f4(+b + dy)}`); segOf.set(p, segs(p.d)); }
-      else if (!t.slide && Math.hypot(dx, dy) > t.h * 2.2) { // leader back to where the label belongs
+      if (tag) for (const m of mates) { m.x += dx; m.y += dy; }
+      if (tag) for (const p of gPaths) { p.d = p.d.replace(/(-?[\d.]+) (-?[\d.]+)/g, (_, a, b) => `${f4(+a + dx)} ${f4(+b + dy)}`); segOf.set(p, segs(p.d)); bbOf.delete(p); }
+      else if (!t.slide && !free && Math.hypot(dx, dy) > t.h * 2.2) { // leader back to where the label belongs
         const b = textBox(t); const to = { x: t0.x, y: t0.y - t.h * 0.36 };
         const vx = to.x - b.cx, vy = to.y - b.cy; const lu = vx * b.c + vy * b.s, lv = -vx * b.s + vy * b.c; const k = Math.min(Math.abs(lu) > 1e-9 ? (b.hw + 0.03) / Math.abs(lu) : Infinity, Math.abs(lv) > 1e-9 ? (b.hh + 0.03) / Math.abs(lv) : Infinity, 1);
         const from = { x: b.cx + vx * k, y: b.cy + vy * k }; if (Math.hypot(to.x - from.x, to.y - from.y) > 0.05) {
-        const lp: SPath = { k: 'p', layer: t.layer, d: Ln(from.x, from.y, to.x, to.y), lw: 0.13, g: t.g ?? `ld${items.length}` }; t.g = lp.g; items.push(lp); } } }
-    placed.push(textBox(t));
+        const lp: SPath = { k: 'p', layer: t.layer, d: Ln(from.x, from.y, to.x, to.y), lw: 0.13, g: t.g ?? `ld${items.length}` }; t.g = lp.g; items.push(lp); P.push(lp); segOf.set(lp, segs(lp.d)); } } }
+    placed.push(textBox(t)); for (const m of mates) placed.push(textBox(m));
   }
 }
 
@@ -340,12 +357,18 @@ function siteSheet(p: Project, I: Info, o: SheetOpts): Sheet {
   labelPass(sb); return sb.done();
 }
 
+/** Escape-window status from the model sizes (CRC R310.2: 20" clear width, 24" clear height, 44" max sill, 5.7 sq ft; 5.0 at grade). */
+export function egress(w: number | null, h: number | null, sill: number | null, grade = true): string {
+  if (w == null || h == null || sill == null) return 'EGRESS: SIZE?';
+  const net = toSqFt(w * h); const ok = w >= 20 * 25.4 - 0.5 && h >= 24 * 25.4 - 0.5 && sill <= 44 * 25.4 + 0.5 && net >= (grade ? 5.0 : 5.7) - 1e-9;
+  return ok ? 'EGRESS OK' : 'EGRESS FAILS';
+}
 function scheduleRows(p: Project, d: Drawing) {
   const q = withRooms(p); const doors = d.openings.filter(x => x.kind === 'door'); const wins = d.openings.filter(x => x.kind === 'window');
   const doorRows = doors.map(x => [x.mark, (x.room.name || '-').slice(0, 26), fmtArch(x.op.widthMm), x.op.heightMm != null ? fmtArch(x.op.heightMm) : '-', 'SWING']);
   const winRows = p.adu.rooms.length ? wins.map(x => { const w = q.adu.windows.find(v => v.room === x.room.name); const sq = x.op.widthMm && x.op.heightMm ? toSqFt(x.op.widthMm * x.op.heightMm).toFixed(1) : '-';
-    return [x.mark, (x.room.name || '-').slice(0, 28), fmtArch(x.op.widthMm), x.op.heightMm != null ? fmtArch(x.op.heightMm) : '-', x.op.sillMm != null ? fmtArch(x.op.sillMm) : '-', x.room.use === 'sleeping' || w?.sleeping ? 'EGRESS' : '-', sq]; })
-    : q.adu.windows.map((w, i) => [String.fromCharCode(65 + (i % 26)), (w.room || '-').slice(0, 28), w.clearWidthMm != null ? fmtArch(w.clearWidthMm) : '-', w.clearHeightMm != null ? fmtArch(w.clearHeightMm) : '-', w.sillMm != null ? fmtArch(w.sillMm) : '-', w.sleeping ? 'EGRESS' : '-', w.clearWidthMm != null && w.clearHeightMm != null ? toSqFt(w.clearWidthMm * w.clearHeightMm).toFixed(1) : '-']);
+    return [x.mark, (x.room.name || '-').slice(0, 28), fmtArch(x.op.widthMm), x.op.heightMm != null ? fmtArch(x.op.heightMm) : '-', x.op.sillMm != null ? fmtArch(x.op.sillMm) : '-', x.room.use === 'sleeping' || w?.sleeping ? egress(x.op.widthMm, x.op.heightMm, x.op.sillMm, w?.gradeFloor !== false) : '-', sq]; })
+    : q.adu.windows.map((w, i) => [String.fromCharCode(65 + (i % 26)), (w.room || '-').slice(0, 28), w.clearWidthMm != null ? fmtArch(w.clearWidthMm) : '-', w.clearHeightMm != null ? fmtArch(w.clearHeightMm) : '-', w.sillMm != null ? fmtArch(w.sillMm) : '-', w.sleeping ? egress(w.clearWidthMm, w.clearHeightMm, w.sillMm, w.gradeFloor !== false) : '-', w.clearWidthMm != null && w.clearHeightMm != null ? toSqFt(w.clearWidthMm * w.clearHeightMm).toFixed(1) : '-']);
   const roomRows = p.adu.rooms.map((r, i) => { const z = roomSize(r); const c = roomCeiling(p, r); return [String(101 + i), (r.name || '-').slice(0, 26), r.use, `${fmtArch(z.w)} x ${fmtArch(z.d)}`, fmtSqFt(roomArea(r)) + (z.taped ? ' (tape)' : ''), c != null ? fmtArch(c) : '-']; });
   const tri = (v: string) => (v === 'yes' ? 'Yes' : v === 'no' ? 'No' : 'Not answered');
   const safety: [string, string][] = [['Bedrooms', q.adu.bedrooms === 0 ? 'Studio (main room counts as a sleeping room unless stated)' : String(q.adu.bedrooms)], ['Smoke and CO alarms on plan', tri(p.adu.smokeCoPlanned)], ['Smoke alarms hardwired with battery backup', tri(p.adu.smokeHardwired)], ['Sprinklers', tri(p.adu.sprinklered)], ['All-electric', tri(p.adu.allElectric)], ['Slab vapor barrier or epoxy coating', tri(p.adu.slabVaporBarrier)]];
@@ -354,7 +377,8 @@ function scheduleRows(p: Project, d: Drawing) {
 function floorSheets(p: Project, I: Info, o: SheetOpts): Sheet[] {
   const out: Sheet[] = []; const title = I.es ? 'PLANTA' : 'FLOOR PLAN';
   let sb = new SB('A-2', title, 'archd', 'floor'); let da = frame(sb, I, '');
-  const box: Rect = { x: da.x, y: da.y + 0.2, w: Math.min(14.5, da.w * 0.5), h: da.h - 1.75 };
+  // Sheet grid (review 3 F7): plan field on the left 7 of 12 columns, schedules on the right 5, so A-2 plots at 1/2" = 1'-0".
+  const col = da.w / 12; const box: Rect = { x: da.x, y: da.y + 0.2, w: col * 7 - 0.25, h: da.h - 1.75 };
   const { d, sc } = fitDraw(p, box, { es: I.es, scope: 'adu', minK: 24, userDims: o.userDims }); place(sb, d, sc, box);
   sb.items.filter(x => x.k === 't' && x.field === 'scale').forEach(x => { (x as SText).s = sc.label; });
   const by = da.y + da.h - 1.2; drawingTitle(sb, da.x + 0.25, by, '1', p.adu.rooms.length ? title : (I.es ? 'PLANTA (CONTORNO)' : 'FLOOR PLAN (OUTLINE)'), sc.label, 6);
@@ -370,7 +394,7 @@ function floorSheets(p: Project, I: Info, o: SheetOpts): Sheet[] {
     while (first || i < rows.length) { if (y + T1 * 6 > maxY) cont(); const r = table(sb, x0, y, first ? title2 : `${title2} (${I.es ? 'CONT.' : 'CONT.'})`, cols, rows.slice(i), maxY); y = r.y; i += r.next; first = false; if (i < rows.length) cont(); } };
   const fit = (ws: number[]) => { const k = Math.min(1, cw / ws.reduce((a, b) => a + b, 0)); return ws.map(w => w * k); };
   const dw = fit([0.8, 3.2, 1.3, 1.3, 1.4]); if (S.doorRows.length) run('DOOR SCHEDULE', ['MARK', 'ROOM', 'WIDTH', 'HEIGHT', 'TYPE'].map((h, i) => ({ h, w: dw[i] })), S.doorRows);
-  const ww = fit([0.8, 3.0, 1.2, 1.2, 1.1, 1.2, 1.3]); run('WINDOW SCHEDULE', ['MARK', 'ROOM', 'WIDTH', 'HEIGHT', 'SILL', 'ESCAPE', 'NET SQ FT'].map((h, i) => ({ h, w: ww[i] })), S.winRows.length ? S.winRows : [['-', 'No windows entered yet.', '', '', '', '', '']]);
+  const ww = fit([0.8, 2.6, 1.1, 1.1, 1.0, 1.75, 1.2]); run('WINDOW SCHEDULE', ['MARK', 'ROOM', 'WIDTH', 'HEIGHT', 'SILL', 'ESCAPE', 'NET SQ FT'].map((h, i) => ({ h, w: ww[i] })), S.winRows.length ? S.winRows : [['-', 'No windows entered yet.', '', '', '', '', '']]);
   const rw = fit([0.8, 3.0, 1.2, 2.3, 1.6, 1.1]); if (S.roomRows.length) run('ROOM SCHEDULE', ['NO.', 'ROOM', 'USE', 'SIZE', 'AREA', 'CEILING'].map((h, i) => ({ h, w: rw[i] })), S.roomRows);
   { const need = T2 * 1.5 + S.safety.length * T1 * 3.5; if (y + need > maxY) cont(); y = dataRows(sb, x0, y, Math.min(cw, 7), 'ROOMS AND SAFETY', S.safety); }
   if (d.keynotes.length) { if (y + 1.2 > maxY) cont(); y = legend(sb, x0, y, Math.min(cw, 7), d, I.es); }
@@ -409,7 +433,7 @@ function plotSheet(p: Project, I: Info, o: SheetOpts, paper: Exclude<PaperId, 'a
   sb.items.filter(x => x.k === 't' && x.field === 'scale').forEach(x => { (x as SText).s = sc.label; });
   const by = da.y + da.h - 1.0; drawingTitle(sb, da.x + 0.1, by, '1', sb.title, sc.label, 2.6);
   const end = scaleBar(sb, da.x + 0.1, by + 0.55, sc.k, 1.6); sb.text(Math.max(end + 0.25, da.x + 3.2), by - 0.02, T1, `Scale ${sc.label} on ${PAPER_IN[paper].label} sheet. Print at actual size.`, {});
-  const sd = siteData(p, I.es); let sy = by + 0.2; const sx = Math.max(end + 0.25, da.x + 3.2); for (const [a, b] of sd.slice(0, 4)) { sb.text(sx, sy, T1, `${a} ${b}`, {}); sy += T1 * 1.3; }
+  const sd = siteData(p, I.es); let sy = by + 0.2; const sx = Math.max(end + 0.25, da.x + 3.2); for (const [a, b] of sd) { sb.text(sx, sy, T1, `${a} ${b}`, {}); sy += T1 * 1.3; }
   northArrow(sb, da.x + da.w - 0.45, by + 0.35, 0.28, p.site.northDeg);
   labelPass(sb); return sb.done();
 }
@@ -418,7 +442,7 @@ function plotSheet(p: Project, I: Info, o: SheetOpts, paper: Exclude<PaperId, 'a
  * A-1.1 letter plot plan for the application (I.A.1). 11x17 or letter: the plot plan alone at that size. */
 export function buildSheets(p: Project, paper: PaperId = 'archd', o: SheetOpts = {}): Sheet[] {
   const es = o.es ?? p.people.language === 'es'; const g2 = p.markup.pins.length > 0 || p.markup.responses.length > 0 || !!o.markers?.length;
-  if (paper !== 'archd') { const I: Info = { p, es, kind: o.kind, index: [{ no: 'A-1', title: 'PLOT PLAN' }] }; return [plotSheet(p, I, o, paper, 'A-1')]; }
+  if (paper !== 'archd') { const I: Info = { p, es, kind: o.kind, index: [{ no: 'A-1.1', title: `PLOT PLAN ${PAPER_IN[paper].label}` }] }; return [plotSheet(p, I, o, paper, 'A-1.1')]; } // same ID as the set's sheet index (review 3 F3)
   const index = sheetIndex(p, !!o.markers?.length);
   const I: Info = { p, es, kind: o.kind, index };
   return [siteSheet(p, I, o), ...floorSheets(p, I, o), ...(g2 ? markupSheets(p, I, o) : []), plotSheet(p, I, o, 'letter', 'A-1.1')];
@@ -434,3 +458,25 @@ export function screenSheet(p: Project, id: 'a1' | 'a2' | 'g2', o: SheetOpts = {
   return id === 'a1' ? siteSheet(p, I, o) : id === 'a2' ? floorSheets(p, I, o)[0] : markupSheets(p, I, o)[0];
 }
 void roomAbs;
+/** Model space gets the same label pass as the sheets (review 3 F5: KITCHEN on RANGE, SHWR on BATH, dims over dims).
+ * The drawing is taken to paper inches at its annotation scale (mm per plotted inch), labels are moved there, then mapped back. */
+export function labelDrawing(d: Drawing, mmPerIn: number): Drawing {
+  const sb = new SB('M', 'MODEL', 'archd', 'site'); const k = mmPerIn;
+  const tr = (s: string, f: (v: number) => number) => s.replace(/(-?[\d.]+) (-?[\d.]+)/g, (_, a, b) => `${f4(f(+a))} ${f4(f(+b))}`);
+  const P = d.prims.map(x => { const it: SPath = { k: 'p', layer: x.layer, d: tr(x.d, v => v / k), lw: x.lw, fill: x.fill, stroke: x.stroke, g: x.g }; sb.items.push(it); return it; });
+  const Tm = d.texts.map(t => { const h = t.h / k; let x = t.x / k, y = t.y / k; if (t.mid) { const r = ((t.rot ?? 0) * Math.PI) / 180; const dy = 0.36 * h; x += -Math.sin(r) * dy; y += Math.cos(r) * dy; }
+    const it: SText = { k: 't', layer: t.layer, x, y, h, s: t.s, anchor: t.anchor, rot: t.rot, bold: t.bold, g: t.g, slide: t.slide }; sb.items.push(it); return it; });
+  const stuck = new Set<SText>(); labelPass(sb, 6, stuck); // model space: a label stays near its object (a tag never leaves its room); a clash it cannot fix stays put
+  const texts = d.texts.flatMap((t, i) => { const m = Tm[i]; return stuck.has(m) ? [] : [{ ...t, x: m.x * k, y: m.y * k, mid: false, g: m.g }]; });
+  const gone = new Set([...stuck].map(t => t.g).filter(g => g && !g.startsWith('dim')));
+  const prims = d.prims.flatMap((x, i) => (x.g && gone.has(x.g) ? [] : [P[i].d === tr(x.d, v => v / k) ? x : { ...x, d: tr(P[i].d, v => v * k) }]));
+  for (const it of sb.items.slice(P.length + Tm.length)) if (it.k === 'p') prims.push({ layer: it.layer as Drawing['prims'][number]['layer'], lw: it.lw, d: tr(it.d, v => v * k), g: it.g });
+  return { ...d, prims, texts };
+}
+/** Overlaps of a model-space drawing measured at its plotted size (for tests). */
+export function modelOverlaps(d: Drawing, mmPerIn: number) {
+  const k = mmPerIn; const tr = (s: string) => s.replace(/(-?[\d.]+) (-?[\d.]+)/g, (_, a, b) => `${f4(+a / k)} ${f4(+b / k)}`);
+  const items: SItem[] = [...d.prims.map((x): SPath => ({ k: 'p', layer: x.layer, d: tr(x.d), lw: x.lw, stroke: x.stroke, g: x.g })),
+    ...d.texts.map((t): SText => { const h = t.h / k; let x = t.x / k, y = t.y / k; if (t.mid) { const r = ((t.rot ?? 0) * Math.PI) / 180; x += -Math.sin(r) * 0.36 * h; y += Math.cos(r) * 0.36 * h; } return { k: 't', layer: t.layer, x, y, h, s: t.s, anchor: t.anchor, rot: t.rot, bold: t.bold, g: t.g }; })];
+  return overlaps({ items });
+}

@@ -17,7 +17,7 @@ for (const paper of ['tabloid', 'letter'] as const) it(`${paper}: one plot plan 
   expect([Math.round(doc.getPage(0).getWidth()), Math.round(doc.getPage(0).getHeight())]).toEqual([PAPER[paper].w * 72, PAPER[paper].h * 72]);
   expect(Math.min(...out[0])).toBeGreaterThanOrEqual(9);
   const text = (await pdfRuns(b))[0].runs.map(r => r.text).join(' ');
-  expect(text).toMatch(new RegExp(`Scale .* on ${PAPER[paper].label} sheet`)); expect(text).toMatch(/ADU SETBACK/); expect(text).toMatch(/FEET/);
+  expect(text).toMatch(new RegExp(`Scale .* on ${PAPER[paper].label} sheet`)); expect(text).toMatch(/REQUIRED SETBACK, SIDE AND REAR 4'-0"/); expect(text).toMatch(/ADU TO (SIDE|REAR) LOT LINE/); expect(text).toMatch(/FEET/);
 });
 it('the scale is the largest standard one that fits, and a bigger lot gets a smaller scale', () => {
   const [s1] = fitScale(50, 150, 7 * 72, 7 * 72); const [s2] = fitScale(100, 300, 7 * 72, 7 * 72);

@@ -9,7 +9,7 @@ import { readFileSync, existsSync, statSync } from 'node:fs';
 import { join, extname, resolve } from 'node:path';
 import { mkdirSync, writeFileSync } from 'node:fs';
 import { check, pdfPage } from './sheetcheck.mjs';
-const SHOTS = process.env.SHOTS ?? '/home/claude/stress/cad_shots/v3'; try { mkdirSync(SHOTS, { recursive: true }); } catch { /* read-only: no shots */ }
+const SHOTS = process.env.SHOTS ?? '/home/claude/stress/cad_shots/v4'; try { mkdirSync(SHOTS, { recursive: true }); } catch { /* read-only: no shots */ }
 
 const here = new URL('.', import.meta.url).pathname; const DIST = process.env.DIST ?? resolve(here, '../dist');
 const PDFJS = resolve(here, '../node_modules/pdfjs-dist/build');
@@ -18,10 +18,10 @@ const MIME = { '.html': 'text/html', '.js': 'text/javascript', '.css': 'text/css
 const server = createServer((req, res) => { const u = new URL(req.url, 'http://x'); if (u.pathname.startsWith('/__pdfjs/')) { const f = join(PDFJS, u.pathname.slice(9)); if (existsSync(f)) { res.writeHead(200, { 'content-type': 'text/javascript' }); res.end(readFileSync(f)); } else { res.writeHead(404); res.end(); } return; } let f = join(DIST, decodeURIComponent(u.pathname.replace('/open-permit-hub/', '')) || 'index.html'); if (existsSync(f) && statSync(f).isDirectory()) f = join(f, 'index.html'); if (!existsSync(f)) { res.writeHead(404).end(); return; } res.writeHead(200, { 'content-type': MIME[extname(f)] ?? 'application/octet-stream' }).end(readFileSync(f)); });
 await new Promise(r => server.listen(0, '127.0.0.1', r)); const BASE = `http://127.0.0.1:${server.address().port}/open-permit-hub/`;
 const browser = await chromium.launch(); const SVG = '[data-testid=viewport] svg';
-const open = async (width, { pro = true, scheme = 'light' } = {}) => {
-  const phone = width < 600; const c = await browser.newContext({ viewport: { width, height: phone ? 844 : width <= 1024 ? 768 : 900 }, colorScheme: scheme, hasTouch: phone, isMobile: phone, deviceScaleFactor: phone ? 2 : 1 });
+const open = async (width, { pro = true, scheme = 'light', state, demo = true } = {}) => {
+  const phone = width < 600; const c = await browser.newContext({ storageState: state, viewport: { width, height: phone ? 844 : width <= 1024 ? 768 : 900 }, colorScheme: scheme, hasTouch: phone, isMobile: phone, deviceScaleFactor: phone ? 2 : 1 });
   const page = await c.newPage(); if (pro) await page.addInitScript(() => { try { localStorage.setItem('opa.ws', 'pro'); } catch { /* */ } });
-  await page.goto(BASE); await page.getByRole('button', { name: /Try the demo lot/ }).click(); if (pro) { await page.locator(SVG).waitFor(); await page.waitForTimeout(500); } return { c, page };
+  await page.goto(BASE); if (demo) await page.getByRole('button', { name: /Try the demo lot/ }).click(); else { /* the saved project reopens where it was left */ } if (pro) { await page.locator(SVG).waitFor(); await page.waitForTimeout(500); } return { c, page };
 };
 const plan = async page => { const cmd = async (...l) => { for (const x of l) { await page.locator('#pw-cmd-in').fill(x); await page.locator('#pw-cmd-in').press('Enter'); } };
   await cmd('RM', 'BED', '28.5,108.5', '37.5,119.5'); await cmd('RM', 'BATH', '37.9,108.5', '47.5,115'); await cmd('RM', 'KITCHEN', '37.9,115.4', '47.5,127.5'); await cmd('RM', 'LIVING', '28.5,119.9', '37.5,127.5');
@@ -103,11 +103,12 @@ const sheetOk = (where, r, a2) => {
   ok(r.minSize >= 0.125 - 1e-3, `${where}: all text at least 1/8" plotted (${(r.minSize * 72).toFixed(1)} pt)`); ok(r.fields.length === 0 && !!r.sheetNo, `${where}: title block fields present (sheet ${r.sheetNo})`, r.fields.join(', '));
   if (a2) { ok(!!r.scale && r.scale.err <= 1 / 32, `${where}: a 20 ft wall measures ${r.scale?.wallIn.toFixed(4)}" at ${r.scale?.label} (within 1/32")`, JSON.stringify(r.scale));
     ok(['A-WALL', 'A-DOOR', 'A-GLAZ', 'A-DOOR-IDEN', 'A-GLAZ-IDEN', 'A-AREA-IDEN'].every(l => r.layers.includes(l)), `${where}: A-2 has walls, doors, windows and tags`, r.layers.join(',')); } };
+let a2Desk = null, deskState = null;
 for (const [w, scheme] of [[1440, 'light'], [1440, 'dark'], [1024, 'light']]) { const { c, page } = await open(w, { scheme }); await plan(page);
   for (const [tab, no] of [['A-1 Site', 'A-1'], ['A-2 Floor', 'A-2'], ['G-2 Markup', 'G-2']]) { await page.getByRole('tab', { name: tab }).click(); await page.waitForTimeout(500);
-    const d = await sheetData(page); ok(d?.no === no, `${w} ${scheme}: tab ${tab} shows sheet ${no}`); if (!d) continue; sheetOk(`screen ${w} ${scheme} ${no}`, check(d), no === 'A-2');
+    const d = await sheetData(page); if (w === 1440 && scheme === 'light' && no === 'A-2' && d) a2Desk = d.texts.map(t => t.s).sort(); ok(d?.no === no, `${w} ${scheme}: tab ${tab} shows sheet ${no}`); if (!d) continue; sheetOk(`screen ${w} ${scheme} ${no}`, check(d), no === 'A-2');
     await page.screenshot({ path: join(SHOTS, `screen-${w}-${scheme}-${no}.png`) }).catch(() => {}); }
-  if (w === 1440 && scheme === 'light') {
+  if (w === 1440 && scheme === 'light') { deskState = await c.storageState({ indexedDB: true });
     await page.getByRole('tab', { name: 'Model' }).click(); await page.waitForTimeout(300);
     const t = await page.evaluate(() => [...document.querySelectorAll('[data-testid=viewport] svg text')].map(x => x.textContent));
     ok(!t.some(s => /^(STREET|KEYNOTES|GRAPHIC SCALE|N)$/.test(s)), 'Model space has no sheet annotation (north arrow, keynote legend, graphic scale, STREET)');
@@ -127,7 +128,12 @@ for (const [w, scheme] of [[1440, 'light'], [1440, 'dark'], [1024, 'light']]) { 
       ok(imgs.length === doc.numPages, `PDF ${tag}: ${imgs.length} pages rasterized with pdf.js`); imgs.forEach((b, i) => { try { writeFileSync(join(SHOTS, `pdf-${tag}-p${i + 1}.png`), Buffer.from(b, 'base64')); } catch { /* */ } }); }
   }
   await c.close(); }
+// Review 3 F2: the phone opens the same project and its A-2 is the same sheet (same text, same model) as desktop.
+{ const { c, page } = await open(390, { state: deskState, demo: false }); await page.getByRole('tab', { name: 'A-2 Floor' }).click(); await page.waitForTimeout(500);
+  const d = await sheetData(page); const ph = d ? d.texts.map(t => t.s).sort() : [];
+  ok(!!a2Desk && JSON.stringify(ph) === JSON.stringify(a2Desk) && ph.includes('BEDROOM'), `390 vs 1440: A-2 is the same sheet (${ph.length} texts, rooms and schedules)`, JSON.stringify({ phone: ph.length, desk: a2Desk?.length, only: ph.filter(x => !a2Desk?.includes(x)).slice(0, 5) }));
+  sheetOk('screen 390 A-2', check(d), true); await page.screenshot({ path: join(SHOTS, 'screen-390-A-2.png') }).catch(() => {}); await c.close(); }
 { const { c, page } = await open(390); const tabs = await page.getByRole('tab', { name: 'A-2 Floor' }).count(); ok(tabs === 1 && await page.getByRole('tab', { name: 'A-2 Floor' }).isVisible(), '390: sheet tabs reachable on the phone');
   ok(await page.getByRole('button', { name: 'Line', exact: true }).isVisible(), '390: the Line tool is in the phone tool bar');
-  await page.getByRole('tab', { name: 'A-2 Floor' }).click(); await page.waitForTimeout(400); ok((await sheetData(page))?.no === 'A-2', '390: A-2 opens on the phone'); await page.screenshot({ path: join(SHOTS, 'screen-390-A-2.png') }).catch(() => {}); await c.close(); }
+  await page.getByRole('tab', { name: 'A-2 Floor' }).click(); await page.waitForTimeout(400); ok((await sheetData(page))?.no === 'A-2', '390: A-2 opens on the phone'); await c.close(); }
 await browser.close(); server.close(); console.log(failed ? `${failed} FAILED` : 'ALL PASS'); process.exit(failed ? 1 : 0);

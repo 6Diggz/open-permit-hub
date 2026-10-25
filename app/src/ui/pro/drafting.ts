@@ -5,6 +5,7 @@ import { bbox, area, clearanceToEdge, onOutline, type Poly, type Pt } from '../.
 import { ft, inch, fmtFtIn, toSqFt } from '../../core/units';
 import { roomAbs, applyTape, roomArea } from '../../core/rooms';
 import { entSegs } from '../../core/cad';
+import { SIDE_REAR_SETBACK_MM, setbackKeynote } from '../../core/sitefacts';
 
 /** NCS (US National CAD Standard) layer names used by the workspace. */
 export const LAYERS = [
@@ -235,7 +236,7 @@ export function draft(p: Project, o: DraftOpts): Drawing {
   const lotOff = A * (DIMSTY.first + DIMSTY.tier);
   let street: Drawing['street'] = null;
   // Setbacks: 4 ft inside side and rear lines (dashed).
-  const sb = offsetInward(lot, i => (streets.has(i) ? 0 : ft(4)));
+  const sb = offsetInward(lot, i => (streets.has(i) ? 0 : SIDE_REAR_SETBACK_MM));
   const hs = p.site.primary; const hb = bbox(hs);
   if (site) {
     prims.push({ layer: 'C-PROP', lw: PEN['C-PROP'], d: ring(lot), dash: 'phantom', obj: 'lot' });
@@ -334,12 +335,12 @@ export function draft(p: Project, o: DraftOpts): Drawing {
     const b = bbox(pl); const Wd = b.maxX - b.minX, Dp = b.maxY - b.minY; const fx0 = detail === 'plan' && (r.use === 'bath' || r.use === 'kitchen' || r === wh);
     const c = !fx0 ? { x: (b.minX + b.maxX) / 2, y: (b.minY + b.maxY) / 2 } : Wd >= Dp ? { x: (b.minX + b.maxX) / 2, y: b.minY + Math.max(Math.min(Dp * 0.5, hRoom * 2.2), Math.min(Dp * 0.36, Dp - inch(30) - hRoom * 2.6)) } : { x: b.minX + Math.max(Math.min(Wd * 0.5, h * 3), Math.min(Wd * 0.36, Wd - inch(30) - h * 1.6)), y: (b.minY + b.maxY) / 2 };
     const nm = (r.name.trim() || (es ? 'CUARTO' : 'ROOM')).toUpperCase(); const no = String(101 + ri);
-    if (detail === 'plan') {
-      T({ layer: 'A-AREA-IDEN', x: c.x, y: -c.y - hRoom * 1.05, h: hRoom, s: nm, anchor: 'middle', bold: true, obj: 'room:' + r.id, mid: true, mask: true });
-      const bw = h * 3.2, bh = h * 1.7; const g = gid('room'); prims.push({ layer: 'A-AREA-IDEN', lw: 0.09, d: ring([{ x: c.x - bw / 2, y: c.y + bh / 2 }, { x: c.x + bw / 2, y: c.y + bh / 2 }, { x: c.x + bw / 2, y: c.y - bh / 2 }, { x: c.x - bw / 2, y: c.y - bh / 2 }]), fill: 'bg', stroke: false, obj: 'room:' + r.id, g });
+    if (detail === 'plan') { const g = gid('room'); // one room tag: name, number box and area move together in the label pass
+      T({ layer: 'A-AREA-IDEN', x: c.x, y: -c.y - h * 0.85 - hRoom * 0.75, h: hRoom, s: nm, anchor: 'middle', bold: true, obj: 'room:' + r.id, mid: true, mask: true, g });
+      const bw = h * 3.2, bh = h * 1.7; prims.push({ layer: 'A-AREA-IDEN', lw: 0.09, d: ring([{ x: c.x - bw / 2, y: c.y + bh / 2 }, { x: c.x + bw / 2, y: c.y + bh / 2 }, { x: c.x + bw / 2, y: c.y - bh / 2 }, { x: c.x - bw / 2, y: c.y - bh / 2 }]), fill: 'bg', stroke: false, obj: 'room:' + r.id, g });
       prims.push({ layer: 'A-AREA-IDEN', lw: PEN['A-AREA-IDEN'], d: ring([{ x: c.x - bw / 2, y: c.y + bh / 2 }, { x: c.x + bw / 2, y: c.y + bh / 2 }, { x: c.x + bw / 2, y: c.y - bh / 2 }, { x: c.x - bw / 2, y: c.y - bh / 2 }]), obj: 'room:' + r.id, g });
       T({ layer: 'A-AREA-IDEN', x: c.x, y: -c.y, h, s: no, anchor: 'middle', obj: 'room:' + r.id, mid: true, g });
-      T({ layer: 'A-AREA-IDEN', x: c.x, y: -c.y + bh / 2 + h * 0.85, h, s: `${Math.round(toSqFt(roomArea(r)))} ${es ? 'P²' : 'SF'}`, anchor: 'middle', obj: 'room:' + r.id, mid: true, mask: true });
+      T({ layer: 'A-AREA-IDEN', x: c.x, y: -c.y + bh / 2 + h * 0.85, h, s: `${Math.round(toSqFt(roomArea(r)))} ${es ? 'P²' : 'SF'}`, anchor: 'middle', obj: 'room:' + r.id, mid: true, mask: true, g });
     } else T({ layer: 'A-AREA-IDEN', x: c.x, y: -c.y, h: Math.min(h, (b.maxX - b.minX) * 0.86 / (nm.length * 0.72)), s: nm, anchor: 'middle', obj: 'room:' + r.id, mid: true, mask: true });
   });
 
@@ -363,11 +364,11 @@ export function draft(p: Project, o: DraftOpts): Drawing {
       else dim({ x: fb.maxX, y: fb.minY }, { x: fb.maxX, y: fb.maxY }, -t1, fmtArch(fb.maxY - fb.minY), 'ink', 'adu');
     }
     lot.forEach((a, i) => { if (streets.has(i)) return; const b = lot[(i + 1) % lot.length]; const [q0, q1] = clearancePair(fp, a, b); const d = len(sub(q1, q0)); if (d < 1 || d > ft(60)) return;
-      dim(q0, q1, 0, fmtArch(d), d < ft(4) - 0.5 ? 'fix' : 'ink', 'adu'); });
+      dim(q0, q1, 0, fmtArch(d), d < SIDE_REAR_SETBACK_MM - 0.5 ? 'fix' : 'ink', 'adu'); });
     // Keynotes (numbered hexagons with leaders; the legend is on each sheet).
     { const side = lot.findIndex((_, i) => !streets.has(i)); if (side >= 0) { const a = lot[side], b = lot[(side + 1) % lot.length], s0 = sb[side], s1 = sb[(side + 1) % lot.length]; const nv = inward(lot, side); const u = unit(sub(b, a));
         const pt = add(a, u, len(sub(b, a)) * 0.22); keynote(es ? 'LINDERO DE PROPIEDAD' : 'PROPERTY LINE', pt, add(add(pt, nv, ft(4) + A * 0.55), u, -A * 0.35), 'lot');
-        const st = add(s0, unit(sub(s1, s0)), len(sub(s1, s0)) * 0.32); keynote(es ? `RETIRO DE 4'-0"` : `4'-0" SETBACK LINE`, st, add(add(st, nv, A * 0.55), u, -A * 0.35)); } }
+        const st = add(s0, unit(sub(s1, s0)), len(sub(s1, s0)) * 0.32); keynote(setbackKeynote(es, fmtArch), st, add(add(st, nv, A * 0.55), u, -A * 0.35)); } }
     { const to = { x: hb.minX + (hb.maxX - hb.minX) * 0.2, y: hb.maxY }; keynote(es ? '(E) VIVIENDA; FUERA DEL ALCANCE' : '(E) RESIDENCE; NOT IN SCOPE', to, add(to, { x: -0.35, y: 0.94 }, A * 0.6), 'house'); }
   } else {
     // Floor plan dimension strings outside each exterior wall, in tiers: tier 1 locates openings and partitions (to centerlines),
@@ -398,7 +399,7 @@ export function draft(p: Project, o: DraftOpts): Drawing {
     const layer = e.layer as LayerId; const lw = PEN[layer] ?? 0.25; const obj = 'ent:' + e.id;
     if (e.t === 'dim' && e.pts.length >= 2) { const [a, b] = e.pts; const L0 = Math.hypot(b.x - a.x, b.y - a.y) || 1; const u = e.rot != null ? { x: Math.cos(e.rot), y: Math.sin(e.rot) } : { x: (b.x - a.x) / L0, y: (b.y - a.y) / L0 };
       const t = (b.x - a.x) * u.x + (b.y - a.y) * u.y; const b2 = add(a, u, t); const ref = { a, b: b2, text: e.text ?? fmtArch(Math.abs(t)) }; if (!dims.some(x => sameDim(x, ref) || sameSpan(x, ref))) { dims.push(ref); const dd = dimension(a, b2, e.off ?? 0, A, ref.text, 'ink', obj); prims.push(...dd.prims); texts.push(...dd.texts); } continue; }
-    if (e.t === 'text') { const th = Math.max(e.h ?? h, h); (e.text ?? '').split('\n').forEach((ln, i) => T({ layer, x: e.pts[0].x, y: -e.pts[0].y + th * 1.45 * i, h: th, s: ln, rot: e.rot ? -(e.rot * 180) / Math.PI : undefined, obj })); continue; }
+    if (e.t === 'text') { /* annotative: standard 1/8" note height at every scale */ const th = h; (e.text ?? '').split('\n').forEach((ln, i) => T({ layer, x: e.pts[0].x, y: -e.pts[0].y + th * 1.45 * i, h: th, s: ln, rot: e.rot ? -(e.rot * 180) / Math.PI : undefined, obj })); continue; }
     const sg = entSegs(e); if (sg.length) prims.push({ layer, lw, d: sg.map(([a, b]) => line(a, b)).join(''), obj });
     if (e.t === 'leader' && e.pts.length >= 2) { prims.push(...leaderPrims(layer, e.pts[0], e.pts[1], A, obj).map(x => ({ ...x, lw: Number.isFinite(x.lw) ? x.lw : lw }))); const q = e.pts[e.pts.length - 1]; const right = q.x >= (e.pts[e.pts.length - 2] ?? q).x; T({ layer, x: q.x + (right ? h * 1.3 : -h * 1.3), y: -q.y, h, s: e.text ?? '', anchor: right ? 'start' : 'end', mid: true, obj }); }
   }

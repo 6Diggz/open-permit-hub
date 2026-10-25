@@ -253,7 +253,7 @@ export function analyze(pagesIn: PageText[], totalPages = pagesIn.length): PlanC
   // Key dimensions
   const setbacks: PlanCheck['dims']['setbacks'] = []; const ceilings: Dim[] = []; const windows: WindowSize[] = [];
   for (const l of all) {
-    if (/set\s?-?backs?|side yard|rear yard|front yard|\bfrom (?:the )?(?:property|lot) line\b|\btoP\.?L\.?|\bto\s?p\.l\./i.test(l.text)) {
+    if (/set\s?-?backs?|side yard|rear yard|front yard|\bfrom (?:the )?(?:property|lot) line\b|\bto (?:the )?(?:side |rear |front )?(?:property|lot) line\b|\btoP\.?L\.?|\bto\s?p\.l\./i.test(l.text)) {
       const side = /side/i.test(l.text) ? 'side' : /rear/i.test(l.text) ? 'rear' : /front/i.test(l.text) ? 'front' : 'any';
       for (const x of lengthsIn(l.text)) if (x.v <= 12 * 200) setbacks.push({ page: l.page, inches: x.v, text: clip(l.text), side });
     }

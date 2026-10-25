@@ -9,7 +9,7 @@ import { type Ent, entDist, inWindow, arcPt, cloudPts, entSnaps, entSegs } from 
 import { draft, annoScaleFor, fmtArch, readable, lwPx, MIN_TEXT_PX, DIMSTY, PEN, LAYERS, SCALES } from './drafting';
 import { layoutPins, obstacles, type PinOut } from './pins';
 import { Graphics, lwDisp } from './graphics';
-import { screenSheet, type Sheet, type Marker } from '../../out/sheet';
+import { screenSheet, labelDrawing, type Sheet, type Marker } from '../../out/sheet';
 import { lockedLayerAt, fit, zoomAt, viewBox, gridPaths, snapPoint, snapSet, ortho, polar, hitTest, selOutline, selKey, isAxisRect, dragCorner, toUnits, type Cam, type Sel, type Snap } from './view';
 import { dimGeom } from './cmd';
 import type { Issue } from './issues';
@@ -106,7 +106,7 @@ export const Canvas = forwardRef<CanvasApi, CanvasProps>(function Canvas(P0, ref
   const paper = sheet !== 'model';
   const anno = useMemo(() => (cam && !paper ? annoScaleFor(cam.k) : SCALES[6]), [cam?.k, paper]); // eslint-disable-line react-hooks/exhaustive-deps
   const userDims = useMemo(() => ents.filter(e => e.t === 'dim' && e.pts.length >= 2).map(e => ({ a: e.pts[0], b: e.pts[1] })), [ents]);
-  const site = useMemo(() => draft(p, { anno: anno.k * 25.4, es, userDims }), [p, anno.k, es, P0.units, userDims]); // eslint-disable-line react-hooks/exhaustive-deps
+  const site = useMemo(() => labelDrawing(draft(p, { anno: anno.k * 25.4, es, userDims }), anno.k * 25.4), [p, anno.k, es, P0.units, userDims]); // eslint-disable-line react-hooks/exhaustive-deps
   const sheetModel = useMemo(() => (paper ? screenSheet(p, sheet as 'a1' | 'a2' | 'g2', { es, userDims, markers: P0.issues.filter(i => i.at && i.n).map((i): Marker => ({ key: 'issue:' + i.id, n: String(i.n), at: i.at!, tone: i.status === 'FAIL' ? 'fix' as const : 'need' as const, text: `${i.r.rule.id} ${i.r.rule.title[es ? 'es' : 'en']}` }))
     .concat(p.markup.pins.map(x => ({ key: 'pin:' + x.id, n: 'R' + x.n, at: { x: x.x, y: x.y }, tone: x.status === 'open' ? 'rev' as const : 'done' as const, text: x.comment || '(no text)' }))) }) : null), [paper, sheet, p, es, P0.units, userDims, P0.issues]); // eslint-disable-line react-hooks/exhaustive-deps
   const extents = useMemo(() => { if (paper) return { minX: 0, minY: 0, maxX: sheetModel?.w ?? 36, maxY: sheetModel?.h ?? 24 }; const e = { ...site.extents }; for (const x of ents) for (const q of x.pts) { e.minX = Math.min(e.minX, q.x - ft(2)); e.maxX = Math.max(e.maxX, q.x + ft(2)); e.minY = Math.min(e.minY, -q.y - ft(2)); e.maxY = Math.max(e.maxY, -q.y + ft(2)); } return e; }, [paper, site.extents, ents, sheetModel?.w]);
