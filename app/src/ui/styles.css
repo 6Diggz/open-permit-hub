@@ -155,3 +155,12 @@ label.btn[aria-disabled="true"] { opacity: .45; cursor: progress; }
 .fm-hc .fm-result button[data-s="fail"][aria-pressed="true"] { background: #8c1b12; }
 .fm-hc .btn, .fm-hc .fm-big, .fm-hc input, .fm-hc select, .fm-hc .tri button { min-height: 56px; min-width: 56px; }
 .fm-hc .field input, .fm-hc .field select { font-size: 1.05rem; }
+/* r4reach-11: right-to-left languages (Farsi). The page mirrors through dir="rtl" (grid, flex, text); the site plan and the
+   room drawing never mirror (north, street and dimensions must match the real lot), and sizes typed like 20' 6" stay left to right. */
+[dir="rtl"] .drawing, [dir="rtl"] .drawing svg { direction: ltr; }
+[dir="rtl"] .drawing .hint { left: auto; right: 12px; direction: rtl; }
+[dir="rtl"] .side { border-left: 0; border-right: 1px solid var(--rule); }
+[dir="rtl"] .rail { border-right: 0; border-left: 1px solid var(--rule); }
+[dir="rtl"] input[type="number"], [dir="rtl"] input[inputmode="decimal"], [dir="rtl"] input[type="date"] { direction: ltr; text-align: right; }
+/* English rule text, sheet items and citations inside an RTL page keep their own direction (no "on the garage side." flipped). */
+[dir="rtl"] :is(p, label, li, summary, h2, h3, td, th, .help, .title, .sub, .verdict) { unicode-bidi: plaintext; }

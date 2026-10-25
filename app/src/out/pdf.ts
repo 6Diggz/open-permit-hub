@@ -4,7 +4,7 @@ import type { Report } from '../rules/engine';
 import { bbox, clearanceToEdge, gap } from '../core/geom';
 import { PACK, PACK_ID, rulesLine } from '../rules/pack';
 import { streetName } from './dxf';
-import { safe, missingGlyphNote } from './glyphs';
+import { safe, missingGlyphNote, typed } from './glyphs';
 import { sheetFonts, drawT } from './pdffonts';
 export { missingGlyphNote };
 import { toSqFt } from '../core/units';
@@ -32,7 +32,7 @@ const setLang = (doc: PDFDocument, lang: string) => doc.catalog.set(PDFName.of('
 /** ARCH D (24x36) sheet with true-scale site plan, scale bar, north arrow, title block. */
 async function sitePlanSheet(doc: PDFDocument, p: Project, kind: Kind, sheets: string[]) {
   const W = 36 * PT_PER_IN, H = 24 * PT_PER_IN; const pg = doc.addPage([W, H]);
-  const { f, fb } = await sheetFonts(doc);
+  const { f, fb } = await sheetFonts(doc, typed(p));
   pg.drawRectangle({ x: 36, y: 36, width: W - 72, height: H - 72, borderColor: INK, borderWidth: 1.5 });
   const tbX = W - 36 - TB_W;
   // drawing area
@@ -130,7 +130,7 @@ function sigBlock(pg: PDFPage, x: number, y: number, w: number, f: PDFFont, p: P
 /** Sheet A-2: floor plan data from the Rooms step (ADU outline at 1/4" = 1'-0", window schedule with escape tags, alarms, areas). */
 async function floorPlanSheet(doc: PDFDocument, p: Project, kind: Kind) {
   const W = 36 * PT_PER_IN, H = 24 * PT_PER_IN; let pg = doc.addPage([W, H]); const first = pg;
-  const { f, fb } = await sheetFonts(doc);
+  const { f, fb } = await sheetFonts(doc, typed(p));
   pg.drawRectangle({ x: 36, y: 36, width: W - 72, height: H - 72, borderColor: INK, borderWidth: 1.5 });
   const ab = bbox(p.adu.footprint); const k = (0.25 * PT_PER_IN) / MM_PER_FT; const ox = 108, oy = 260;
   p.adu.footprint.forEach((a, i) => { const b = p.adu.footprint[(i + 1) % p.adu.footprint.length]; pg.drawLine({ start: { x: ox + (a.x - ab.minX) * k, y: oy + (a.y - ab.minY) * k }, end: { x: ox + (b.x - ab.minX) * k, y: oy + (b.y - ab.minY) * k }, thickness: 4, color: INK }); });
@@ -181,7 +181,7 @@ async function floorPlanSheet(doc: PDFDocument, p: Project, kind: Kind) {
 
 /** Sheet G-2: review markup. Numbered pins drawn on a small site plan, the pin list, and correction-letter responses. */
 async function markupSheet(doc: PDFDocument, p: Project) {
-  const W = 36 * PT_PER_IN, H = 24 * PT_PER_IN; const { f, fb } = await sheetFonts(doc);
+  const W = 36 * PT_PER_IN, H = 24 * PT_PER_IN; const { f, fb } = await sheetFonts(doc, typed(p));
   const newPage = (cont: boolean) => { const pg = doc.addPage([W, H]); pg.drawRectangle({ x: 36, y: 36, width: W - 72, height: H - 72, borderColor: INK, borderWidth: 1.5 });
     drawT(pg, cont ? 'REVIEW MARKUP (CONTINUED)' : 'REVIEW MARKUP', { x: 60, y: H - 80, size: 20, font: fb, color: INK });
     drawT(pg, safe(`G-2 Review markup   ${p.site.address || p.name}   APN ${p.site.apn || '-'}   Notes travel in the .permitpack file.`), { x: 60, y: 54, size: 10, font: f, color: INK });
@@ -230,7 +230,7 @@ const STAT: Record<string, [string, string, ReturnType<typeof rgb>]> = {
 };
 export async function reportPDF(p: Project, rep: Report, lang: 'en' | 'es' = p.people.language) {
   const doc = await PDFDocument.create(); doc.setTitle(`${p.name} - check report`); setLang(doc, lang === 'es' ? 'es-US' : 'en-US');
-  const { f, fb } = await sheetFonts(doc);
+  const { f, fb } = await sheetFonts(doc, typed(p));
   let pg: PDFPage = doc.addPage([612, 792]); let y = 740; const L = 54, Wd = 504;
   const line = (t: string, size = 10, font = f, color = INK, indent = 0) => { for (const l of wrap(safe(t), font, size, Wd - indent)) { if (y < 60) { pg = doc.addPage([612, 792]); y = 740; } drawT(pg, l, { x: L + indent, y, size, font, color }); y -= size + 4; } };
   const es = lang === 'es';
@@ -241,7 +241,7 @@ export async function reportPDF(p: Project, rep: Report, lang: 'en' | 'es' = p.p
   line(verdictOf(p, rep).plain[es ? 'es' : 'en'], 10, fb, INK); // r5whole-05: the same plain answer as the check card
   const fr = rulesLine(p.applicationDate, rep.pack, es);
   line(fr.text, 9, f, fr.stale ? AMBER : MUTE);
-  line(es ? `Base del código: la hoja LADBS cita ${PACK.sheet.codes}; ciclo estatal ${PACK.stateCycle}. ${PACK.localCycleNote}` : `Code basis: the LADBS sheet cites ${PACK.sheet.codes}; state cycle ${PACK.stateCycle}. ${PACK.localCycleNote}`, 8, f, MUTE);
+  line(es ? `Base del código: la hoja LADBS cita ${PACK.sheet.codes}; ciclo estatal: ${PACK.stateCycleEs}. ${PACK.localCycleNoteEs}` : `Code basis: the LADBS sheet cites ${PACK.sheet.codes}; state cycle ${PACK.stateCycle}. ${PACK.localCycleNote}`, 8, f, MUTE);
   line(`${es ? 'Revisiones de reglas' : 'Rule checks'}: ${es ? 'Cumple' : 'Pass'} ${rep.counts.PASS} / ${es ? 'Corregir' : 'Fix'} ${rep.counts.FAIL} / ${es ? 'Falta info' : 'Need info'} ${rep.counts.UNKNOWN} / ${es ? 'No revisado' : 'Not checked'} ${rep.counts.NOT_CHECKED}`, 10, fb, INK);
   line((es ? 'Puntos de la hoja LADBS: ' : 'LADBS sheet items: ') + scoreLine(readiness(p, rep), es) + ` - ${PACK.sheet.form} Rev ${PACK.sheet.rev}`, 10, fb, INK);
   line(es ? 'Una revisión de regla puede cubrir varios puntos de la hoja, así que los dos números de "corregir" pueden ser distintos.' : 'One rule check can cover several sheet items, so the two "fix" numbers can differ.', 8, f, MUTE);

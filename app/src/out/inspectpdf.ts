@@ -4,7 +4,7 @@ import type { Project } from '../core/model';
 import { INSP_ITEMS, GROUPS, result, tally, fieldConflicts, appFailMap } from '../core/inspection';
 import { getVerdict } from '../core/verdict';
 import { sheetFonts } from './pdffonts';
-import { safe } from './glyphs';
+import { safe, typed } from './glyphs';
 
 const INK = rgb(0.12, 0.14, 0.18), MUTE = rgb(0.42, 0.45, 0.5), RED = rgb(0.72, 0.16, 0.12), GREEN = rgb(0.1, 0.45, 0.25), GREY = rgb(0.39, 0.45, 0.55);
 function wrap(t: string, f: PDFFont, size: number, max: number): string[] {
@@ -19,7 +19,7 @@ export async function inspectionPDF(p: Project, photos: Record<string, Uint8Arra
   // r5whole-02: the app's own result is printed next to every field result; a Pass over a failing check is recorded as an override.
   const rep = getVerdict(p).report; const conf = new Set(fieldConflicts(p, rep)); const failMap = appFailMap(p, rep, lang);
   const doc = await PDFDocument.create(); doc.setTitle(`${p.name} - ${es ? 'registro de visita' : 'site visit record'}`); doc.catalog.set(PDFName.of('Lang'), PDFString.of(es ? 'es-US' : 'en-US'));
-  const { f, fb } = await sheetFonts(doc);
+  const { f, fb } = await sheetFonts(doc, typed(p));
   let pg: PDFPage = doc.addPage([612, 792]); let y = 740; const X = 54, W = 504; let pageNo = 1;
   const foot = () => pg.drawText(safe(`${es ? 'Página' : 'Page'} ${pageNo}  ·  ${p.site.address || p.name}`), { x: X, y: 36, size: 8, font: f, color: MUTE });
   const need = (h: number) => { if (y - h < 60) { foot(); pg = doc.addPage([612, 792]); pageNo++; y = 740; } };

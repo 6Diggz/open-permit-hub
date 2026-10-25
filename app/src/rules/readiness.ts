@@ -2,10 +2,49 @@ import type { Project } from '../core/model';
 import type { Report } from './engine';
 import type { Route, SheetItem } from './ladbs-adu-2025';
 import { packById } from './registry';
+import { mayHaveUpperFloor } from './la-city';
 
 /** mayApply: a document whose trigger (grading, shared driveway, vehicle lift...) the app does not ask about; the preparer decides. */
 export type ItemState = 'covered' | 'autoPassed' | 'failing' | 'needsAnswer' | 'docsMissing' | 'mayApply';
-export interface Readiness { /** Name of the checklist these items come from (per pack). */ sheet: { en: string; es: string }; total: number; checked: number; covered: number; autoPassed: number; failing: number; needsAnswer: number; docsMissing: number; mayApply: number; items: { item: SheetItem; state: ItemState; why: string }[] }
+export interface Readiness { /** Name of the checklist these items come from (per pack). */ sheet: { en: string; es: string }; total: number; checked: number; covered: number; autoPassed: number; failing: number; needsAnswer: number; docsMissing: number; mayApply: number;
+  /** needsAnswer split by who answers (parity2-09). */ youLeft: number; preparerLeft: number;
+  items: { item: SheetItem; state: ItemState; why: string; who: Who; from?: { en: string; es: string } }[] }
+
+/** Who answers an open item: "you" (the homeowner knows it, or the app asked it) or "preparer" (a detail drawn on the plans). */
+export type Who = 'you' | 'preparer';
+
+/**
+ * parity2-09: plan-sheet questions a homeowner can answer from facts about the property (or must read and know).
+ * Everything else that is "ask" is a detail the preparer draws on the plans.
+ */
+export const HOMEOWNER_ITEMS: readonly string[] = ['N.1', 'N.3', 'N.4', 'II.K.11', 'III.C.1', 'III.C.2', 'III.F.9', 'III.H.6', 'III.H.7', 'III.H.8', 'III.I.2', 'III.I.6'];
+export const whoAnswers = (i: SheetItem, linked: boolean): Who => (linked || HOMEOWNER_ITEMS.includes(i.id) ? 'you' : 'preparer');
+
+/**
+ * parity2-09: sheet answers the drawing or earlier answers already prove. Each default names its source; the user's own
+ * answer always wins (p.sheet). Only facts the project data shows for sure: never a design detail the preparer still draws.
+ */
+export function sheetDefaults(p: Project): Record<string, { value: 'yes' | 'na'; en: string; es: string }> {
+  const out: Record<string, { value: 'yes' | 'na'; en: string; es: string }> = {};
+  const set = (ids: string[], value: 'yes' | 'na', en: string, es: string) => ids.forEach(id => { out[id] = { value, en, es }; });
+  const conv = p.adu.mode === 'conversion';
+  const oneStory = conv && p.adu.newUpperFloor === 'no' && !mayHaveUpperFloor(p);
+  if (conv && p.adu.garageAttachment === 'detached') {
+    set(['III.A.1', 'III.A.2', 'III.A.4', 'III.A.6'], 'na', 'Garage step: the garage is detached and all of it becomes the ADU, so no garage stays next to a home.', 'Paso Garaje: el garaje está separado y todo se convierte en el ADU, así que no queda un garaje junto a una vivienda.');
+    set(['III.D.5', 'III.G.9'], 'na', 'Garage step: the ADU is its own building, so it shares no wall or floor with another unit.', 'Paso Garaje: el ADU es un edificio aparte, así que no comparte muro ni piso con otra unidad.');
+    if (oneStory) set(['III.A.3'], 'na', 'Garage step: detached, one story, no new floor on top, so there are no rooms above a garage.', 'Paso Garaje: separado, de un piso, sin piso nuevo arriba, así que no hay cuartos sobre un garaje.');
+  }
+  if (oneStory) {
+    set(['III.B.4'], 'yes', 'Garage step: one story with no new floor on top, under the 3-story limit.', 'Paso Garaje: un piso sin piso nuevo arriba, debajo del límite de 3 pisos.');
+    set(['III.F.5', 'III.F.6', 'III.F.7'], 'na', 'Garage step: one story with no new floor on top, so there are no stairs inside.', 'Paso Garaje: un piso sin piso nuevo arriba, así que no hay escaleras adentro.');
+  }
+  const rooms = conv ? p.adu.rooms : [];
+  if (rooms.some(r => r.use === 'bath') && rooms.some(r => r.use === 'kitchen'))
+    set(['III.G.10', 'III.H.10'], 'yes', 'Rooms step: a bathroom and a kitchen are drawn. Your preparer still shows the toilet, sink and shower or tub.', 'Paso Cuartos: hay un baño y una cocina dibujados. Su preparador aún muestra el inodoro, lavabo y regadera o tina.');
+  if (rooms.some(r => r.openings.some(o => o.kind === 'door' && o.widthMm >= 914 && (o.heightMm ?? 0) >= 2032)))
+    set(['III.F.2'], 'yes', 'Rooms step: a door 36 in wide and 80 in high or larger is drawn.', 'Paso Cuartos: hay una puerta dibujada de 36 pulg de ancho y 80 pulg de alto o más.');
+  return out;
+}
 
 export function projectRoute(p: Project): Route | 'unknown' {
   if (p.adu.mode !== 'conversion') return 'new';
@@ -28,7 +67,10 @@ export function readiness(p: Project, rep: Report): Readiness {
   const sheet = pk.meta.sheet.name ?? { en: 'LADBS correction-sheet', es: 'la hoja de correcciones de LADBS' };
   const byItem = new Map<string, string[]>();
   for (const [rule, ids] of Object.entries(RULE_ITEMS)) ids.forEach(id => byItem.set(id, [...(byItem.get(id) ?? []), rule]));
-  const items = CATALOG.map(item => {
+  // parity2-09: proven answers are LADBS sheet ids (LA City pack only).
+  const defs = rep.pack.startsWith('la-city@') ? sheetDefaults(p) : {};
+  const items = CATALOG.map(item => ({ ...state1(item), who: whoAnswers(item, byItem.has(item.id)), from: p.sheet[item.id] ? undefined : defs[item.id] && { en: defs[item.id].en, es: defs[item.id].es } }));
+  function state1(item: SheetItem): { item: SheetItem; state: ItemState; why: string } {
     if (!applies(item, p)) return { item, state: 'covered' as ItemState, why: 'does not apply' };
     const rs = rep.results.filter(r => byItem.get(item.id)?.includes(r.rule.id));
     if (rs.length) {
@@ -40,24 +82,25 @@ export function readiness(p: Project, rep: Report): Readiness {
       if (item.mode === 'auto') return { item, state: (rs.every(r => r.status === 'PASS') ? 'autoPassed' : 'covered') as ItemState, why: 'checked' };
     }
     if (item.mode === 'doc') return { item, state: (p.docs[item.id] ? 'covered' : item.garageRelevant ? 'docsMissing' : 'mayApply') as ItemState, why: p.docs[item.id] ? 'attached' : item.garageRelevant ? 'not attached' : 'may apply: ask your preparer' };
-    const a = p.sheet[item.id];
-    if (a === 'yes' || a === 'na') return { item, state: 'covered' as ItemState, why: a === 'na' ? 'does not apply' : 'shown on plans' };
+    const own = p.sheet[item.id]; const a = own ?? defs[item.id]?.value;
+    if (a === 'yes' || a === 'na') return { item, state: 'covered' as ItemState, why: (a === 'na' ? 'does not apply' : 'shown on plans') + (own ? '' : ' (from your answers)') };
     return { item, state: (a === 'no' ? 'failing' : 'needsAnswer') as ItemState, why: a === 'no' ? 'not on plans yet' : 'not answered' };
-  });
+  }
   // r6logic-03: a failing check that lands on no applicable sheet item still counts as one item to fix, so every surface agrees.
   const failingIds = new Set(items.filter(x => x.state === 'failing').map(x => x.item.id));
   const orphanFails = rep.results.filter(r => r.status === 'FAIL' && !r.dismissed && !(RULE_ITEMS[r.rule.id] ?? []).some(id => failingIds.has(id))).length;
   const n = (s: ItemState) => items.filter(x => x.state === s).length + (s === 'failing' ? orphanFails : 0);
   const covered = n('covered'), autoPassed = n('autoPassed');
-  return { sheet, total: items.length, checked: covered + autoPassed, covered, autoPassed, failing: n('failing'), needsAnswer: n('needsAnswer'), docsMissing: n('docsMissing'), mayApply: n('mayApply'), items };
+  const youLeft = items.filter(x => x.state === 'needsAnswer' && x.who === 'you').length;
+  return { sheet, total: items.length, checked: covered + autoPassed, covered, autoPassed, failing: n('failing'), needsAnswer: n('needsAnswer'), docsMissing: n('docsMissing'), mayApply: n('mayApply'), youLeft, preparerLeft: n('needsAnswer') - youLeft, items };
 }
 
 /** One plain-language line: what is done, what is left, and who does it. */
 export const scoreLine = (r: Readiness, es = false) => {
   const left = r.needsAnswer + r.docsMissing + r.failing;
   return es
-    ? `${r.checked} de ${r.total} puntos de ${r.sheet.es} están listos. Quedan ${left}: ${r.failing} por corregir, ${r.needsAnswer} preguntas sin responder (muchas son para su preparador) y ${r.docsMissing} documentos por adjuntar. Otros ${r.mayApply} pueden aplicar: pregunte a su preparador`
-    : `${r.checked} of ${r.total} ${r.sheet.en} items are done. ${left} left: ${r.failing} to fix, ${r.needsAnswer} questions to answer (many are for your preparer) and ${r.docsMissing} documents to attach. ${r.mayApply} more may apply: ask your preparer`;
+    ? `${r.checked} de ${r.total} puntos de ${r.sheet.es} están listos. Quedan ${left}: ${r.failing} por corregir, ${r.needsAnswer} preguntas sin responder (${r.youLeft} para usted, ${r.preparerLeft} para su preparador) y ${r.docsMissing} documentos por adjuntar. Otros ${r.mayApply} pueden aplicar: pregunte a su preparador`
+    : `${r.checked} of ${r.total} ${r.sheet.en} items are done. ${left} left: ${r.failing} to fix, ${r.needsAnswer} questions to answer (${r.youLeft} for you, ${r.preparerLeft} for your preparer) and ${r.docsMissing} documents to attach. ${r.mayApply} more may apply: ask your preparer`;
 };
 
 /**

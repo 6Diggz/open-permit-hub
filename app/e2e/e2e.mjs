@@ -123,7 +123,9 @@ for (const width of [390, 1440]) {
   // parity-13 calendar hint; qa-16 unprintable characters are flagged
   { const c = await ctx(width); const page = await c.newPage(); await startDemo(page); await step(page, 'export');
     ok(await page.getByText('Enter the date you filed to set the reminder.').isVisible(), `parity-13 calendar button explains why it is off ${W}`);
-    await page.fill('#own', 'Wang 王'); ok(await page.getByText(/can't print in this PDF yet/).isVisible(), `qa-16 characters the PDF can't print are flagged ${W}`);
+    // OUT2-17: Chinese, Korean and Farsi now print (lazy Noto fonts); a script with no PDF font yet (Thai) is still flagged.
+    await page.fill('#own', 'Wang 王 김'); ok(!(await page.getByText(/can't print in this PDF yet/).count()), `OUT2-17 Chinese and Korean names are not flagged ${W}`);
+    await page.fill('#own', 'Wang 王 สมชาย'); ok(await page.getByText(/can't print in this PDF yet/).isVisible(), `qa-16 characters the PDF can't print are flagged ${W}`);
     const [dl] = await Promise.all([page.waitForEvent('download'), page.getByRole('button', { name: 'Check report (PDF)' }).click()]); ok(!!(await dl.path()), `qa-16 report PDF still exports with those characters ${W}`);
     const [dx] = await Promise.all([page.waitForEvent('download'), page.getByRole('button', { name: 'Site plan for CAD (DXF)' }).click()]);
     const dxf = readFileSync(await dx.path(), 'utf8'); ok(dxf.includes('AC1032') && dxf.includes('LWPOLYLINE'), `parity-11 DXF download is DXF 2018 with polylines ${W}`);

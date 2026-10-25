@@ -20,6 +20,8 @@ export const PACK = {
   /** State code cycle in force for applications from 2026-01-01 (California Building Standards Code, 2025 edition). */
   stateCycle: '2025 California codes (effective 2026-01-01)',
   /** LA City's local adoption of the 2025 state cycle (2026 LABC/LARC). Section numbers not yet checked against it. */
+  localCycleNoteEs: 'Los números de sección siguen el LABC/LARC 2023 impreso en la hoja LADBS. Equivalencia con el LABC/LARC 2026: SIN VERIFICAR.',
+  stateCycleEs: 'códigos de California 2025 (vigentes desde el 2026-01-01)',
   localCycleNote: 'Section numbers follow the 2023 LABC/LARC printed on the LADBS sheet. Matching 2026 LABC/LARC numbers: UNVERIFIED.',
 } as const;
 

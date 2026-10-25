@@ -31,7 +31,10 @@ export function buildServiceWorker(files: string[], indexHtml: string): { source
   // the DXF 2018 export and Clean and Fix must work offline after one visit (qa-07).
   const set = new Set(files); const stem = (f: string) => f.replace(/-[A-Za-z0-9_-]{8}(?=\.woff$)/, '').replace(/\.woff$/, '');
   const w2 = new Set([...set].filter(f => f.endsWith('.woff2')).map(f => f.replace(/-[A-Za-z0-9_-]{8}(?=\.woff2$)/, '').replace(/\.woff2$/, '')));
-  const precache = ['./', ...[...set].filter(f => f !== 'sw.js' && !f.endsWith('.map') && !(f.endsWith('.woff') && w2.has(stem(f)))).sort().map(f => './' + f)];
+  // OUT2-17: the CJK font pieces (about 300 lazy chunks) load only when a PDF has Korean or Chinese letters; they are cached on
+  // first use instead of being downloaded by every visitor.
+  const lazyFont = (f: string) => /noto-sans-(kr|sc|tc)-\d+-400-normal-/.test(f);
+  const precache = ['./', ...[...set].filter(f => f !== 'sw.js' && !f.endsWith('.map') && !lazyFont(f) && !(f.endsWith('.woff') && w2.has(stem(f)))).sort().map(f => './' + f)];
   const version = createHash('sha256').update(precache.join('\n')).update(indexHtml).digest('hex').slice(0, 12);
   const source = SW_TEMPLATE.replace('__VERSION__', JSON.stringify(version)).replace('__PRECACHE__', JSON.stringify(precache));
   return { source, version, precache };

@@ -23,12 +23,12 @@ const FieldMode = lazy(() => import('./FieldMode').then(m => ({ default: m.Field
 import { fromMap, unmark, type MapField } from '../io/parcel-apply';
 import { ask, AskHost } from './Ask';
 import { autoFit } from '../rules/fit';
-import { readiness, scoreLine, applies as itemApplies } from '../rules/readiness';
+import { readiness, scoreLine, sheetDefaults, applies as itemApplies } from '../rules/readiness';
 import { verdictOf } from '../core/verdict';
 import { RULE_ITEMS } from '../rules/ladbs-adu-2025';
 import { citeText } from '../rules/cites-es';
 import { tr, type Lang } from './i18n';
-import { L, setUiLang, uiLang } from './lang';
+import { L, setUiLang, uiLang, UI_LANGS, loadLang, langDir, localeMeta, nativeName, pickLang, contentLang } from './lang';
 import { encryptPack, passphraseProblem, readPackFile, serialize, serializeAll, readBundle, contentKey, MAX_BUNDLE_BYTES } from '../core/permitpack';
 import { takeoff, takeoffCSV } from '../out/takeoff';
 import { plainWasmError } from '../out/wasm';
@@ -64,13 +64,17 @@ export default function App() {
   const [p, setP] = useState<Project | null>(load);
   const [step, setStepRaw] = useState(stepFromHash);
   const [tool, setTool] = useState<'adu' | 'clean' | 'field'>(location.hash === '#clean' ? 'clean' : location.hash === '#field' ? 'field' : 'adu');
-  const [lang, setLang] = useState<Lang>(() => (p?.people.language ?? (navigator.language?.startsWith('es') ? 'es' : 'en')));
+  // OUT2-17: the UI language can be any locale file; rule results and reports use the content language (English or Spanish).
+  const [ui, setUi] = useState<string>(() => { try { const s = localStorage.getItem('opa.lang'); if (s && UI_LANGS.includes(s)) return s; } catch { /* storage blocked */ } return p?.people.language === 'es' ? 'es' : pickLang(navigator.languages ?? [navigator.language ?? 'en']); });
+  const [, setLoaded] = useState(0); const lang: Lang = contentLang(ui);
+  useEffect(() => { let on = true; void loadLang(ui).then(() => { if (on) setLoaded(n => n + 1); }); return () => { on = false; }; }, [ui]);
+  const setLang = (l: string) => { setUi(l); try { localStorage.setItem('opa.lang', l); } catch { /* storage blocked */ } };
   const [saveState, setSaveState] = useState<SaveResult>('ok');
   const [notice, setNotice] = useState<string[]>(() => (p ? openNotes(p) : []));
   const formRef = useRef<HTMLDivElement>(null); const moved = useRef(false);
   const [roomSel, setRoomSel] = useState<string | null>(null); const [pinSel, setPinSel] = useState<string | null>(null); const [placing, setPlacing] = useState<string | false>(false);
   if (p && !hist.current) hist.current = new History(p);
-  setUiLang(lang);
+  setUiLang(ui);
 
   // Saves are batched: a drag fires dozens of edits a second; the first edit is written at once and the rest once it settles (300 ms),
   // and right away when the tab is hidden or closed, or another project is opened.
@@ -90,7 +94,7 @@ export default function App() {
   // r4reach-13: Safari on iPhone can clear a site's saved projects after 7 days unvisited; Home Screen apps are exempt. Say so once.
   const [homeTip, setHomeTip] = useState(() => { try { const ios = /iPhone|iPad|iPod/.test(navigator.userAgent) && !(navigator as Navigator & { standalone?: boolean }).standalone; return ios && !localStorage.getItem('opa.homeTip'); } catch { return false; } });
   const hideTip = () => { setHomeTip(false); try { localStorage.setItem('opa.homeTip', '1'); } catch { /* storage blocked */ } };
-  useEffect(() => { document.documentElement.lang = lang; const sk = document.querySelector('a[href="#main"]'); if (sk) sk.textContent = lang === 'es' ? 'Saltar al contenido' : 'Skip to content'; }, [lang]);
+  useEffect(() => { document.documentElement.lang = ui; document.documentElement.dir = langDir(ui); const sk = document.querySelector('a[href="#main"]'); if (sk) sk.textContent = L('Skip to content'); });
   // Another tab saved this project: say so now, before this tab's next save is refused.
   useEffect(() => { const id = p?.id; if (!id) return; const on = (e: StorageEvent) => { if (e.key === store.keyOf(id) && e.newValue) setSaveState('conflict'); }; window.addEventListener('storage', on); return () => window.removeEventListener('storage', on); }, [p?.id]);
   // Browser Back / Forward move between steps; the step lives in the URL so reload keeps it.
@@ -116,7 +120,7 @@ export default function App() {
   const show = (x: Project, s = 0) => { flushSave(); setNotice(openNotes(x)); const y = { ...x, repairNotes: undefined }; hist.current = new History(y); setP(y); if (tool === 'field') { setStepRaw(s); if (location.hash !== '#field') history.replaceState(null, '', '#field'); } else setStep(s); };
 
   if (tool === 'clean') return <><CleanFix onBack={() => openTool('adu')} /><AskHost /></>;
-  if (!p || !report) return <><AskHost /><Welcome onPick={id => { try { show(store.open(id)); } catch (e) { loadError = (e as Error).message; loadErrorId = id; setP(null); } }} onClean={() => openTool('clean')} lang={lang} setLang={setLang} field={tool === 'field'}
+  if (!p || !report) return <><AskHost /><Welcome onPick={id => { try { show(store.open(id)); } catch (e) { loadError = (e as Error).message; loadErrorId = id; setP(null); } }} onClean={() => openTool('clean')} lang={lang} ui={ui} setLang={setLang} field={tool === 'field'}
     onStart={(d) => { const x = d ? demoProject() : blankProject(); x.people.language = lang; if (lang === 'es') x.name = d ? 'Lote de ejemplo (no es una dirección real)' : 'Mi conversión de garaje'; show(x); }} onOpen={x => show(x, 3)} /></>;
 
   if (tool === 'field') return <><AskHost /><Suspense fallback={<p className="lead" role="status">{L('Loading…')}</p>}><FieldMode p={p} update={update} onBack={() => openTool('adu')} download={download} /></Suspense></>;
@@ -150,11 +154,10 @@ export default function App() {
           <button className="btn quiet" onClick={undo} disabled={!hist.current?.canUndo}>{tr(lang, 'undo')}</button>
           <button className="btn quiet" onClick={redo} disabled={!hist.current?.canRedo}>{tr(lang, 'redo')}</button>
           <label className="sr" htmlFor="lang">{L("Language")}</label>
-          <select id="lang" className="btn quiet" value={lang} onChange={e => { const l = e.target.value as Lang; setLang(l); update(d => { d.people.language = l; }); }}>
-            <option value="en">{L("English")}</option><option value="es">{L("Español")}</option>
-          </select>
+          <LangPicker ui={ui} onPick={l => { setLang(l); update(d => { d.people.language = contentLang(l); }); }} />
         </div>
         {/* r5whole-06: on a phone the check card is far below the form; the plain answer is shown at the top too. */}
+        <BetaNote ui={ui} />
         {homeTip && <div className="banner" role="status">{L("Tip: in Safari tap Share, then Add to Home Screen. Projects in a Home Screen app are kept; Safari can clear them after 7 days without a visit. Still save a backup.")} <button className="btn quiet" onClick={hideTip}>{L("OK")}</button></div>}
         {verdict && <p className={'banner mobile-only' + (verdict.plain.verdict === 'likely-no' ? ' warn' : '')} style={{ margin: '8px 16px 0' }}>{verdict.plain[lang === 'es' ? 'es' : 'en']}{' '}
           {/* r6ux-06: a path from the top answer to the details */}
@@ -210,7 +213,18 @@ function openNotes(x: Project): string[] {
   return n;
 }
 
-function Welcome({ lang, setLang, onStart, onOpen, onClean, onPick, field }: { field?: boolean; onPick: (id: string) => void; onClean: () => void; lang: Lang; setLang: (l: Lang) => void; onStart: (demo: boolean) => void; onOpen: (p: Project) => void }) {
+/** Language menu: every UI language in its own name (OUT2-17). */
+function LangPicker({ ui, onPick, id = 'lang' }: { ui: string; onPick: (l: string) => void; id?: string }) {
+  return <><label className="sr" htmlFor={id}>{L("Language")}</label>
+    <select id={id} className="btn quiet" value={ui} onChange={e => onPick(e.target.value)}>{UI_LANGS.map(c => <option key={c} value={c} lang={c}>{c === 'en' ? 'English' : c === 'es' ? 'Español' : nativeName(c)}</option>)}</select></>;
+}
+/** A machine-made translation says so, in its language and in English (OUT2-17). */
+function BetaNote({ ui }: { ui: string }) {
+  const m = localeMeta(ui); if (!m?.beta) return null;
+  return <div className="banner" role="note" data-testid="beta-translation">{L("Beta translation: not yet reviewed by a native speaker. Rule results, code citations and legal names stay in English.")}<span lang="en" dir="ltr"> (Beta translation: not yet reviewed by a native speaker.)</span></div>;
+}
+
+function Welcome({ lang, ui, setLang, onStart, onOpen, onClean, onPick, field }: { field?: boolean; onPick: (id: string) => void; onClean: () => void; lang: Lang; ui: string; setLang: (l: string) => void; onStart: (demo: boolean) => void; onOpen: (p: Project) => void }) {
   const [err, setErr] = useState(''); const [tick, setTick] = useState(0);
   const sample = evaluate(demoProject(), RULES, PACK_ID); const es = lang === 'es';
   const openFile = async (f: File) => {
@@ -247,7 +261,8 @@ function Welcome({ lang, setLang, onStart, onOpen, onClean, onPick, field }: { f
   const raw = loadErrorId ? store.raw(loadErrorId) : null;
   return (
     <main className="welcome-grid" id="main"><div className="welcome">
-      <button className="btn quiet" style={{ marginBottom: 28 }} onClick={() => setLang(lang === 'en' ? 'es' : 'en')}>{lang === 'en' ? 'Español' : 'English'}</button>
+      <div style={{ marginBottom: 28 }}><LangPicker ui={ui} onPick={setLang} id="lang-w" /></div>
+      <BetaNote ui={ui} />
       {field && <div className="banner" role="status">{es ? 'Visita a la obra (modo de inspector): elija un proyecto abajo, o abra un archivo .permitpack de la visita, para empezar.' : 'Site visit (inspector field mode): pick a project below, or open a site-visit .permitpack, to start the visit.'}</div>}
       <h1>{es ? 'Su garaje, revisado contra las reglas de LA.' : 'Your garage, checked against LA\'s rules.'}</h1>
       <p>{tr(lang, 'tagline')}</p>
@@ -447,6 +462,11 @@ function RoomsStep({ p, update, sel, setSel }: { p: Project; update: U; sel: str
   const setW = (i: number, patch: Partial<Window>, key?: string) => update(d => { d.adu.windows[i] = { ...d.adu.windows[i], ...patch }; }, key);
   return <>
     <RoomsPanel p={p} update={update} selected={sel} setSelected={setSel} />
+    {/* r4cold-08: the estimate sits with the rooms it is measured from (the CSV stays in Download). */}
+    {(() => { const t = takeoff(p); const es = uiLang() === 'es'; return <>
+    <h2 id="materials">{L("Materials estimate")}</h2>
+    <table className="take"><thead><tr><th>{L("Item")}</th><th>{L("Qty")}</th><th>{L("Unit")}</th></tr></thead><tbody>{t.map(r => <tr key={r.item}><td>{es ? r.itemEs : r.item}<br /><span className="help" style={{ color: 'var(--pencil)', fontSize: '.8rem' }}>{es ? r.basisEs : r.basis}</span></td><td className="q">{r.qty}</td><td>{es ? r.unitEs : r.unit}</td></tr>)}</tbody></table>
+    </>; })()}
     {a.rooms.length === 0 && <>
     <h2>{L("Or list windows without drawing rooms")}</h2>
     <p className="lead">{L("Every bedroom needs a window you can climb out of. Measure the clear opening when the window is fully open, not the size on the label.")}</p>
@@ -512,8 +532,7 @@ function ExportStep({ p, update, report, lang }: { p: Project; update: U; report
     <p className="help">{L("Plan sheets are 24x36 inches. Print them at Actual size (100%) on 24x36 paper at a print shop. Printed smaller, the scale is wrong: measure the scale bar with a ruler to check.")}</p>
     {note && !busy && <p role="status">{note}</p>}
     {busy && <p role="status">{L('Making')} {busy}...</p>}
-    <h2>{L("Materials estimate")}</h2>
-    <table className="take"><thead><tr><th>{L("Item")}</th><th>{L("Qty")}</th><th>{L("Unit")}</th></tr></thead><tbody>{t.map(r => <tr key={r.item}><td>{es ? r.itemEs : r.item}<br /><span className="help" style={{ color: 'var(--pencil)', fontSize: '.8rem' }}>{es ? r.basisEs : r.basis}</span></td><td className="q">{r.qty}</td><td>{es ? r.unitEs : r.unit}</td></tr>)}</tbody></table>
+    <p className="help">{L("The materials estimate (drywall, paint, flooring) is on the Rooms step, under the rooms.")}</p>
     <h2>{L("Deadlines")}</h2>
     <div className="grid2"><div className="field"><label htmlFor="filed">{L("Date you filed for plan check")}</label><input id="filed" type="date" value={filed} onChange={e => setFiled(e.target.value)} /></div>
       <div className="field"><label htmlFor="issued">{L("Date the permit was issued (optional)")}</label><input id="issued" type="date" value={issued} onChange={e => setIssued(e.target.value)} /></div>
@@ -530,7 +549,7 @@ function ExportStep({ p, update, report, lang }: { p: Project; update: U; report
 }
 
 function SheetItems({ p, update, report, lang }: { p: Project; update: U; report: Report; lang: Lang }) {
-  const rd = readiness(p, report); const pk = packById(report.pack); const linked = new Set(Object.values(pk.ruleItems).flat());
+  const rd = readiness(p, report); const defs = report.pack.startsWith('la-city@') ? sheetDefaults(p) : {}; const pk = packById(report.pack); const linked = new Set(Object.values(pk.ruleItems).flat());
   const open = pk.catalog.filter(i => itemApplies(i, p) && !linked.has(i.id) && i.mode !== 'auto');
   const docs = open.filter(i => i.mode === 'doc'), asks = open.filter(i => i.mode === 'ask');
   const must = docs.filter(i => i.garageRelevant), maybe = docs.filter(i => !i.garageRelevant);
@@ -547,15 +566,22 @@ function SheetItems({ p, update, report, lang }: { p: Project; update: U; report
     </div>
     {maybe.length > 0 && <><p className="lead">{L("May apply: ask your preparer. These depend on grading, shared driveways, lifts and other facts this app does not ask about.")}</p><div className="mods">{maybe.map(docBox)}</div></>}
     <h2>{L("Shown on your plans?")}</h2>
-    <details open={p.people.preparerRole !== 'owner'}><summary>{L("Plan-sheet items for your preparer")} ({asks.filter(i => !p.sheet[i.id]).length} {L("not answered")})</summary>
-    {asks.map(i => <div className="field" key={i.id}><label id={'si-' + i.id}>{i.id} {i.summary[lang]}</label>
-      <div className="tri" role="group" aria-labelledby={'si-' + i.id}>
-        <button type="button" aria-pressed={p.sheet[i.id] === 'yes'} onClick={() => setA(i.id, 'yes')}>{tr(uiLang(), 'yes')}</button>
-        <button type="button" aria-pressed={p.sheet[i.id] === 'no'} onClick={() => setA(i.id, 'no')}>{tr(uiLang(), 'no')}</button>
-        <button type="button" aria-pressed={p.sheet[i.id] === 'na'} onClick={() => setA(i.id, 'na')}>{L("Doesn't apply")}</button>
-        <button type="button" aria-pressed={!p.sheet[i.id]} onClick={() => setA(i.id, undefined)}>{tr(uiLang(), 'unknown')}</button>
-      </div></div>)}
-    </details>
+    {/* parity2-09: answers the drawing or earlier steps prove are filled in with their source; questions are grouped by who answers. */}
+    {(() => { const by = new Map(rd.items.map(x => [x.item.id, x])); const mine = asks.filter(i => by.get(i.id)?.who === 'you'), theirs = asks.filter(i => by.get(i.id)?.who !== 'you');
+      const left = (xs: typeof asks) => xs.filter(i => by.get(i.id)?.state === 'needsAnswer').length;
+      const q = (i: typeof asks[number]) => { const d = by.get(i.id)?.from; const v = p.sheet[i.id] ?? (d ? (i.id in defs ? defs[i.id].value : undefined) : undefined);
+        return <div className="field" key={i.id}><label id={'si-' + i.id}>{i.id} {i.summary[lang]}</label>
+        <div className="tri" role="group" aria-labelledby={'si-' + i.id} aria-describedby={d ? 'sd-' + i.id : undefined}>
+          <button type="button" aria-pressed={v === 'yes'} onClick={() => setA(i.id, 'yes')}>{tr(uiLang(), 'yes')}</button>
+          <button type="button" aria-pressed={v === 'no'} onClick={() => setA(i.id, 'no')}>{tr(uiLang(), 'no')}</button>
+          <button type="button" aria-pressed={v === 'na'} onClick={() => setA(i.id, 'na')}>{L("Doesn't apply")}</button>
+          <button type="button" aria-pressed={!v} onClick={() => setA(i.id, undefined)}>{tr(uiLang(), 'unknown')}</button>
+        </div>{d && <span className="help" id={'sd-' + i.id}>{L("Filled in from")} <bdi lang={lang}>{lang === 'es' ? d.es : d.en}</bdi> {L("Change it if this is wrong.")}</span>}</div>; };
+      return <>
+        <h3>{L("Questions for you")} ({left(mine)} {L("not answered")})</h3>
+        {mine.map(q)}
+        <details><summary>{L("Plan-sheet items for your preparer")} ({left(theirs)} {L("not answered")})</summary>{theirs.map(q)}</details>
+      </>; })()}
   </>;
 }
 
