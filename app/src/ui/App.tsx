@@ -15,6 +15,7 @@ import { Len, Num, Q } from './fields';
 import { RoomsPanel } from './Rooms';
 import { RoomPlan } from './RoomPlan';
 import { ReviewStep } from './Review';
+import { FieldMode } from './FieldMode';
 import { fromMap, unmark, type MapField } from '../io/parcel-apply';
 import { ask, AskHost } from './Ask';
 import { autoFit } from '../rules/fit';
@@ -55,7 +56,7 @@ export default function App() {
   const hist = useRef<History<Project> | null>(null); const dragStart = useRef<Project | null>(null);
   const [p, setP] = useState<Project | null>(load);
   const [step, setStepRaw] = useState(stepFromHash);
-  const [tool, setTool] = useState<'adu' | 'clean'>(location.hash === '#clean' ? 'clean' : 'adu');
+  const [tool, setTool] = useState<'adu' | 'clean' | 'field'>(location.hash === '#clean' ? 'clean' : location.hash === '#field' ? 'field' : 'adu');
   const [lang, setLang] = useState<Lang>(() => (p?.people.language ?? (navigator.language?.startsWith('es') ? 'es' : 'en')));
   const [saveState, setSaveState] = useState<SaveResult>('ok');
   const [notice, setNotice] = useState<string[]>(() => (p ? openNotes(p) : []));
@@ -83,12 +84,12 @@ export default function App() {
   // Another tab saved this project: say so now, before this tab's next save is refused.
   useEffect(() => { const id = p?.id; if (!id) return; const on = (e: StorageEvent) => { if (e.key === store.keyOf(id) && e.newValue) setSaveState('conflict'); }; window.addEventListener('storage', on); return () => window.removeEventListener('storage', on); }, [p?.id]);
   // Browser Back / Forward move between steps; the step lives in the URL so reload keeps it.
-  useEffect(() => { const on = () => { if (location.hash === '#clean') { setTool('clean'); return; } setTool('adu'); setStepRaw(stepFromHash()); moved.current = true; }; window.addEventListener('popstate', on); return () => window.removeEventListener('popstate', on); }, []);
+  useEffect(() => { const on = () => { if (location.hash === '#clean') { setTool('clean'); return; } if (location.hash === '#field') { setTool('field'); return; } setTool('adu'); setStepRaw(stepFromHash()); moved.current = true; }; window.addEventListener('popstate', on); return () => window.removeEventListener('popstate', on); }, []);
   useEffect(() => { if (p && tool === 'adu' && !/step=/.test(location.hash)) history.replaceState(null, '', `#step=${STEP_KEYS[step]}`); }, [p, tool, step]);
   // Move focus to the new step's heading so keyboard and screen-reader users land on it.
   useEffect(() => { if (!moved.current) return; moved.current = false; const h = formRef.current?.querySelector('h2'); if (h) { h.setAttribute('tabindex', '-1'); h.focus(); h.scrollIntoView?.({ block: 'start' }); } }, [step]);
   const setStep = (i: number) => { moved.current = true; setStepRaw(i); history.pushState(null, '', `#step=${STEP_KEYS[i]}`); };
-  const openTool = (t: 'adu' | 'clean') => { setTool(t); history.pushState(null, '', t === 'clean' ? '#clean' : `#step=${STEP_KEYS[step]}`); };
+  const openTool = (t: 'adu' | 'clean' | 'field') => { setTool(t); history.pushState(null, '', t === 'clean' ? '#clean' : t === 'field' ? '#field' : `#step=${STEP_KEYS[step]}`); };
 
   const report: Report | null = useMemo(() => (p ? evaluate(p, RULES, PACK_ID) : null), [p]);
   const commit = (next: Project, key?: string) => { hist.current!.push(next, key); setP(next); };
@@ -105,6 +106,7 @@ export default function App() {
   if (!p || !report) return <><AskHost /><Welcome onPick={id => { try { show(store.open(id)); } catch (e) { loadError = (e as Error).message; loadErrorId = id; setP(null); } }} onClean={() => openTool('clean')} lang={lang} setLang={setLang}
     onStart={(d) => { const x = d ? demoProject() : blankProject(); x.people.language = lang; if (lang === 'es') x.name = d ? 'Lote de ejemplo (no es una dirección real)' : 'Mi conversión de garaje'; show(x); }} onOpen={x => show(x, 3)} /></>;
 
+  if (tool === 'field') return <><AskHost /><FieldMode p={p} update={update} onBack={() => openTool('adu')} download={download} /></>;
   const steps: string[] = tr(lang, 'steps');
   const stepDot = (i: number) => { const mod = [['core', 'zoning', 'hazards'], ['zoning', 'fire', 'structural', 'fees'], ['egress'], [], [], []][i]; const rs = report.results.filter(r => mod.includes(r.rule.module)); return rs.some(r => r.status === 'FAIL') ? 'var(--fix)' : rs.some(r => r.status === 'UNKNOWN') ? 'var(--info-need)' : rs.some(r => r.status === 'NOT_CHECKED') ? 'var(--off)' : rs.some(r => r.status === 'PASS') ? 'var(--pass)' : 'transparent'; };
   const close = () => { flushSave(); setP(null); hist.current = null; history.pushState(null, '', '#projects'); };
@@ -166,7 +168,7 @@ export default function App() {
           {step === 2 && <RoomsStep p={p} update={update} sel={roomSel} setSel={setRoomSel} />}
           {step === 3 && <ChecksStep p={p} update={update} report={report} lang={lang} />}
           {step === 4 && <ExportStep p={p} update={update} report={report} lang={lang} />}
-          {step === 5 && <ReviewStep p={p} update={update} sel={pinSel} setSel={setPinSel} placing={placing} setPlacing={setPlacing} download={(n, d, t) => download(n, d, t)} />}
+          {step === 5 && <ReviewStep p={p} update={update} sel={pinSel} setSel={setPinSel} placing={placing} setPlacing={setPlacing} download={(n, d, t) => download(n, d, t)} onField={() => openTool('field')} />}
           <div style={{ display: 'flex', gap: 8 }}>
             {step > 0 && <button className="btn quiet" onClick={() => setStep(step - 1)}>{tr(lang, 'back')}</button>}
             {step < steps.length - 1 && <button className="btn primary" onClick={() => setStep(step + 1)}>{tr(lang, 'next')}: {steps[step + 1]}</button>}

@@ -120,3 +120,26 @@ a { color: var(--link); }
 @media (pointer: coarse) { .mods label { display: flex; align-items: center; gap: 10px; min-height: 44px; } .mods input[type="checkbox"] { width: 22px; height: 22px; flex: none; margin: 0; } }
 /* Phones: all six steps stay on screen (they wrap) instead of sitting off to the right with no cue (r3people-13). */
 @media (max-width: 600px) { .rail { flex-wrap: wrap; overflow-x: visible; row-gap: 4px; } .rail .brand { flex-basis: 100%; } .rail .step { flex: 1 1 30%; min-width: 0; } }
+/* Inspector field mode: same tokens and components, sized for gloved hands and bright sun (r3people-12). */
+.fm { min-height: 100vh; background: var(--desk); }
+.fm-bar { position: sticky; top: 0; z-index: 5; }
+.fm-count { font-weight: 800; }
+.fm-main { margin: 0 auto; max-width: 760px; }
+.fm .lead { color: var(--ink); }
+.fm-list { padding: 0; gap: 14px; }
+.fm-item { display: grid; gap: 10px; padding: 14px; border-left-width: 8px; }
+.fm-item .title { font-size: 1.05rem; margin: 0; }
+.fm-group { margin: 0; font-size: .8rem; font-weight: 800; text-transform: uppercase; letter-spacing: .04em; color: var(--pencil); }
+.fm-tri { width: 100%; border-width: 2px; border-color: var(--ink); }
+.fm-tri button { flex: 1 1 0; min-height: 56px; font-size: 1.05rem; font-weight: 800; color: var(--ink); }
+.fm-tri button + button { border-left: 2px solid var(--ink); }
+.fm-result button[data-s="pass"][aria-pressed="true"] { background: var(--pass); color: #fff; }
+.fm-result button[data-s="fail"][aria-pressed="true"] { background: var(--fix); color: #fff; }
+.fm-result button[data-s="na"][aria-pressed="true"] { background: var(--ink); color: var(--sheet); }
+.fm-big { min-height: 52px; display: inline-flex; align-items: center; justify-content: center; font-size: 1rem; }
+.fm-photo { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; }
+.fm-photo .help { flex-basis: 100%; }
+.fm-thumb { width: 120px; height: 90px; object-fit: cover; border: 1.5px solid var(--ink); border-radius: var(--r-sm); background: var(--faint); }
+.fm-note { width: 100%; font: inherit; font-size: 1rem; padding: 10px; border: 2px solid var(--rule); border-radius: var(--r-sm); background: var(--sheet); color: var(--ink); }
+.fm-actions { display: grid; gap: 10px; }
+label.btn[aria-disabled="true"] { opacity: .45; cursor: progress; }

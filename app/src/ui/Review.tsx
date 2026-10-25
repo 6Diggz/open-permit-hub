@@ -4,6 +4,8 @@ import { uid } from '../core/model';
 import { MAX_PINS } from '../core/permitpack';
 import { defaultPinSpot, nextPinNumber, parseLetter, responseLetter, sortPins, type SortKey } from '../core/markup';
 import { L, uiLang } from './lang';
+import { PlanCheckPanel } from './PlanCheck';
+import { tally } from '../core/inspection';
 
 type U = (fn: (d: Project) => void, key?: string) => void;
 const AUTHOR_KEY = 'opa.author';
@@ -15,7 +17,7 @@ const today = () => new Date(Date.now() - new Date().getTimezoneOffset() * 60000
  * Review step: numbered pins on the plan with comment, status, author and date, a sortable list that mirrors them,
  * and a helper that turns a pasted city correction letter into pins or checklist responses.
  */
-export function ReviewStep({ p, update, sel, setSel, placing, setPlacing, download }: { p: Project; update: U; sel: string | null; setSel: (id: string | null) => void; placing: string | false; setPlacing: (v: string | false) => void; download: (name: string, data: string, type: string) => void }) {
+export function ReviewStep({ p, update, sel, setSel, placing, setPlacing, download, onField }: { p: Project; update: U; sel: string | null; setSel: (id: string | null) => void; placing: string | false; setPlacing: (v: string | false) => void; download: (name: string, data: string, type: string) => void; onField?: () => void }) {
   const [author, setAuthor] = useState(readAuthor); const [sort, setSort] = useState<{ k: SortKey; d: 1 | -1 }>({ k: 'n', d: 1 });
   const [q, setQ] = useState(''); const [show, setShow] = useState<'all' | 'open' | 'resolved'>('all');
   const [letter, setLetter] = useState(''); const [items, setItems] = useState<{ ref: string; text: string }[] | null>(null); const [msg, setMsg] = useState('');
@@ -92,5 +94,13 @@ export function ReviewStep({ p, update, sel, setSel, placing, setPlacing, downlo
       <div><button type="button" className="btn" onClick={() => download('correction-responses.txt', responseLetter(p, es), 'text/plain;charset=utf-8')}>{L('Download the response letter (text)')}</button></div>
     </>}
     <p className="help">{L('The draft site plan PDF adds a markup sheet with every note and answer.')}</p>
+    <PlanCheckPanel onNotes={list => { const room = Math.max(0, MAX_PINS - pins.length); const add = list.slice(0, room); if (!add.length) return 0;
+      update(d => { for (const it of add) { const spot = defaultPinSpot(d); d.markup.pins.push({ id: uid(), n: nextPinNumber(d.markup.pins), ...spot, comment: it.text, status: 'open', author: author.trim(), at: today(), ref: it.ref }); } }); return add.length; }} />
+    {onField && <section className="field" aria-labelledby="fm-h" style={{ gap: 8 }}>
+      <h2 id="fm-h" style={{ fontSize: '1.15rem', margin: 0 }}>{L('Inspector field mode')}</h2>
+      <p className="lead" style={{ margin: 0 }}>{L('A phone screen for the site visit: pass or fail for each inspection item, a photo and a note, saved on the phone and working with no signal.')}</p>
+      <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap', alignItems: 'center' }}><button type="button" className="btn primary" onClick={onField}>{L('Open field mode')}</button>
+        {(() => { const t = tally(p.inspection); return t.open < t.total ? <span className="help">{t.total - t.open} / {t.total} {L('checked')}{t.fail ? ` · ${t.fail} ${L('fail')}` : ''}</span> : null; })()}</div>
+    </section>}
   </>;
 }

@@ -1,3 +1,4 @@
+import type { Inspection } from './inspection';
 import { ft, inch } from './units';
 import { rect, type Poly } from './geom';
 import { PACK_ID } from '../rules/pack';
@@ -91,6 +92,8 @@ export interface Project {
     rooms: Room[];
   };
   markup: { pins: Pin[]; responses: Response[] };
+  /** Site-visit results from inspector field mode (photos stay on the device; see core/photos). */
+  inspection?: Inspection;
   /** Answers to correction-sheet "ask" items: yes = shown on plans / handled, no = not yet, na = does not apply. */
   sheet: Record<string, 'yes' | 'no' | 'na'>;
   /** Correction-sheet "doc" items the user has attached. */

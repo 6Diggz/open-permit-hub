@@ -3,6 +3,8 @@ import { isNum, MAX_LEN_MM } from './units';
 import type { Poly } from './geom';
 import { MAX_ROOMS, MAX_OPENINGS, MAX_ROOM_PTS } from './rooms';
 import { ROOM_USES, type Room, type Pin, type Response } from './model';
+import { sanitizeInspection, sanitizePhotos } from './inspection';
+import { stagePhotos } from './photos';
 
 export const MAX_PINS = 500, MAX_RESPONSES = 500;
 
@@ -128,6 +130,10 @@ export function migrate(raw: any): Project {
   const responses: Response[] = (Array.isArray(mk.responses) ? mk.responses : []).slice(0, MAX_RESPONSES).filter((x: any) => x && typeof x === 'object')
     .map((x: any) => ({ id: str(x.id, 60) || uid(), ref: str(x.ref, 40), text: str(x.text, 2000), response: str(x.response, 2000), sheet: str(x.sheet, 60), done: !!x.done, ...(x.pinId ? { pinId: str(x.pinId, 60) } : {}) }));
   out.markup = { pins, responses };
+  // Site visit: results are checked like every other field; photos carried in the file go to this device's photo store, never into the saved project.
+  const ins = sanitizeInspection(p.inspection); if (ins) out.inspection = ins; else delete out.inspection;
+  const photos = sanitizePhotos((p as any).inspectionPhotos, ins); delete (out as any).inspectionPhotos;
+  if (Object.keys(photos).length) stagePhotos(photos);
   out.rev = Number.isInteger(p.rev) && p.rev >= 0 ? p.rev : 0;
   out.repairNotes = notes.length ? notes : undefined;
   return out;

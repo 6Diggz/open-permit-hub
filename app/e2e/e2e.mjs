@@ -171,6 +171,18 @@ if (!SMOKE && server) {
   ok(!!dxf, 'qa-07 offline: DXF exports');
   await page.goto(BASE + '#clean'); await page.locator('input[type=file][accept=".dwg,.dxf"]').setInputFiles(FIXTURE);
   ok(await seen(page.getByText('mixed_r2018.dxf'), 30000), 'qa-07 offline: Clean and Fix opens a file');
+  // Plan-set pre-check offline, under the site's real Content-Security-Policy: pdf.js and its worker come from the precache.
+  { const { PDFDocument, StandardFonts } = await import('pdf-lib'); const d = await PDFDocument.create(); const f = await d.embedFont(StandardFonts.Helvetica);
+    const pg = d.addPage([2592, 1728]); ['FLOOR PLAN', 'SHEET A-2', "Ceiling height 8'-0\"", 'Smoke alarms in each bedroom'].forEach((t, i) => pg.drawText(t, { x: 60, y: 1600 - i * 24, size: 14, font: f }));
+    const errs = []; page.on('pageerror', e => errs.push(String(e))); page.on('console', m => { if (m.type() === 'error') errs.push(m.text()); });
+    await page.goto(BASE + '#step=review'); await page.getByRole('heading', { name: 'Pre-check a plan set (PDF)' }).waitFor({ timeout: 15000 });
+    await page.locator('input[type=file][accept="application/pdf,.pdf"]').setInputFiles({ name: 'offline-set.pdf', mimeType: 'application/pdf', buffer: Buffer.from(await d.save()) });
+    ok(await seen(page.locator('.banner', { hasText: 'offline-set.pdf' }).filter({ hasText: '1 page read' }), 30000), 'r3market-04 offline: the plan-set pre-check reads a PDF (worker precached, CSP on)', errs.join(' | '));
+    ok(!errs.some(e => /Content Security Policy|unsafe-eval/i.test(e)), 'r3market-04 offline: no CSP errors from pdf.js', errs.join(' | ')); }
+  // Inspector field mode opens and saves with no signal (r3people-12).
+  await page.goto(BASE + '#field'); ok(await seen(page.getByRole('heading', { name: 'Site visit' }), 15000), 'r3people-12 offline: field mode opens from the precache');
+  await page.locator('li.fm-item').first().getByRole('button', { name: 'Pass' }).click(); await page.waitForTimeout(400); await page.reload();
+  ok(await page.locator('li.fm-item').first().getByRole('button', { name: 'Pass' }).getAttribute('aria-pressed').catch(() => null) === 'true', 'r3people-12 offline: a result tapped offline is still there after a reload');
   await c.setOffline(false); await page.goto(BASE);
   // Simulate a new deploy: new hashed entry file, new service worker.
   const v1 = JSON.parse(readFileSync(join(DIST, 'version.json'), 'utf8')).version;

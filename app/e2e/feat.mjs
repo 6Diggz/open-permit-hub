@@ -126,5 +126,115 @@ await page.getByText('Filled from the parcel map').scrollIntoViewIfNeeded(); awa
     await page.getByRole('combobox', { name: 'Language' }).selectOption('es'); await step(page, 'review'); ok(await page.getByRole('heading', { name: 'Notas de revisión' }).isVisible(), `review: Spanish ${W}`);
     await c2.close(); await c.close(); }
 }
+
+// FEATURE 4: plan-set pre-check (PDF read on the device) and FEATURE 5: inspector field mode. Fixtures are made here with pdf-lib.
+const { PDFDocument, StandardFonts } = await import('pdf-lib');
+async function planSetPDF() { const d = await PDFDocument.create(); const f = await d.embedFont(StandardFonts.Helvetica);
+  const sheet = ls => { const pg = d.addPage([2592, 1728]); let y = 1650; for (const l of ls) { pg.drawText(l, { x: 60, y, size: 14, font: f }); y -= 24; } };
+  sheet(['COVER SHEET', 'SHEET A-0', 'Project address: 4305 W Edenhurst Ave, Los Angeles, CA 90039', 'Owner: Maria Lopez', 'Occupancy: R-3', 'Type V-B', 'Applicable codes: 2023 LARC', 'Smoke alarms in each bedroom, hardwired with battery backup', 'Carbon monoxide alarm per CRC R315']);
+  sheet(['FLOOR PLAN', 'SHEET A-2', 'Scale: 1/4" = 1\'-0"', "Ceiling height 6'-10\"", 'Egress window 18" x 22" net clear']);
+  return d.save(); }
+async function scanPDF() { const d = await PDFDocument.create(); d.addPage([612, 792]).drawRectangle({ x: 40, y: 40, width: 300, height: 300 }); return d.save(); }
+const setFile = async (page, sel, name, bytes, mimeType) => page.locator(sel).setInputFiles({ name, mimeType, buffer: Buffer.from(bytes) });
+const PHOTO = resolve(here, 'fixtures/site-photo.jpg');
+for (const width of [390, 1440]) {
+  const W = `@${width}`;
+  { const c = await ctx(width); const page = await c.newPage(); const errs = []; page.on('pageerror', e => errs.push(String(e)));
+    await page.goto(BASE); await page.getByRole('button', { name: 'Try the demo lot' }).click(); await step(page, 'review');
+    const pick = 'input[type=file][accept="application/pdf,.pdf"]';
+    ok(await page.getByRole('heading', { name: 'Pre-check a plan set (PDF)' }).isVisible(), `precheck: section shown ${W}`);
+    ok(await page.getByText('This is an assist, not a plan review').isVisible(), `precheck: says it is an assist, not a review ${W}`);
+    const reqs = []; page.on('request', r => { if (!r.url().startsWith(BASE)) reqs.push(r.url()); });
+    // 1) the app's own exported sheets, known good
+    await step(page, 'export'); const [dl] = await Promise.all([page.waitForEvent('download'), page.getByRole('button', { name: 'Draft site plan (PDF, 24x36)' }).click()]);
+    const own = readFileSync(await dl.path()); await step(page, 'review');
+    await setFile(page, pick, 'own-sheets.pdf', own, 'application/pdf');
+    ok(await page.getByText(/2 pages read/).waitFor({ timeout: 20000 }).then(() => true, () => false), `precheck: the app's own sheets are read ${W}`, errs.join(' | '));
+    const i2 = page.locator('li.res', { hasText: 'I.C.2 ·' }); ok((await i2.textContent()).includes('Partly found') && (await i2.textContent()).includes('missing the owner') && (await i2.textContent()).includes('Confidence: Medium'), `precheck: demo has no owner, so I.C.2 is partly found with medium confidence ${W}`, await i2.textContent());
+    ok((await page.locator('li.res', { hasText: 'III.G.1 ·' }).textContent()).includes("8' 0\""), `precheck: ceiling height read from the floor plan sheet ${W}`);
+    ok((await page.locator('li.res', { hasText: 'I.C.7 ·' }).textContent()).includes('Page 1'), `precheck: page reference shown ${W}`);
+    ok(await page.locator('table.take caption', { hasText: 'Sheets found' }).isVisible() && (await page.locator('table.take').last().textContent()).includes('A-2'), `precheck: sheet list ${W}`);
+    ok(reqs.length === 0, `precheck: nothing leaves the device ${W}`, reqs.join(', '));
+    await page.locator('#pc-h').scrollIntoViewIfNeeded(); await shot(page, `precheck-own-${width}.png`);
+    // 2) a drafter set with a low ceiling and small escape window
+    await setFile(page, pick, 'drafter-set.pdf', await planSetPDF(), 'application/pdf'); await page.locator('.banner', { hasText: 'drafter-set.pdf' }).filter({ hasText: 'pages read' }).waitFor({ timeout: 20000 });
+    ok(await page.getByText(/A ceiling height under 7 ft was read/).isVisible(), `precheck: low ceiling flagged ${W}`);
+    ok(await page.getByText(/is under 20" wide, 24" high or 5.0 sq ft/).isVisible(), `precheck: small escape window flagged ${W}`);
+    await page.getByRole('button', { name: /^Not found in the text \(\d+\)$/ }).click(); const pc = page.locator('section[aria-labelledby=pc-h]'); const nMiss = await pc.locator('li.res.FAIL').count();
+    ok(nMiss > 0 && await pc.locator('li.res.PASS').count() === 0 && await pc.locator('li.res.UNKNOWN').count() === 0, `precheck: filter to not-found items ${W}`);
+    const pins0 = await page.locator('.drawing svg g[role=button]').count();
+    await page.getByRole('button', { name: 'Add the not-found items as review notes' }).click();
+    ok(await page.locator('.drawing svg g[role=button]').count() === pins0 + nMiss, `precheck: not-found items become review notes ${W}`, `${pins0} -> ${await page.locator('.drawing svg g[role=button]').count()} (${nMiss})`);
+    const v = await axe(page, RULES); ok(v.length === 0, `precheck: axe ${W}`, v.join(' | '));
+    if (width === 390) ok(await page.evaluate(() => document.documentElement.scrollWidth <= 390), `precheck: no sideways scroll at 390`);
+    await page.locator('#pc-h').scrollIntoViewIfNeeded(); await shot(page, `precheck-drafter-${width}.png`); await fullShot(page, `precheck-full-${width}.png`);
+    // 3) error and edge states
+    await setFile(page, pick, 'scan.pdf', await scanPDF(), 'application/pdf');
+    ok(await page.getByText('No text was found in this PDF').waitFor({ timeout: 15000 }).then(() => true, () => false), `precheck: scanned PDF says no text ${W}`); await shot(page, `precheck-scan-${width}.png`);
+    await setFile(page, pick, 'notes.pdf', new TextEncoder().encode('just text'), 'application/pdf');
+    ok(await page.getByText('This file is not a PDF').waitFor({ timeout: 8000 }).then(() => true, () => false), `precheck: not a PDF ${W}`);
+    await setFile(page, pick, 'broken.pdf', new TextEncoder().encode('%PDF-1.7\n1 0 obj << >> garbage'), 'application/pdf');
+    ok(await page.getByText('This PDF could not be read').waitFor({ timeout: 15000 }).then(() => true, () => false), `precheck: damaged PDF ${W}`); await shot(page, `precheck-error-${width}.png`);
+    await page.getByRole('combobox', { name: 'Language' }).selectOption('es'); await step(page, 'review');
+    ok(await page.getByRole('heading', { name: 'Revisión previa de un juego de planos (PDF)' }).isVisible(), `precheck: Spanish ${W}`);
+    await setFile(page, pick, 'drafter-set.pdf', await planSetPDF(), 'application/pdf');
+    ok(await page.getByText(/Se leyó una altura de techo de menos de 7 pies/).waitFor({ timeout: 20000 }).then(() => true, () => false) && await page.getByText(/Confianza: /).first().isVisible(), `precheck: Spanish results ${W}`);
+    await page.locator('#pc-h').scrollIntoViewIfNeeded(); await shot(page, `precheck-es-${width}.png`);
+    ok(errs.length === 0, `precheck: no page errors ${W}`, errs.join(' | '));
+    await c.close(); }
+
+  { const c = await ctx(width, { hasTouch: width < 600, isMobile: width < 600 }); const page = await c.newPage(); const errs = []; page.on('pageerror', e => errs.push(String(e)));
+    await page.goto(BASE); await page.getByRole('button', { name: 'Try the demo lot' }).click(); await step(page, 'review');
+    await page.getByRole('button', { name: 'Open field mode' }).click(); await page.getByRole('heading', { name: 'Site visit' }).waitFor();
+    ok(page.url().endsWith('#field'), `field: has its own address ${W}`);
+    const items = page.locator('li.fm-item'); const n = await items.count(); ok(n >= 20, `field: garage conversion checklist (${n} items) ${W}`);
+    const sizes = await page.locator('.fm-result button').evaluateAll(bs => bs.map(b => b.getBoundingClientRect().height)); ok(Math.min(...sizes) >= 48, `field: big tap targets (min ${Math.min(...sizes)} px) ${W}`);
+    await page.fill('#fm-who', 'R. Inspector');
+    const egress = items.filter({ hasText: 'Bedroom escape window' }); await egress.getByRole('button', { name: 'Fail' }).click();
+    ok(await egress.getByRole('button', { name: 'Fail' }).getAttribute('aria-pressed') === 'true' && (await egress.getAttribute('class')).includes('FAIL'), `field: fail marks the item ${W}`);
+    await items.filter({ hasText: 'Smoke alarms' }).getByRole('button', { name: 'Pass' }).click(); await items.filter({ hasText: 'Fire sprinklers' }).getByRole('button', { name: 'N/A' }).click();
+    await egress.getByLabel('Note').fill('Sill at 46 in, over the limit on the plans');
+    ok(await egress.locator('input[type=file]').getAttribute('capture') === 'environment' && await egress.locator('input[type=file]').getAttribute('accept') === 'image/*', `field: photo input opens the camera ${W}`);
+    await egress.locator('input[type=file]').setInputFiles(PHOTO); ok(await egress.locator('img.fm-thumb').waitFor({ timeout: 10000 }).then(() => true, () => false), `field: photo kept on the device ${W}`, errs.join(' | '));
+    const kb = await egress.locator('img.fm-thumb').evaluate(async img => (await (await fetch(img.src)).blob()).size); ok(kb <= 110 * 1024 && kb > 1000, `field: photo compressed (${kb} bytes) ${W}`);
+    await egress.locator('input[type=file]').setInputFiles({ name: 'x.heic', mimeType: 'image/heic', buffer: Buffer.from('not an image') });
+    ok(await egress.getByText('This photo format cannot be read here').isVisible().catch(() => false) || await egress.getByText('This photo format cannot be read here').waitFor({ timeout: 4000 }).then(() => true, () => false), `field: unreadable photo explained, old photo kept ${W}`);
+    ok(await egress.locator('img.fm-thumb').count() === 1, `field: old photo still there after a bad one ${W}`);
+    ok((await page.locator('.fm-count').textContent()).includes('3 / '), `field: progress count ${W}`, await page.locator('.fm-count').textContent());
+    await page.getByRole('button', { name: /^Fail \(1\)$/ }).click(); ok(await items.count() === 1, `field: filter to failed items ${W}`);
+    await page.getByRole('button', { name: /^All items/ }).click();
+    const v = await axe(page, [...RULES, 'target-size']); ok(v.length === 0, `field: axe incl. target size ${W}`, v.join(' | '));
+    if (width === 390) ok(await page.evaluate(() => document.documentElement.scrollWidth <= 390), `field: no sideways scroll at 390`);
+    await shot(page, `field-top-${width}.png`); await egress.scrollIntoViewIfNeeded(); await shot(page, `field-item-${width}.png`); await fullShot(page, `field-full-${width}.png`);
+    // offline: keeps working and saving
+    await c.setOffline(true); await page.evaluate(() => window.dispatchEvent(new Event('offline')));
+    ok(await page.getByText('Offline: everything still works').isVisible(), `field: offline banner ${W}`);
+    await items.filter({ hasText: 'Carbon monoxide' }).getByRole('button', { name: 'Pass' }).click(); await page.waitForTimeout(400);
+    await page.reload(); await page.getByRole('heading', { name: 'Site visit' }).waitFor({ timeout: 10000 }).catch(() => {});
+    const eg2 = page.locator('li.fm-item').filter({ hasText: 'Bedroom escape window' });
+    ok(await eg2.getByRole('button', { name: 'Fail' }).getAttribute('aria-pressed').catch(() => null) === 'true' && await eg2.locator('img.fm-thumb').waitFor({ timeout: 8000 }).then(() => true, () => false), `field: results and photo survive a reload ${W}`);
+    ok(await page.locator('li.fm-item').filter({ hasText: 'Carbon monoxide' }).getByRole('button', { name: 'Pass' }).getAttribute('aria-pressed') === 'true', `field: offline tap was saved ${W}`);
+    await c.setOffline(false);
+    const [pdf] = await Promise.all([page.waitForEvent('download', { timeout: 20000 }), page.getByRole('button', { name: 'Save the visit record (PDF)' }).click()]);
+    const pb = readFileSync(await pdf.path()); ok(pb.subarray(0, 5).toString() === '%PDF-' && pb.toString('latin1').includes('/DCTDecode'), `field: PDF record with the photo ${W}`);
+    const [pk] = await Promise.all([page.waitForEvent('download'), page.getByRole('button', { name: 'Save the visit with photos (.permitpack)' }).click()]);
+    const file = join(tmp, `visit-${width}.permitpack`); await pk.saveAs(file); const pj = JSON.parse(readFileSync(file, 'utf8'));
+    ok(pj.inspection?.items?.egress?.s === 'fail' && Object.values(pj.inspectionPhotos ?? {}).length === 1, `field: .permitpack carries results and photo ${W}`);
+    // another device opens the pack: results and photo are there
+    const c2 = await ctx(width); const r = await c2.newPage(); await r.goto(BASE); await r.locator('input[type=file][accept=".permitpack,.json"]').first().setInputFiles(file);
+    await r.getByRole('heading', { level: 2 }).first().waitFor(); await step(r, 'review'); await r.getByRole('button', { name: 'Open field mode' }).click();
+    const eg3 = r.locator('li.fm-item').filter({ hasText: 'Bedroom escape window' });
+    ok(await eg3.locator('img.fm-thumb').waitFor({ timeout: 8000 }).then(() => true, () => false) && (await eg3.getByLabel('Note').inputValue()).includes('Sill at 46'), `field: visit opens on another device with its photo ${W}`);
+    await c2.close();
+    // Spanish and clearing the visit
+    await page.getByRole('button', { name: 'Back to the project' }).click(); await page.getByRole('combobox', { name: 'Language' }).selectOption('es'); await step(page, 'review');
+    await page.getByRole('button', { name: 'Abrir el modo de campo' }).click(); ok(await page.getByRole('heading', { name: 'Visita a la obra' }).isVisible() && await page.getByRole('button', { name: 'No cumple' }).first().isVisible(), `field: Spanish ${W}`);
+    await shot(page, `field-es-${width}.png`);
+    await page.getByRole('button', { name: 'Borrar la visita' }).click(); await page.locator('dialog.ask').getByRole('button', { name: 'Borrar la visita' }).click();
+    ok(await page.getByText('Se borró la visita.').isVisible() && await page.locator('img.fm-thumb').count() === 0 && await page.locator('.fm-result button[aria-pressed=true]').count() === 0, `field: clear removes results and photos ${W}`);
+    ok(await page.inputValue('#fm-who') === 'R. Inspector', `field: inspector name kept after clearing ${W}`);
+    ok(errs.length === 0, `field: no page errors ${W}`, errs.join(' | '));
+    await c.close(); }
+}
 await browser.close(); server.close();
 console.log(`${total - failed}/${total} passed` + (failed ? `, ${failed} FAILED` : '')); process.exit(failed ? 1 : 0);

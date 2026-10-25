@@ -1,3 +1,4 @@
+import { ES_FEAT } from './es-feat';
 export const ES = {
 "yes": "sí",
 "no": "no",
@@ -455,5 +456,6 @@ export const ES = {
 "Word, name or letter item": "Palabra, nombre o punto de la carta",
 "All notes": "Todas las notas",
 "Open only": "Solo abiertas",
-"Resolved only": "Solo resueltas"
+"Resolved only": "Solo resueltas",
+...ES_FEAT,
 } as const;
