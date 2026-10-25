@@ -1,23 +1,28 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { blankProject, demoProject, isDemo, MODULES, SAFETY_MODULES, uid, type Project, type Tri, type Window } from '../core/model';
 import { History } from '../core/undo';
+import { nextPinNumber } from '../core/markup';
 import { canDismiss, evaluate, exportBlockers, type Report, type Result } from '../rules/engine';
 import { RULES, PACK_ID, addressCity } from '../rules/la-city';
 import { PACK, packFreshness, rulesLine } from '../rules/pack';
 import { bbox, rect, translate } from '../core/geom';
-import { fmtFtIn, fmtSqFt, ft, lengthBlur, lengthTooLarge, toFt, RANGES, outOfRange } from '../core/units';
+import { fmtFtIn, fmtSqFt, ft, toFt, RANGES } from '../core/units';
 import { area } from '../core/geom';
 import { Plan } from './Plan';
 import { CleanFix } from './CleanFix';
+import { ParcelLookup } from './ParcelLookup';
+import { Len, Num, Q } from './fields';
+import { RoomsPanel } from './Rooms';
+import { RoomPlan } from './RoomPlan';
+import { ReviewStep } from './Review';
+import { fromMap, unmark, type MapField } from '../io/parcel-apply';
 import { ask, AskHost } from './Ask';
 import { autoFit } from '../rules/fit';
 import { readiness, scoreLine, applies as itemApplies } from '../rules/readiness';
 import { CATALOG, RULE_ITEMS } from '../rules/ladbs-adu-2025';
 import { citeText } from '../rules/cites-es';
 import { tr, type Lang } from './i18n';
-import { ES } from './es';
-let LANG: Lang = 'en';
-const L = (en: string) => (LANG === 'es' ? (ES as Record<string, string>)[en] ?? en : en);
+import { L, setUiLang, uiLang } from './lang';
 import { encryptPack, passphraseProblem, readPackFile, serialize, serializeAll, readBundle, MAX_PACK_BYTES } from '../core/permitpack';
 import { takeoff, takeoffCSV } from '../out/takeoff';
 import { plainWasmError } from '../out/wasm';
@@ -41,7 +46,7 @@ async function shareOrDownload(name: string, data: string, type: string): Promis
   download(name, data, type); return 'saved';
 }
 const slug = (p: Project) => (p.site.address || p.name).replace(/[^a-z0-9]+/gi, '-').replace(/^-|-$/g, '').toLowerCase().slice(0, 40) || 'project';
-const STEP_KEYS = ['lot', 'garage', 'rooms', 'checks', 'export'];
+const STEP_KEYS = ['lot', 'garage', 'rooms', 'checks', 'export', 'review'];
 const stepFromHash = () => { const m = location.hash.match(/step=(\w+)/); const i = m ? STEP_KEYS.indexOf(m[1]) : -1; return i < 0 ? 0 : i; };
 /** Typing in a text field: skip the app-wide undo shortcut so the field's own undo works. */
 const inField = (t: EventTarget | null) => t instanceof HTMLElement && (t.tagName === 'INPUT' || t.tagName === 'TEXTAREA' || t.tagName === 'SELECT' || t.isContentEditable);
@@ -55,8 +60,9 @@ export default function App() {
   const [saveState, setSaveState] = useState<SaveResult>('ok');
   const [notice, setNotice] = useState<string[]>(() => (p ? openNotes(p) : []));
   const formRef = useRef<HTMLDivElement>(null); const moved = useRef(false);
+  const [roomSel, setRoomSel] = useState<string | null>(null); const [pinSel, setPinSel] = useState<string | null>(null); const [placing, setPlacing] = useState<string | false>(false);
   if (p && !hist.current) hist.current = new History(p);
-  LANG = lang;
+  setUiLang(lang);
 
   useEffect(() => { if (p) setSaveState(persist(p)); }, [p]);
   useEffect(() => { navigator.storage?.persist?.().catch(() => {}); }, []);
@@ -77,7 +83,7 @@ export default function App() {
   const undo = () => { if (hist.current?.undo()) setP(hist.current.present); };
   const redo = () => { if (hist.current?.redo()) setP(hist.current.present); };
   useEffect(() => {
-    const k = (e: KeyboardEvent) => { if (inField(e.target)) return; if ((e.metaKey || e.ctrlKey) && e.key.toLowerCase() === 'z') { e.preventDefault(); if (e.shiftKey) redo(); else undo(); } };
+    const k = (e: KeyboardEvent) => { if (e.key === 'Escape' && placing) { setPlacing(false); return; } if (inField(e.target)) return; if ((e.metaKey || e.ctrlKey) && e.key.toLowerCase() === 'z') { e.preventDefault(); if (e.shiftKey) redo(); else undo(); } };
     window.addEventListener('keydown', k); return () => window.removeEventListener('keydown', k);
   });
   const show = (x: Project, s = 0) => { setNotice(openNotes(x)); const y = { ...x, repairNotes: undefined }; hist.current = new History(y); setP(y); setStep(s); };
@@ -87,7 +93,7 @@ export default function App() {
     onStart={(d) => { const x = d ? demoProject() : blankProject(); x.people.language = lang; if (!d && lang === 'es') x.name = 'Mi conversión de garaje'; show(x); }} onOpen={x => show(x, 3)} /></>;
 
   const steps: string[] = tr(lang, 'steps');
-  const stepDot = (i: number) => { const mod = [['core', 'zoning', 'hazards'], ['zoning', 'fire', 'structural', 'fees'], ['egress'], [], []][i]; const rs = report.results.filter(r => mod.includes(r.rule.module)); return rs.some(r => r.status === 'FAIL') ? 'var(--fix)' : rs.some(r => r.status === 'UNKNOWN') ? 'var(--info-need)' : rs.some(r => r.status === 'NOT_CHECKED') ? 'var(--off)' : rs.some(r => r.status === 'PASS') ? 'var(--pass)' : 'transparent'; };
+  const stepDot = (i: number) => { const mod = [['core', 'zoning', 'hazards'], ['zoning', 'fire', 'structural', 'fees'], ['egress'], [], [], []][i]; const rs = report.results.filter(r => mod.includes(r.rule.module)); return rs.some(r => r.status === 'FAIL') ? 'var(--fix)' : rs.some(r => r.status === 'UNKNOWN') ? 'var(--info-need)' : rs.some(r => r.status === 'NOT_CHECKED') ? 'var(--off)' : rs.some(r => r.status === 'PASS') ? 'var(--pass)' : 'transparent'; };
   const close = () => { setP(null); hist.current = null; history.pushState(null, '', '#projects'); };
   const fresh = packFreshness(new Date(), p.applicationDate);
   const saveText = saveState === 'ok' ? tr(lang, 'saved') : saveState === 'blocked' ? L("Not saved: storage is blocked. Export a backup.") : L("Not saved: this project changed in another tab.");
@@ -128,23 +134,29 @@ export default function App() {
         {fresh.stale && <div className="banner warn" role="status">{lang === 'es' ? fresh.reasonEs : fresh.reason}</div>}
         {p.site.flags.fireRebuild === 'yes' && <div className="banner warn">{L("This lot is in a 2025 burn area. Use the official rebuild path. Automatic passes are off.")}</div>}
         <div className="drawing">
-          <Plan p={p} es={lang === 'es'} onMove={(dx, dy, c) => {
+          {step === 2 ? <RoomPlan p={p} selected={roomSel} onSelect={setRoomSel} onRemove={id => { update(d => { d.adu.rooms = d.adu.rooms.filter(x => x.id !== id); }); setRoomSel(null); }}
+            onChange={(id, poly, key) => update(d => { const r = d.adu.rooms.find(x => x.id === id); if (r) { r.poly = poly; if (r.shape === 'rect') { const bb = bbox(poly); if (r.tape.w != null) r.tape.w = bb.maxX - bb.minX; if (r.tape.d != null) r.tape.d = bb.maxY - bb.minY; } } }, key)} /> :
+          <Plan p={p} es={lang === 'es'} pins={step === 5 ? { sel: pinSel, onSelect: setPinSel, placing, zoom: !!pinSel, onPlace: (x, y) => {
+            if (placing === 'new') { const id = uid(); update(d => { d.markup.pins.push({ id, n: nextPinNumber(d.markup.pins), x, y, comment: '', status: 'open', author: (() => { try { return localStorage.getItem('opa.author') ?? ''; } catch { return ''; } })(), at: new Date(Date.now() - new Date().getTimezoneOffset() * 60000).toISOString().slice(0, 10) }); }); setPinSel(id); }
+            else if (placing) { const id = placing; update(d => { const x2 = d.markup.pins.find(q => q.id === id); if (x2) { x2.x = x; x2.y = y; } }); }
+            setPlacing(false); } } : undefined} onMove={(dx, dy, c) => {
             const moved = (base: Project) => ({ ...base, adu: { ...base.adu, footprint: translate(base.adu.footprint, dx, dy) } });
             if (!c) { if (!dragStart.current) dragStart.current = p; setP(moved(p)); return; }
             if (dragStart.current) { const start = dragStart.current; dragStart.current = null; hist.current!.present = start; commit({ ...p, confirmed: { ...p.confirmed, adu: true } }); return; }
             if (dx || dy) commit({ ...moved(p), confirmed: { ...p.confirmed, adu: true } });
-          }} />
-          <span className="hint">{L("Drag the ADU, or select it and use arrow keys. Shaded band = 4 ft side/rear setback.")}</span>
+          }} />}
+          <span className="hint">{step === 2 ? L("Drag a room, or drag a corner to resize. Keys: arrows move, Alt+arrows resize.") : step === 5 ? (pinSel ? <button type="button" className="btn quiet" onClick={() => setPinSel(null)}>{L("Show the whole lot")}</button> : L("Pins: red = open, green = resolved.")) : L("Drag the ADU, or select it and use arrow keys. Shaded band = 4 ft side/rear setback.")}</span>
         </div>
         <div className="form" ref={formRef}>
-          {step === 0 && <LotStep p={p} update={update} lang={lang} />}
+          {step === 0 && <LotStep p={p} update={update} lang={lang} replace={next => commit({ ...next, rulePack: PACK_ID })} />}
           {step === 1 && <GarageStep p={p} update={update} />}
-          {step === 2 && <RoomsStep p={p} update={update} />}
+          {step === 2 && <RoomsStep p={p} update={update} sel={roomSel} setSel={setRoomSel} />}
           {step === 3 && <ChecksStep p={p} update={update} report={report} lang={lang} />}
           {step === 4 && <ExportStep p={p} update={update} report={report} lang={lang} />}
+          {step === 5 && <ReviewStep p={p} update={update} sel={pinSel} setSel={setPinSel} placing={placing} setPlacing={setPlacing} download={(n, d, t) => download(n, d, t)} />}
           <div style={{ display: 'flex', gap: 8 }}>
             {step > 0 && <button className="btn quiet" onClick={() => setStep(step - 1)}>{tr(lang, 'back')}</button>}
-            {step < 4 && <button className="btn primary" onClick={() => setStep(step + 1)}>{tr(lang, 'next')}: {steps[step + 1]}</button>}
+            {step < steps.length - 1 && <button className="btn primary" onClick={() => setStep(step + 1)}>{tr(lang, 'next')}: {steps[step + 1]}</button>}
           </div>
         </div>
       </main>
@@ -210,56 +222,29 @@ function Welcome({ lang, setLang, onStart, onOpen, onClean, onPick }: { onPick: 
   );
 }
 
-function TriPick({ id, value, onChange, lang = 'en' as Lang }: { id: string; value: Tri; onChange: (v: Tri) => void; lang?: Lang }) {
-  return <div className="tri" role="group" aria-labelledby={id}>{(['yes', 'no', 'unknown'] as Tri[]).map(v => <button key={v} type="button" aria-pressed={value === v} onClick={() => onChange(v)}>{tr(LANG ?? lang, v)}</button>)}</div>;
-}
-function Q({ id, label, help, value, onChange }: { id: string; label: string; help?: string; value: Tri; onChange: (v: Tri) => void }) {
-  return <div className="field"><label id={id}>{label}</label><TriPick id={id} value={value} onChange={onChange} />{help && <span className="help">{help}</span>}</div>;
-}
-/** Length field. Rejects what can't be a size; accepts unusual sizes but says "check this number". */
-function Len({ id, label, help, mm, onChange, allowZero, range, bare, always }: { id: string; label: string; help?: string; mm: number | null; onChange: (mm: number | null) => void; allowZero?: boolean; range?: readonly [number, number]; /** Unit of a bare number (window fields: inches). */ bare?: 'ft' | 'in'; /** Commit on every good entry, even an unchanged one (confirms example sizes). */ always?: boolean }) {
-  const [txt, setTxt] = useState(mm == null ? '' : fmtFtIn(mm)); const [bad, setBad] = useState(false); const [dirty, setDirty] = useState(false);
-  const [prev, setPrev] = useState(mm); if (prev !== mm) { setPrev(mm); setTxt(mm == null ? '' : fmtFtIn(mm)); }
-  const odd = !bad && range != null && mm != null && outOfRange(mm, range);
-  return <div className="field"><label htmlFor={id}>{label}</label>
-    <input id={id} value={txt} inputMode="text" aria-invalid={bad} aria-describedby={id + '-h'} onChange={e => { setTxt(e.target.value); setDirty(true); }}
-      onBlur={() => { const r = lengthBlur(txt, mm, { allowZero, bare, always: always && dirty }); setDirty(false); setBad(r.bad); if (r.commit) onChange(r.value); }} />
-    <span className="help" id={id + '-h'} style={odd ? { color: 'var(--info-need)' } : undefined}>{bad && lengthTooLarge(txt) ? L('Check this number: it is larger than any lot or building.') : bad && /^-|^0+(\.0*)?$/.test(txt.trim()) ? L('Enter a size greater than zero.') : bad ? (bare === 'in' ? L("Try a format like 24, 24\" or 2' 0\".") : L("Try a format like 20' 6\", 20-6, 20.5 or 6.25m.")) : odd ? L('Check this number: it looks unusual for a garage ADU.') : help ?? L("Feet and inches, like 20' 6\"")}</span></div>;
-}
-/** Number field with whole-number and range handling that says what happened instead of silently changing the value. */
-function Num({ id, label, help, value, onChange, min = 0, max, integer }: { id: string; label: string; help?: string; value: number | null; onChange: (n: number | null) => void; min?: number; max?: number; integer?: boolean }) {
-  const [msg, setMsg] = useState('');
-  return <div className="field"><label htmlFor={id}>{label}</label><input id={id} type="number" min={min} max={max} step={integer ? 1 : 'any'} inputMode={integer ? 'numeric' : 'decimal'} value={value ?? ''} aria-describedby={id + '-h'}
-    onChange={e => { if (e.target.value === '') { setMsg(''); onChange(null); return; } let n = Number(e.target.value); if (!Number.isFinite(n)) return; let m = '';
-      if (integer && !Number.isInteger(n)) { n = Math.round(n); m = L('Use a whole number.'); }
-      if (n < min) { n = min; m = `${L('The smallest allowed is')} ${min}.`; }
-      if (max != null && n > max) m = L('Check this number: it looks unusual for a garage ADU.');
-      setMsg(m); onChange(n); }} />
-    <span className="help" id={id + '-h'} style={msg ? { color: 'var(--info-need)' } : undefined}>{msg || help}</span></div>;
-}
-
 type U = (fn: (d: Project) => void, key?: string) => void;
 
-/** Lot is in another city or unincorporated county area if the address names one of these. */
-const OTHER_PLACES = /\b(pasadena|glendale|burbank|long beach|santa monica|beverly hills|culver city|inglewood|west hollywood|san fernando|torrance|east los angeles|east la|view park|windsor hills|altadena|marina del rey|ladera heights|west athens|florence|willowbrook|topanga|la crescenta)\b/i;
-
-function LotStep({ p, update }: { p: Project; update: U; lang: Lang }) {
+function LotStep({ p, update, replace }: { p: Project; update: U; lang: Lang; replace: (next: Project) => void }) {
   const lb = bbox(p.site.lot), hb = bbox(p.site.primary); const f = p.site.flags; const s = p.site;
   const zimas = `https://zimas.lacity.org/?address=${encodeURIComponent(p.site.address)}`;
-  const setLot = (w: number | null, dpt: number | null) => update(d => { d.confirmed.lot = true; const W = w ?? lb.maxX - lb.minX, D = dpt ?? lb.maxY - lb.minY; d.site.lot = rect(0, 0, W, D); });
-  const other = p.site.address.match(OTHER_PLACES)?.[0];
+  const tag = (k: MapField, help?: string) => (fromMap(p, k) ? L('From parcel map, verify on site') : help);
+  const shaped = p.site.lot.length !== 4 || p.site.lotSource === 'gis';
+  const setLot = (w: number | null, dpt: number | null) => update(d => { d.confirmed.lot = true; d.site.lotSource = 'manual'; unmark(d, 'lot'); const W = w ?? lb.maxX - lb.minX, D = dpt ?? lb.maxY - lb.minY; d.site.lot = rect(0, 0, W, D); d.site.streetEdge = 0; });
+  const flag = (k: 'hillside' | 'vhfhsz' | 'hpoz' | 'coastal') => (v: Tri) => update(d => { d.site.flags[k] = v; unmark(d, k); });
   return <>
     <h2>{L("The lot")}</h2>
-    <p className="lead">{L("Enter the address, then check the parcel in ZIMAS. It's the city's free map, and it answers most of the questions below.")}</p>
+    <p className="lead">{L("Enter the address. Tap Look up to fill in the lot from the city's parcel map, or check the parcel in ZIMAS and type it in.")}</p>
     <div className="grid2">
       <div className="field"><label htmlFor="addr">{L("Street address")}</label><input id="addr" value={p.site.address} onChange={e => update(d => { d.site.address = e.target.value; }, 'addr')} autoComplete="street-address" /><span className="help">{p.site.address ? <a href={zimas} target="_blank" rel="noreferrer">{L("Open this address in ZIMAS")}</a> : L("Used only on your sheets. It stays on this device.")}</span></div>
-      <div className="field"><label htmlFor="apn">{L("Parcel number (APN)")}</label><input id="apn" value={p.site.apn} onChange={e => update(d => { d.site.apn = e.target.value; }, 'apn')} placeholder="1234-567-890" /><span className="help">{L("The 10-digit number on your property tax bill.")}</span></div>
-      <div className="field"><label htmlFor="jur">{L("City")}</label><select id="jur" value={p.site.jurisdiction} onChange={e => update(d => { d.site.jurisdiction = e.target.value as Project['site']['jurisdiction']; })}>
+      <ParcelLookup p={p} commit={replace} />
+      <div className="field"><label htmlFor="apn">{L("Parcel number (APN)")}</label><input id="apn" value={p.site.apn} onChange={e => update(d => { d.site.apn = e.target.value; unmark(d, 'apn'); }, 'apn')} placeholder="1234-567-890" aria-describedby="apn-h" /><span className="help" id="apn-h">{tag('apn', L("The 10-digit number on your property tax bill."))}</span></div>
+      <div className="field"><label htmlFor="zone">{L("Zone")}</label><input id="zone" value={p.site.zone} onChange={e => update(d => { d.site.zone = e.target.value; unmark(d, 'zone'); }, 'zone')} placeholder="R1-1" aria-describedby="zone-h" /><span className="help" id="zone-h">{tag('zone', L("Shown in ZIMAS, like R1-1. Printed on your site plan."))}</span></div>
+      <div className="field"><label htmlFor="jur">{L("City")}</label><select id="jur" value={p.site.jurisdiction} aria-describedby="jur-h" onChange={e => update(d => { d.site.jurisdiction = e.target.value as Project['site']['jurisdiction']; unmark(d, 'jurisdiction'); })}>
         <option value="unknown">{L("Not sure yet")}</option><option value="la-city">{L("City of Los Angeles")}</option><option value="la-county">{L("Unincorporated LA County")}</option><option value="other">{L("Another city")}</option></select>
-        <span className="help">{L("A \"Los Angeles\" mailing address is not always LA City. Pasadena, Long Beach, Glendale, Burbank and Santa Monica are separate cities, and East LA, View Park and Altadena are unincorporated county. ZIMAS shows if the lot is in LA City.")}</span></div>
+        <span className="help" id="jur-h">{tag('jurisdiction', L("A \"Los Angeles\" mailing address is not always LA City. Pasadena, Long Beach, Glendale, Burbank and Santa Monica are separate cities, and East LA, View Park and Altadena are unincorporated county. ZIMAS shows if the lot is in LA City."))}</span></div>
     </div>
     {p.site.jurisdiction === 'la-city' && (() => { const c = addressCity(p.site.address); return c && c !== 'los angeles' && c !== 'la' ? <div className="mods"><label><input type="checkbox" checked={!!s.jurisdictionConfirmed} onChange={e => update(d => { d.site.jurisdictionConfirmed = e.target.checked; })} /> {L("I checked ZIMAS: this lot is in the City of Los Angeles")}</label></div> : null; })()}
-    {other && p.site.jurisdiction === 'la-city' && <div className="banner warn" role="status">{L("The address names a place that is not in the City of Los Angeles:")} {other}. {L("Check the parcel in ZIMAS before you rely on these rules.")}</div>}
+    {p.site.parcel && fromMap(p, 'jurisdiction') && p.site.jurisdiction === 'other' && <div className="banner warn" role="status">{L("The city map shows this lot is outside the City of Los Angeles")}{p.site.parcel.cityName ? ` (${p.site.parcel.cityName})` : ''}. {L("This tool's rules are for LA City only.")}</div>}
     <div className="grid2">
       <div className="field"><label htmlFor="mb">{L("What is the main building on the lot?")}</label><select id="mb" value={s.mainBuilding} onChange={e => update(d => { d.site.mainBuilding = e.target.value as Project['site']['mainBuilding']; })}>
         <option value="unknown">{L("Not sure yet")}</option><option value="sfd">{L("One single-family house")}</option><option value="duplex">{L("A duplex")}</option><option value="multifamily">{L("Apartments (3 or more units)")}</option></select></div>
@@ -267,8 +252,8 @@ function LotStep({ p, update }: { p: Project; update: U; lang: Lang }) {
       <Num id="exj" label={L("Junior ADUs already on the lot")} integer max={4} value={s.existingJadus} onChange={v => update(d => { d.site.existingJadus = v; })} help={L("A junior ADU is a unit inside the house, up to 500 sq ft. 0 if none.")} />
     </div>
     <div className="grid2">
-      <Len always id="lw" range={RANGES.lot} label={L("Lot width (street side)")} mm={lb.maxX - lb.minX} onChange={v => setLot(v, null)} />
-      <Len always id="ld" range={RANGES.lot} label={L("Lot depth")} mm={lb.maxY - lb.minY} onChange={v => setLot(null, v)} />
+      <Len always id="lw" range={RANGES.lot} label={L("Lot width (street side)")} mm={p.site.lotSource === 'gis' ? Math.hypot(p.site.lot[1].x - p.site.lot[0].x, p.site.lot[1].y - p.site.lot[0].y) : lb.maxX - lb.minX} onChange={v => setLot(v, null)} help={tag('lot', shaped ? L("Typing a width or depth replaces the drawn lot shape with a rectangle.") : undefined)} />
+      <Len always id="ld" range={RANGES.lot} label={L("Lot depth")} mm={lb.maxY - lb.minY} onChange={v => setLot(null, v)} help={tag('lot', shaped ? L("Typing a width or depth replaces the drawn lot shape with a rectangle.") : undefined)} />
       <Len id="err" allowZero range={RANGES.uncertainty} label={L("How sure are the lot lines?")} mm={p.site.lotUncertaintyMm} onChange={v => update(d => { d.site.lotUncertaintyMm = v ?? ft(2); })} help={L("County maps can be off by a couple of feet. A survey makes this 0.")} />
     </div>
     <div className="grid2">
@@ -282,10 +267,10 @@ function LotStep({ p, update }: { p: Project; update: U; lang: Lang }) {
     </div>
     <h2>{L("What ZIMAS shows")}</h2>
     <div className="grid2">
-      <Q id="q-hill" label={L("Hillside Area?")} value={f.hillside} onChange={v => update(d => { d.site.flags.hillside = v; })} />
-      <Q id="q-fire" label={L("Very High Fire Hazard Severity Zone?")} value={f.vhfhsz} onChange={v => update(d => { d.site.flags.vhfhsz = v; })} />
-      <Q id="q-hpoz" help={L("HPOZ = Historic Preservation Overlay Zone.")} label={L("Historic district (HPOZ)?")} value={f.hpoz} onChange={v => update(d => { d.site.flags.hpoz = v; })} />
-      <Q id="q-coast" label={L("Coastal Zone?")} value={f.coastal} onChange={v => update(d => { d.site.flags.coastal = v; })} />
+      <Q id="q-hill" label={L("Hillside Area?")} help={tag('hillside')} value={f.hillside} onChange={flag('hillside')} />
+      <Q id="q-fire" label={L("Very High Fire Hazard Severity Zone?")} help={tag('vhfhsz')} value={f.vhfhsz} onChange={flag('vhfhsz')} />
+      <Q id="q-hpoz" help={tag('hpoz', L("HPOZ = Historic Preservation Overlay Zone."))} label={L("Historic district (HPOZ)?")} value={f.hpoz} onChange={flag('hpoz')} />
+      <Q id="q-coast" label={L("Coastal Zone?")} help={tag('coastal')} value={f.coastal} onChange={flag('coastal')} />
       <Q id="q-meth" label={L("Methane zone?")} value={f.methane} onChange={v => update(d => { d.site.flags.methane = v; })} />
       <Q id="q-burn" label={L("In a 2025 burn area (Palisades or Eaton)?")} value={f.fireRebuild} onChange={v => update(d => { d.site.flags.fireRebuild = v; })} />
       <Q id="q-tr" label={L("Within a half-mile walk of a major transit stop or a frequent bus corridor?")} help={L("Walking distance, not a straight line. A high-quality transit corridor counts too.")} value={f.transitHalfMile} onChange={v => update(d => { d.site.flags.transitHalfMile = v; })} />
@@ -313,11 +298,11 @@ function GarageStep({ p, update }: { p: Project; update: U }) {
       <div className="tri" role="group" aria-labelledby="att">
         <button aria-pressed={a.garageAttachment === 'detached'} onClick={() => update(d => { d.adu.garageAttachment = 'detached'; })}>{L("Detached")}</button>
         <button aria-pressed={a.garageAttachment === 'attached'} onClick={() => update(d => { d.adu.garageAttachment = 'attached'; })}>{L("Attached")}</button>
-        <button aria-pressed={a.garageAttachment === 'unknown'} onClick={() => update(d => { d.adu.garageAttachment = 'unknown'; })}>{tr(LANG, 'unknown')}</button>
+        <button aria-pressed={a.garageAttachment === 'unknown'} onClick={() => update(d => { d.adu.garageAttachment = 'unknown'; })}>{tr(uiLang(), 'unknown')}</button>
       </div><span className="help">{L("The city uses sheet II-C for detached garages and II-G for attached ones.")}</span></div>}
     {a.mode === 'conversion' && <div className="field"><label id="cons">{L("What are the garage walls made of?")}</label>
       <div className="tri" role="group" aria-labelledby="cons">
-        {(['wood', 'masonry', 'concrete', 'unknown'] as const).map(c => <button key={c} aria-pressed={a.garageConstruction === c} onClick={() => update(d => { d.adu.garageConstruction = c; })}>{c === 'unknown' ? tr(LANG, 'unknown') : (c === 'wood' ? L("Wood frame") : c === 'masonry' ? L("Brick or block") : L("Concrete"))}</button>)}
+        {(['wood', 'masonry', 'concrete', 'unknown'] as const).map(c => <button key={c} aria-pressed={a.garageConstruction === c} onClick={() => update(d => { d.adu.garageConstruction = c; })}>{c === 'unknown' ? tr(uiLang(), 'unknown') : (c === 'wood' ? L("Wood frame") : c === 'masonry' ? L("Brick or block") : L("Concrete"))}</button>)}
       </div><span className="help">{L("Wood-frame is common. Brick, block (CMU) and concrete garages need a licensed architect or engineer.")}</span></div>}
     {a.mode === 'youadu' && <div><button className="btn" onClick={() => { const r = autoFit(p); setScanMsg(r.why); if (r.footprint) update(d => { d.adu.footprint = r.footprint!; }); }}>{L("Fit it on my lot")}</button> <span role="status" className="help">{scanMsg}</span></div>}
     {a.mode === 'youadu' && <p className="lead"><a href="https://dbs.lacity.gov/standard-plan-program" target="_blank" rel="noreferrer">{L("See the LA Standard Plan list")}</a>. {L("Enter the footprint from the plan sheet below.")}</p>}
@@ -374,16 +359,14 @@ function GarageStep({ p, update }: { p: Project; update: U }) {
   </>;
 }
 
-function RoomsStep({ p, update }: { p: Project; update: U }) {
+function RoomsStep({ p, update, sel, setSel }: { p: Project; update: U; sel: string | null; setSel: (id: string | null) => void }) {
   const a = p.adu;
   const setW = (i: number, patch: Partial<Window>, key?: string) => update(d => { d.adu.windows[i] = { ...d.adu.windows[i], ...patch }; }, key);
   return <>
-    <h2>{L("Rooms, windows and alarms")}</h2>
+    <RoomsPanel p={p} update={update} selected={sel} setSelected={setSel} />
+    {a.rooms.length === 0 && <>
+    <h2>{L("Or list windows without drawing rooms")}</h2>
     <p className="lead">{L("Every bedroom needs a window you can climb out of. Measure the clear opening when the window is fully open, not the size on the label.")}</p>
-    <div className="grid2"><Num id="beds" integer max={6} label={L("Bedrooms")} value={a.bedrooms} onChange={v => update(d => { d.adu.bedrooms = v ?? 0; })} help={L("0 for a studio.")} />
-      {a.bedrooms === 0 && <Q id="q-studio" label={L("Studio: will anyone sleep in the main room?")} help={L("If yes or not sure, the main room needs an escape window.")} value={a.mainRoomSleeping} onChange={v => update(d => { d.adu.mainRoomSleeping = v; })} />}
-      <Q id="q-alarm" label={L("Smoke and CO alarms shown on the plan?")} value={a.smokeCoPlanned} onChange={v => update(d => { d.adu.smokeCoPlanned = v; })} />
-      <Q id="q-hw" label={L("Are smoke alarms hardwired with battery backup?")} value={a.smokeHardwired} onChange={v => update(d => { d.adu.smokeHardwired = v; })} /></div>
     {a.windows.map((w, i) => <fieldset key={w.id} className="grid2" style={{ border: '1px solid var(--rule)', padding: 12 }}>
       <legend>{L("Window")} {i + 1}</legend>
       <div className="field"><label htmlFor={`wr${i}`}>{L("Room")}</label><input id={`wr${i}`} value={w.room} onChange={e => setW(i, { room: e.target.value }, 'wr' + w.id)} aria-describedby={`wr${i}-h`} /><span className="help" id={`wr${i}-h`}>{L("Give each bedroom its own name, like Bedroom 1 and Bedroom 2.")}</span></div>
@@ -395,6 +378,7 @@ function RoomsStep({ p, update }: { p: Project; update: U }) {
         <button className="btn quiet" onClick={() => update(d => { d.adu.windows.splice(i, 1); })}>{L("Remove window")}</button></div>
     </fieldset>)}
     <div><button className="btn" onClick={() => update(d => { const n = d.adu.windows.filter(x => x.sleeping).length; d.adu.windows.push({ id: uid(), room: d.adu.bedrooms === 0 ? L('Main room') : d.adu.bedrooms > 1 ? `${L('Bedroom')} ${n + 1}` : L('Bedroom'), sleeping: true, clearWidthMm: null, clearHeightMm: null, sillMm: null, gradeFloor: true }); })}>{L("Add a window")}</button></div>
+    </>}
   </>;
 }
 
@@ -481,10 +465,10 @@ function SheetItems({ p, update, report, lang }: { p: Project; update: U; report
     <details open={p.people.preparerRole !== 'owner'}><summary>{L("Plan-sheet items for your preparer")} ({asks.filter(i => !p.sheet[i.id]).length} {L("not answered")})</summary>
     {asks.map(i => <div className="field" key={i.id}><label id={'si-' + i.id}>{i.id} {i.summary[lang]}</label>
       <div className="tri" role="group" aria-labelledby={'si-' + i.id}>
-        <button type="button" aria-pressed={p.sheet[i.id] === 'yes'} onClick={() => setA(i.id, 'yes')}>{tr(LANG, 'yes')}</button>
-        <button type="button" aria-pressed={p.sheet[i.id] === 'no'} onClick={() => setA(i.id, 'no')}>{tr(LANG, 'no')}</button>
+        <button type="button" aria-pressed={p.sheet[i.id] === 'yes'} onClick={() => setA(i.id, 'yes')}>{tr(uiLang(), 'yes')}</button>
+        <button type="button" aria-pressed={p.sheet[i.id] === 'no'} onClick={() => setA(i.id, 'no')}>{tr(uiLang(), 'no')}</button>
         <button type="button" aria-pressed={p.sheet[i.id] === 'na'} onClick={() => setA(i.id, 'na')}>{L("Doesn't apply")}</button>
-        <button type="button" aria-pressed={!p.sheet[i.id]} onClick={() => setA(i.id, undefined)}>{tr(LANG, 'unknown')}</button>
+        <button type="button" aria-pressed={!p.sheet[i.id]} onClick={() => setA(i.id, undefined)}>{tr(uiLang(), 'unknown')}</button>
       </div></div>)}
     </details>
   </>;

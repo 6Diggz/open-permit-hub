@@ -1,5 +1,6 @@
 import type { Project } from '../core/model';
 import { SAFETY_MODULES } from '../core/model';
+import { withRooms } from '../core/rooms';
 
 export type Status = 'PASS' | 'FAIL' | 'UNKNOWN' | 'NOT_CHECKED' | 'INFO';
 export type L = { en: string; es: string };
@@ -23,6 +24,8 @@ export interface Report { results: Result[]; overall: 'READY_FOR_PREPARER' | 'FI
 
 export function evaluate(p: Project, rules: Rule[], packId: string, today = new Date()): Report {
   if (p.applicationDate && !/^\d{4}-\d{2}-\d{2}$/.test(p.applicationDate)) p = { ...p, applicationDate: null };
+  // Drawn rooms are the source of bedrooms and escape windows (one truth for the drawing and the checks).
+  p = withRooms(p);
   const local = new Date(today.getTime() - today.getTimezoneOffset() * 60000).toISOString().slice(0, 10);
   const vestDate = (p.applicationDate ?? local);
   const results: Result[] = [];

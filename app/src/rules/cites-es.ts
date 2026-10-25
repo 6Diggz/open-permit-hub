@@ -2,6 +2,8 @@ import { LA_ED } from './pack';
 import type { Cite } from './engine';
 /** Spanish for the plain-language part of each citation. Code numbers stay as they are. A test fails if a cite is missing here. */
 export const CITES_ES: Record<string, string> = {
+  'LARC R304.1, R304.2 (habitable rooms at least 70 sq ft and 7 ft in any direction; kitchens exempt)': 'LARC R304.1, R304.2 (cuartos habitables de al menos 70 pies² y 7 pies en cualquier dirección; cocinas exentas)',
+  'LADBS sheet III-G.8 (interior doors at least 32" wide)': 'Hoja LADBS III-G.8 (puertas interiores de al menos 32" de ancho)',
   'Data check (not a code rule)': 'Revisión de datos (no es una regla del código)',
   'LADBS jurisdiction': 'Jurisdicción de LADBS',
   'Gov. Code §66323(a)(1)(A); LADBS sheet II-C (detached) and II-G (attached)': 'Código de Gobierno §66323(a)(1)(A); hoja LADBS II-C (separado) y II-G (adjunto)',

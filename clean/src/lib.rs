@@ -380,7 +380,7 @@ pub fn site_plan(spec: &str) -> Result<Vec<u8>, String> {
     let mut doc = CadDocument::new();
     doc.header.insertion_units = 1; // inches
     doc.header.measurement = 0; // imperial
-    for (n, c) in [("C-PROP", 7), ("A-EXST-BLDG", 8), ("A-ADU-WALL", 1), ("C-PROP-SETB", 3), ("A-ANNO-DIMS", 5), ("G-ANNO-TEXT", 7)] {
+    for (n, c) in [("C-PROP", 7), ("A-EXST-BLDG", 8), ("A-ADU-WALL", 1), ("C-PROP-SETB", 3), ("A-ANNO-DIMS", 5), ("G-ANNO-TEXT", 7), ("A-AREA", 4), ("A-AREA-IDEN", 4), ("A-DOOR", 2), ("A-GLAZ", 5), ("G-ANNO-REDL", 1)] {
         let mut l = Layer::new(n); l.color = acadrust::types::Color::from_index(c); let _ = doc.layers.add(l);
     }
     let f = |x: &Value| x.as_f64().filter(|v| v.is_finite()).ok_or_else(|| "site plan has a number that is not finite".to_string());

@@ -31,7 +31,7 @@ jobs:
       - name: Bundle size budget (main JS under 3 MB)
         run: cd app && test $(du -cb dist/assets/index-*.js | tail -1 | cut -f1) -lt 3000000
       - name: Browser tests (390 and 1440 wide, offline, deploy update, accessibility)
-        run: cd app && npx playwright install --with-deps chromium && node e2e/e2e.mjs
+        run: cd app && npx playwright install --with-deps chromium && node e2e/e2e.mjs && node e2e/feat.mjs
       - name: MCP server self-test
         run: cd mcp && npm ci && npm test
       - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4

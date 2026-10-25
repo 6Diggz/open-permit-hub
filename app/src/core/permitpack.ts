@@ -1,6 +1,10 @@
 import { FORMAT, FORMAT_VERSION, type Project, blankProject, uid, UUID_RE } from './model';
 import { isNum, MAX_LEN_MM } from './units';
 import type { Poly } from './geom';
+import { MAX_ROOMS, MAX_OPENINGS, MAX_ROOM_PTS } from './rooms';
+import { ROOM_USES, type Room, type Pin, type Response } from './model';
+
+export const MAX_PINS = 500, MAX_RESPONSES = 500;
 
 /** Packs larger than this are refused before parsing (a real project is a few KB). */
 export const MAX_PACK_BYTES = 5 * 1024 * 1024;
@@ -86,6 +90,31 @@ export function migrate(raw: any): Project {
     return { id: str(w.id, 60) || uid(), room: str(w.room, 60), sleeping: !!w.sleeping, gradeFloor: !!w.gradeFloor, clearWidthMm: n(w.clearWidthMm), clearHeightMm: n(w.clearHeightMm), sillMm: n(w.sillMm) };
   });
   if (badWin) notes.push('a window size');
+  // Zoning and parcel source (from the city map, or typed).
+  s.zone = str(s.zone, 40);
+  const pc = s.parcel as any;
+  s.parcel = pc && typeof pc === 'object' ? { at: str(pc.at, 40), matched: str(pc.matched, 120), cityName: str(pc.cityName, 60), pin: str(pc.pin, 40),
+    fromMap: Array.isArray(pc.fromMap) ? pc.fromMap.filter((k: any) => typeof k === 'string').slice(0, 20).map((k: string) => k.slice(0, 20)) : [],
+    failed: Array.isArray(pc.failed) ? pc.failed.filter((k: any) => typeof k === 'string').slice(0, 20).map((k: string) => k.slice(0, 30)) : [] } : null;
+  // Rooms: cap counts, valid shapes and sizes, known uses. A broken room is dropped and listed.
+  if (!Array.isArray(a.rooms)) a.rooms = [];
+  let badRoom = false;
+  const nn = (v: any) => (v == null ? null : len(v) ? v : (badRoom = true, null));
+  a.rooms = (a.rooms as any[]).slice(0, MAX_ROOMS).filter(r => { const ok = r && typeof r === 'object' && okPoly(r.poly) && r.poly.length <= MAX_ROOM_PTS; if (!ok) badRoom = true; return ok; }).map((r: any): Room => ({
+    id: str(r.id, 60) || uid(), name: str(r.name, 60), use: ROOM_USES.includes(r.use) ? r.use : 'living', shape: r.shape === 'poly' ? 'poly' : 'rect',
+    poly: r.poly.map((q: any) => ({ x: q.x, y: q.y })), tape: { w: nn(r.tape?.w), d: nn(r.tape?.d) }, ceilingMm: nn(r.ceilingMm),
+    openings: (Array.isArray(r.openings) ? r.openings : []).slice(0, MAX_OPENINGS).filter((o: any) => o && typeof o === 'object' && Number.isInteger(o.wall) && o.wall >= 0 && o.wall < r.poly.length && len(o.widthMm) && o.widthMm > 0 && isNum(o.offsetMm) && Math.abs(o.offsetMm) <= MAX_LEN_MM)
+      .map((o: any) => ({ id: str(o.id, 60) || uid(), kind: o.kind === 'door' ? 'door' : 'window', wall: o.wall, offsetMm: o.offsetMm, widthMm: o.widthMm, heightMm: nn(o.heightMm), sillMm: nn(o.sillMm) })),
+  }));
+  if ((p.adu?.rooms?.length ?? 0) > MAX_ROOMS) notes.push(`rooms over ${MAX_ROOMS}`);
+  if (badRoom) notes.push('a room shape or size');
+  // Review markup: pins and correction responses travel in the pack (reviewers need no account).
+  const mk = (p.markup && typeof p.markup === 'object') ? p.markup : {};
+  const pins: Pin[] = (Array.isArray(mk.pins) ? mk.pins : []).slice(0, MAX_PINS).filter((x: any) => x && isNum(x.x) && isNum(x.y) && Math.abs(x.x) < 1e9 && Math.abs(x.y) < 1e9)
+    .map((x: any, i: number) => ({ id: str(x.id, 60) || uid(), n: Number.isInteger(x.n) && x.n > 0 && x.n < 100000 ? x.n : i + 1, x: x.x, y: x.y, comment: str(x.comment, 2000), status: x.status === 'resolved' ? 'resolved' : 'open', author: str(x.author, 80), at: str(x.at, 40), ...(x.ref ? { ref: str(x.ref, 40) } : {}) }));
+  const responses: Response[] = (Array.isArray(mk.responses) ? mk.responses : []).slice(0, MAX_RESPONSES).filter((x: any) => x && typeof x === 'object')
+    .map((x: any) => ({ id: str(x.id, 60) || uid(), ref: str(x.ref, 40), text: str(x.text, 2000), response: str(x.response, 2000), sheet: str(x.sheet, 60), done: !!x.done, ...(x.pinId ? { pinId: str(x.pinId, 60) } : {}) }));
+  out.markup = { pins, responses };
   out.rev = Number.isInteger(p.rev) && p.rev >= 0 ? p.rev : 0;
   out.repairNotes = notes.length ? notes : undefined;
   return out;
