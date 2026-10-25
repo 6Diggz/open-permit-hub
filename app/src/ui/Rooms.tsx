@@ -1,7 +1,7 @@
 import type { Opening, Project, Room } from '../core/model';
 import { ROOM_USES, uid } from '../core/model';
 import { fmtFtIn, fmtSqFt, ft, inch, RANGES, toSqFt } from '../core/units';
-import { addCorner, applyTape, newRoom, openingProblems, roomArea, roomFits, roomSize, wallLength, wallName, footLocal, MAX_ROOMS, MAX_OPENINGS } from '../core/rooms';
+import { addCorner, addRoom, applyTape, clampMove, overlappingRooms, openingProblems, roomArea, roomFits, roomSize, wallLength, wallName, footLocal, MAX_ROOMS, MAX_OPENINGS } from '../core/rooms';
 import { Len, Num, Q } from './fields';
 import { roomUseLabel } from './RoomPlan';
 import { L, uiLang } from './lang';
@@ -15,7 +15,7 @@ export function RoomsPanel({ p, update, selected, setSelected }: { p: Project; u
   const setR = (fn: (r: Room) => void, key?: string) => update(d => { const r = d.adu.rooms.find(x => x.id === selected); if (r) fn(r); }, key);
   const sleeping = rooms.filter(r => r.use === 'sleeping').length;
   const add = () => { const id = uid(); update(d => { const n = d.adu.rooms.length; const use = n === 0 ? 'living' : 'sleeping'; const k = d.adu.rooms.filter(x => x.use === 'sleeping').length;
-    d.adu.rooms.push(newRoom(d, id, n === 0 ? L('Main room') : `${L('Bedroom')} ${k + 1}`, use)); }); setSelected(id); };
+    d.adu.rooms = addRoom(d, id, n === 0 ? L('Main room') : `${L('Bedroom')} ${k + 1}`, use); }); setSelected(id); };
   const total = rooms.reduce((t, r) => t + roomArea(r), 0);
   return <>
     <h2>{L("Rooms, windows and alarms")}</h2>
@@ -24,7 +24,7 @@ export function RoomsPanel({ p, update, selected, setSelected }: { p: Project; u
       <button type="button" className="btn primary" onClick={add} disabled={rooms.length >= MAX_ROOMS}>{L('Add a room')}</button>
     </div>
     {rooms.length === 0 ? <p className="lead">{L('No rooms drawn yet. The first room fills the garage; split it by adding more. You can also skip drawing and list windows at the bottom.')}</p>
-      : <div className="mods" role="list" aria-label={L('Rooms')}>{rooms.map(r => { const z = roomSize(r); const bad = !roomFits(r.poly, footLocal(p)) || openingProblems(r).length > 0;
+      : <div className="mods" role="list" aria-label={L('Rooms')}>{rooms.map(r => { const z = roomSize(r); const bad = !roomFits(r.poly, footLocal(p)) || openingProblems(r).length > 0 || overlappingRooms(rooms).some(([x, y]) => x.id === r.id || y.id === r.id);
         return <div role="listitem" key={r.id}><button type="button" className="btn quiet" style={{ width: '100%', textAlign: 'left' }} aria-pressed={r.id === selected} onClick={() => setSelected(r.id === selected ? null : r.id)}>
           <strong>{r.name || L('Room')}</strong> · {roomUseLabel(r.use)} · {fmtFtIn(z.w)} x {fmtFtIn(z.d)} · {fmtSqFt(roomArea(r))}{z.taped ? ` · ${L('tape-measured')}` : ''}{bad && <span style={{ color: 'var(--fix)' }}> · {L('needs fixing')}</span>}</button></div>; })}
         <p className="help">{L('Rooms total')} {fmtSqFt(total)}{a.interiorLivableSqFt != null ? ` · ${L('livable area entered')} ${a.interiorLivableSqFt} sq ft` : ''}. {L('Bedrooms from your rooms')}: {sleeping}{sleeping === 0 ? ` (${L('studio')})` : ''}.</p></div>}
@@ -33,10 +33,11 @@ export function RoomsPanel({ p, update, selected, setSelected }: { p: Project; u
       <div className="field"><label htmlFor="rn">{L('Room name')}</label><input id="rn" value={sel.name} maxLength={60} onChange={e => setR(r => { r.name = e.target.value; }, 'rn' + sel.id)} /></div>
       <div className="field"><label htmlFor="ru">{L('Use')}</label><select id="ru" value={sel.use} onChange={e => setR(r => { r.use = e.target.value as Room['use']; })}>{ROOM_USES.map(u => <option key={u} value={u}>{roomUseLabel(u)}</option>)}</select></div>
       {sel.shape === 'rect' ? <>
-        <Len id="rtw" range={[ft(2), ft(60)]} label={L('Width, tape-measured')} mm={sel.tape.w ?? roomSize(sel).w} help={sel.tape.w != null ? L('Tape size. It overrides the drawing.') : L('Type the tape size to override the drawing.')} onChange={v => setR(r => { r.tape.w = v; Object.assign(r, applyTape(r)); })} />
-        <Len id="rtd" range={[ft(2), ft(60)]} label={L('Depth, tape-measured')} mm={sel.tape.d ?? roomSize(sel).d} help={sel.tape.d != null ? L('Tape size. It overrides the drawing.') : L('Type the tape size to override the drawing.')} onChange={v => setR(r => { r.tape.d = v; Object.assign(r, applyTape(r)); })} />
+        <Len id="rtw" range={[ft(2), ft(60)]} label={L('Width, tape-measured')} mm={sel.tape.w ?? roomSize(sel).w} help={sel.tape.w != null ? L('Tape size. It overrides the drawing.') : L('Type the tape size to override the drawing.')} onChange={v => setR(r => { r.tape.w = v; Object.assign(r, applyTape(r)); r.poly = clampMove(r.poly, footLocal(p), 0, 0); })} />
+        <Len id="rtd" range={[ft(2), ft(60)]} label={L('Depth, tape-measured')} mm={sel.tape.d ?? roomSize(sel).d} help={sel.tape.d != null ? L('Tape size. It overrides the drawing.') : L('Type the tape size to override the drawing.')} onChange={v => setR(r => { r.tape.d = v; Object.assign(r, applyTape(r)); r.poly = clampMove(r.poly, footLocal(p), 0, 0); })} />
       </> : <p className="help">{L('Shaped room: drag its corners on the plan. Tape sizes work on rectangle rooms.')} {fmtSqFt(roomArea(sel))}.</p>}
       <Len id="rc" range={RANGES.ceiling} label={L('Finished ceiling height in this room')} mm={sel.ceilingMm} help={a.ceilingHeightMm != null ? `${L('Blank uses the garage ceiling')}: ${fmtFtIn(a.ceilingHeightMm)}` : L('Blank uses the garage ceiling height.')} onChange={v => setR(r => { r.ceilingMm = v; })} />
+      {overlappingRooms(rooms).some(([x, y]) => x.id === sel.id || y.id === sel.id) && <p className="help" role="alert" style={{ color: 'var(--fix)' }}>{L('This room overlaps another room. Move it or make it smaller.')}</p>}
       {!roomFits(sel.poly, footLocal(p)) && <p className="help" role="alert" style={{ color: 'var(--fix)' }}>{L('This room is outside the garage outline. Move it, make it smaller, or check the garage size and tape sizes.')}</p>}
       {(sel.use === 'sleeping' || sel.use === 'living') && (toSqFt(roomArea(sel)) < 70 || Math.min(roomSize(sel).w, roomSize(sel).d) < ft(7)) && <p className="help" style={{ color: 'var(--info-text)' }}>{L('Living and sleeping rooms need at least 70 sq ft and 7 ft across.')}</p>}
       <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap', gridColumn: '1 / -1' }}>

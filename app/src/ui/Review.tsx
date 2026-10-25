@@ -20,7 +20,8 @@ export function ReviewStep({ p, update, sel, setSel, placing, setPlacing, downlo
   const es = uiLang() === 'es'; const pins = p.markup.pins; const pin = pins.find(x => x.id === sel) ?? null;
   const open = pins.filter(x => x.status === 'open').length;
   const setPin = (id: string, fn: (x: Pin) => void, key?: string) => update(d => { const x = d.markup.pins.find(y => y.id === id); if (x) fn(x); }, key);
-  const addPin = (comment = '', ref?: string) => { const id = uid(); update(d => { const spot = defaultPinSpot(d); d.markup.pins.push({ id, n: nextPinNumber(d.markup.pins), ...spot, comment, status: 'open', author: author.trim(), at: today(), ...(ref ? { ref } : {}) }); }); setSel(id); return id; };
+  /** One update per click: two updates in one handler would each start from the same old project and the second would drop the first. */
+  const addPin = (comment = '', ref?: string, also?: (d: Project, pinId: string) => void) => { const id = uid(); update(d => { const spot = defaultPinSpot(d); d.markup.pins.push({ id, n: nextPinNumber(d.markup.pins), ...spot, comment, status: 'open', author: author.trim(), at: today(), ...(ref ? { ref } : {}) }); also?.(d, id); }); setSel(id); return id; };
   const head = (k: SortKey, label: string) => <th aria-sort={sort.k === k ? (sort.d === 1 ? 'ascending' : 'descending') : 'none'} scope="col">
     <button type="button" className="btn quiet" style={{ border: 0, padding: '2px 4px' }} onClick={() => setSort(s => ({ k, d: s.k === k ? (s.d === 1 ? -1 : 1) : 1 }))}>{label}{sort.k === k ? (sort.d === 1 ? ' ▲' : ' ▼') : ''}</button></th>;
   return <>
@@ -63,7 +64,7 @@ export function ReviewStep({ p, update, sel, setSel, placing, setPlacing, downlo
     {items && items.length > 0 && <ul className="results" style={{ padding: 0 }}>{items.map((it, k) => <li key={k} className="res">
       <p><strong>{it.ref}.</strong> {it.text}</p>
       <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap', marginTop: 6 }}>
-        <button type="button" className="btn" onClick={() => { const pid = addPin(it.text, it.ref); update(d => { d.markup.responses.push({ id: uid(), ref: it.ref, text: it.text, response: '', sheet: '', done: false, pinId: pid }); }); setItems(items.filter((_, j) => j !== k)); setMsg(L('Added as a note at the ADU. To move it, choose the note and then "Move this note".')); }}>{L('Make it a note on the plan')}</button>
+        <button type="button" className="btn" onClick={() => { addPin(it.text, it.ref, (d, pid) => { d.markup.responses.push({ id: uid(), ref: it.ref, text: it.text, response: '', sheet: '', done: false, pinId: pid }); }); setItems(items.filter((_, j) => j !== k)); setMsg(L('Added as a note at the ADU. To move it, choose the note and then "Move this note".')); }}>{L('Make it a note on the plan')}</button>
         <button type="button" className="btn quiet" onClick={() => { update(d => { d.markup.responses.push({ id: uid(), ref: it.ref, text: it.text, response: '', sheet: '', done: false }); }); setItems(items.filter((_, j) => j !== k)); }}>{L('Answer in the checklist')}</button>
         <button type="button" className="btn quiet" onClick={() => setItems(items.filter((_, j) => j !== k))}>{L('Skip')}</button>
       </div></li>)}</ul>}

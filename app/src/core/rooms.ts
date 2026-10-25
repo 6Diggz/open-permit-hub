@@ -1,5 +1,5 @@
 import type { Project, Room, Opening, Window, RoomUse } from './model';
-import { area, bbox, inside, rect, segmentsCross, translate, type Poly, type Pt } from './geom';
+import { area, bbox, inside, overlaps, rect, segmentsCross, translate, type Poly, type Pt } from './geom';
 import { ft, inch, isNum } from './units';
 
 export const MAX_ROOMS = 40, MAX_OPENINGS = 30, MAX_ROOM_PTS = 64;
@@ -110,3 +110,29 @@ export function openingProblems(r: Room): string[] {
   return [...new Set(out)];
 }
 export type { Opening };
+
+/** Shrink a shape a few mm toward its middle, so rooms that only share a wall don't count as overlapping. */
+const inset = (pl: Poly, mm = 3): Poly => { const b = bbox(pl); const cx = (b.minX + b.maxX) / 2, cy = (b.minY + b.maxY) / 2; const kx = Math.max(0, 1 - (2 * mm) / Math.max(b.maxX - b.minX, 1)), ky = Math.max(0, 1 - (2 * mm) / Math.max(b.maxY - b.minY, 1)); return pl.map(q => ({ x: cx + (q.x - cx) * kx, y: cy + (q.y - cy) * ky })); };
+/** Pairs of rooms whose floors overlap (a wall shared between two rooms is fine). */
+export function overlappingRooms(rooms: Room[]): [Room, Room][] {
+  const out: [Room, Room][] = [];
+  for (let i = 0; i < rooms.length; i++) for (let j = i + 1; j < rooms.length; j++) if (overlaps(inset(applyTape(rooms[i]).poly), inset(applyTape(rooms[j]).poly))) out.push([rooms[i], rooms[j]]);
+  return out;
+}
+/**
+ * Make room for a new room: when one room still fills the garage (the usual first step), split it in two along its longer side
+ * (the old room keeps the first part). Otherwise the new room goes where `newRoom` puts it, and any overlap is flagged.
+ */
+export function addRoom(p: Project, id: string, name: string, use: RoomUse): Room[] {
+  const rooms = p.adu.rooms.map(r => ({ ...r, poly: r.poly.map(q => ({ ...q })) }));
+  const f = bbox(footLocal(p)); const fa = (f.maxX - f.minX) * (f.maxY - f.minY);
+  const big = rooms.length === 1 && rooms[0].shape === 'rect' && roomArea(rooms[0]) > fa * 0.8 ? rooms[0] : null;
+  if (big) {
+    const b = bbox(big.poly); const W = b.maxX - b.minX, D = b.maxY - b.minY; const wall = inch(4.5);
+    if (W >= D) { const w1 = snap((W - wall) * 0.55); big.poly = rect(b.minX, b.minY, w1, D); big.tape = { w: null, d: big.tape.d }; big.openings = big.openings.filter(o => o.wall !== 1);
+      return [...rooms, { ...newRoom(p, id, name, use), poly: rect(b.minX + w1 + wall, b.minY, W - w1 - wall, D) }]; }
+    const d1 = snap((D - wall) * 0.55); big.poly = rect(b.minX, b.minY, W, d1); big.tape = { w: big.tape.w, d: null }; big.openings = big.openings.filter(o => o.wall !== 2);
+    return [...rooms, { ...newRoom(p, id, name, use), poly: rect(b.minX, b.minY + d1 + wall, W, D - d1 - wall) }];
+  }
+  return [...rooms, newRoom(p, id, name, use)];
+}

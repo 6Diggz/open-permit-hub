@@ -3,7 +3,7 @@ import type { Project, Tri } from '../core/model';
 import { area, clearanceToEdge, gap, polyInside } from '../core/geom';
 import { ft, fmtFtIn, inch, isNum, toSqFt, RANGES } from '../core/units';
 import { PACK, PACK_ID, LA_ED, packFreshness } from './pack';
-import { applyTape, footLocal, openingProblems, roomArea, roomCeiling, roomFits, roomMinDim } from '../core/rooms';
+import { applyTape, footLocal, openingProblems, overlappingRooms, roomArea, roomCeiling, roomFits, roomMinDim } from '../core/rooms';
 
 export { PACK_ID };
 const SHEET_URL = PACK.sheet.url;
@@ -230,6 +230,8 @@ export const RULES: Rule[] = [
         if (openingProblems(r).length) bad.push(nm);
         if (r.use === 'sleeping' || r.use === 'living') { const a = toSqFt(roomArea(r)), m = roomMinDim(r); if (a < 70 || m < ft(7)) small.push(`${nm} (${Math.round(a)} sq ft, narrowest ${fmtFtIn(m)})`); } });
       if (out.length) return fail(`Drawn outside the garage outline: ${out.join(', ')}.`, `Dibujado fuera del contorno del garaje: ${out.join(', ')}.`, 'Move or resize the room inside the garage, or check the garage size and the tape sizes.', 'Mueva o cambie el tamaño del cuarto dentro del garaje, o revise el tamaño del garaje y las medidas con cinta.');
+      const ov = overlappingRooms(p.adu.rooms).map(([x, y]) => `${safeName(x.name) || 'room'} / ${safeName(y.name) || 'room'}`);
+      if (ov.length) return fail(`Rooms drawn on top of each other: ${ov.join(', ')}.`, `Cuartos dibujados uno encima de otro: ${ov.join(', ')}.`, 'Move or resize the rooms so they only share walls.', 'Mueva o cambie el tamaño de los cuartos para que solo compartan muros.');
       if (small.length) return fail(`Too small for a living or sleeping room: ${small.join('; ')}.`, `Demasiado pequeño para sala o dormitorio: ${small.join('; ')}.`, 'Habitable rooms need 70 sq ft and 7 ft across. Make it bigger, or call it a different use.', 'Los cuartos habitables necesitan 70 pies² y 7 pies de ancho. Hágalo más grande o cambie su uso.');
       const doors = p.adu.rooms.flatMap(r => r.openings.filter(o => o.kind === 'door').map(o => ({ r, o })));
       const narrow = doors.filter(x => x.o.widthMm < inch(32) - 0.5).map(x => `${safeName(x.r.name) || 'room'} ${fmtFtIn(x.o.widthMm)}`);

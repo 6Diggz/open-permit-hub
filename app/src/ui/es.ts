@@ -1,4 +1,9 @@
 export const ES = {
+"yes": "sí",
+"no": "no",
+"outside LA": "fuera de LA",
+"This room overlaps another room. Move it or make it smaller.": "Este cuarto se encima con otro cuarto. Muévalo o hágalo más pequeño.",
+"Needs fixing: outside the garage, overlapping another room, or an opening does not fit.": "Hay que corregir: está fuera del garaje, se encima con otro cuarto, o una abertura no cabe.",
 "This scan file is too large.": "Este archivo de escaneo es demasiado grande.",
 "Try a format like 24, 24\" or 2' 0\".": "Pruebe un formato como 24, 24\" o 2' 0\".",
 "I checked ZIMAS: this lot is in the City of Los Angeles": "Revisé ZIMAS: este lote está en la Ciudad de Los Ángeles",

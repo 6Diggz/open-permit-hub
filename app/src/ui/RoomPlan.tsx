@@ -1,8 +1,8 @@
 import { useRef, useState } from 'react';
 import type { Project, Room } from '../core/model';
-import { bbox, translate, type Poly, type Pt } from '../core/geom';
+import { bbox, type Poly, type Pt } from '../core/geom';
 import { fmtFtIn, fmtSqFt, ft, inch } from '../core/units';
-import { clampMove, footLocal, roomArea, roomFits, roomSize, snap, wallPoint, openingProblems } from '../core/rooms';
+import { clampMove, overlappingRooms, footLocal, roomArea, roomFits, roomSize, snap, wallPoint, openingProblems } from '../core/rooms';
 import { L } from './lang';
 
 const USE: Record<Room['use'], string> = { sleeping: 'Sleeping', living: 'Living', bath: 'Bath', kitchen: 'Kitchen' };
@@ -22,7 +22,7 @@ export function RoomPlan({ p, selected, onSelect, onChange, onRemove }: { p: Pro
   const pts = (pl: Poly) => pl.map(q => `${q.x},${Y(q.y)}`).join(' ');
   const s = Math.max(vb.w, vb.h) / 520;
   const toModel = (e: React.PointerEvent): Pt => { const m = svg.current!.getScreenCTM()!.inverse(); const pt = new DOMPoint(e.clientX, e.clientY).matrixTransform(m); return { x: pt.x, y: Y(pt.y) }; };
-  const rooms = p.adu.rooms;
+  const rooms = p.adu.rooms; const over = new Set(overlappingRooms(rooms).flat().map(r => r.id));
   const describe = (r: Room) => { const z = roomSize(r); return `${r.name || L('Room')}, ${roomUseLabel(r.use)}, ${fmtFtIn(z.w)} x ${fmtFtIn(z.d)}, ${fmtSqFt(roomArea(r))}${z.taped ? `, ${L('tape-measured')}` : ''}`; };
   const tryPoly = (r: Room, poly: Poly, key: string) => { if (roomFits(poly, foot)) { setBlocked(false); onChange(r.id, poly, key); return true; } setBlocked(true); return false; };
 
@@ -43,21 +43,21 @@ export function RoomPlan({ p, selected, onSelect, onChange, onRemove }: { p: Pro
       if (r.tape.w != null && v[0] || r.tape.d != null && v[1]) { setLive(L('This size is tape-measured. Change it in the room details.')); return; }
       const b = bbox(r.poly); next = [{ x: b.minX, y: b.minY }, { x: b.maxX + v[0], y: b.minY }, { x: b.maxX + v[0], y: b.maxY + v[1] }, { x: b.minX, y: b.maxY + v[1] }];
       if (next[1].x - next[0].x < ft(2) || next[2].y - next[1].y < ft(2)) return;
-    } else next = translate(r.poly, v[0], v[1]);
+    } else next = clampMove(r.poly, foot, v[0], v[1]);
     if (tryPoly(r, next, 'room-key-' + r.id)) setLive(describe({ ...r, poly: next })); else setLive(L('It would go outside the garage outline.'));
   };
   return (<>
-    <svg ref={svg} viewBox={`${vb.x} ${vb.y} ${vb.w} ${vb.h}`} role="group" aria-label={L('Floor plan. Each room is a button: arrow keys move it 1 inch, Shift moves 1 foot, Alt with arrows resizes, Delete removes it.')}
+    <svg ref={svg} style={{ userSelect: 'none' }} viewBox={`${vb.x} ${vb.y} ${vb.w} ${vb.h}`} role="group" aria-label={L('Floor plan. Each room is a button: arrow keys move it 1 inch, Shift moves 1 foot, Alt with arrows resizes, Delete removes it.')}
       onPointerDown={e => { if (e.target === svg.current) onSelect(null); }}>
       <g color="var(--ink)">
         <polygon points={pts(foot)} fill="none" stroke="var(--ink)" strokeWidth={s * 5} />
         {rooms.length === 0 && <text x={(fb.minX + fb.maxX) / 2} y={Y((fb.minY + fb.maxY) / 2)} fontSize={s * 15} textAnchor="middle" fill="var(--pencil)">{L('No rooms yet. Tap "Add a room".')}</text>}
         {rooms.map(r => {
-          const z = roomSize(r); const b = bbox(r.poly); const sel = r.id === selected; const bad = !roomFits(r.poly, foot) || openingProblems(r).length > 0;
+          const z = roomSize(r); const b = bbox(r.poly); const sel = r.id === selected; const bad = !roomFits(r.poly, foot) || openingProblems(r).length > 0 || over.has(r.id);
           const cx = (b.minX + b.maxX) / 2, cy = (b.minY + b.maxY) / 2; const fs = Math.max(s * 9, Math.min(s * 14, (b.maxX - b.minX) / 9));
           return <g key={r.id}>
             <polygon points={pts(r.poly)} fill={sel ? 'var(--faint)' : 'var(--sheet)'} stroke={bad ? 'var(--fix)' : 'var(--ink)'} strokeWidth={s * (sel ? 3 : 1.6)}
-              tabIndex={0} role="button" aria-pressed={sel} aria-label={describe(r) + (bad ? `. ${L('Needs fixing: outside the garage or an opening does not fit.')}` : '')} style={{ cursor: 'move', touchAction: 'none' }}
+              tabIndex={0} role="button" aria-pressed={sel} aria-label={describe(r) + (bad ? `. ${L('Needs fixing: outside the garage, overlapping another room, or an opening does not fit.')}` : '')} style={{ cursor: 'move', touchAction: 'none' }}
               onFocus={() => onSelect(r.id)} onKeyDown={key(r)}
               onPointerDown={e => { e.stopPropagation(); onSelect(r.id); (e.target as Element).setPointerCapture(e.pointerId); drag.current = { id: r.id, mode: 'move', start: toModel(e), poly: r.poly }; }}
               onPointerMove={e => { const d = drag.current; if (!d || d.id !== r.id || d.mode !== 'move') return; const m = toModel(e); const next = clampMove(d.poly, foot, snap(m.x - d.start.x), snap(m.y - d.start.y)); tryPoly(r, next, 'room-drag-' + r.id); }}

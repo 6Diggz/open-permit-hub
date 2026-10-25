@@ -29,8 +29,8 @@ export function parseLetter(text: string): { ref: string; text: string }[] {
 
 /** Default spot for a new pin when it isn't placed by tapping: the ADU, nudged so pins don't stack. */
 export function defaultPinSpot(p: Project): { x: number; y: number } {
-  const b = bbox(p.adu.footprint); const k = p.markup.pins.length % 6;
-  return { x: (b.minX + b.maxX) / 2 + (k - 2.5) * 600, y: (b.minY + b.maxY) / 2 };
+  const b = bbox(p.adu.footprint); const k = p.markup.pins.length % 9;
+  return { x: (b.minX + b.maxX) / 2 + ((k % 3) - 1) * 1200, y: (b.minY + b.maxY) / 2 + (Math.floor(k / 3) - 1) * 1200 };
 }
 
 /** Plain-text response letter: one numbered answer per correction item, for the preparer to paste or attach. */

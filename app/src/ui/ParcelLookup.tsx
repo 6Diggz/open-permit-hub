@@ -19,7 +19,7 @@ const ERR: Record<ParcelError, string> = {
   'no-parcel': 'The street was found but not this exact parcel. Enter the lot by hand below.',
 };
 
-type St = { k: 'idle' } | { k: 'loading' } | { k: 'error'; e: ParcelError } | { k: 'done'; filled: MapField[]; matched: string; failed: string[]; multi: boolean; outside: string | null };
+type St = { k: 'idle' } | { k: 'loading' } | { k: 'error'; e: ParcelError } | { k: 'done'; filled: string[]; matched: string; failed: string[]; multi: boolean; outside: string | null };
 
 /** Opt-in parcel autofill. The address leaves the device only when the user taps "Look up", and the screen says so before. */
 export function ParcelLookup({ p, commit }: { p: Project; commit: (next: Project) => void }) {
@@ -36,7 +36,10 @@ export function ParcelLookup({ p, commit }: { p: Project; commit: (next: Project
       if (!filled.length) { setSt({ k: 'error', e: r.fill.failed.length ? 'network' : 'no-parcel' }); return; }
       commit(next);
       const outside = r.fill.jurisdiction === 'other' ? r.fill.cityName : null;
-      setSt({ k: 'done', filled, matched: r.fill.matched, failed: [...new Set(r.fill.failed.map(f => L(LAYER[f] ?? f)))], multi: r.fill.multiPiece, outside });
+      const yn = (v: string) => (v === 'yes' ? L('yes') : L('no'));
+      const said: Record<MapField, string> = { lot: L(NAMES.lot), apn: `${L(NAMES.apn)} ${next.site.apn}`, zone: `${L(NAMES.zone)} ${next.site.zone}`, jurisdiction: `${L(NAMES.jurisdiction)}: ${r.fill.jurisdiction === 'la-city' ? 'Los Angeles' : r.fill.cityName || L('outside LA')}`,
+        hillside: `${L(NAMES.hillside)}: ${yn(next.site.flags.hillside)}`, vhfhsz: `${L(NAMES.vhfhsz)}: ${yn(next.site.flags.vhfhsz)}`, coastal: `${L(NAMES.coastal)}: ${yn(next.site.flags.coastal)}`, hpoz: `${L(NAMES.hpoz)}: ${yn(next.site.flags.hpoz)}` };
+      setSt({ k: 'done', filled: filled.map(f => said[f]), matched: r.fill.matched, failed: [...new Set(r.fill.failed.map(f => L(LAYER[f] ?? f)))], multi: r.fill.multiPiece, outside });
     } catch (e) { if ((e as Error)?.name === 'AbortError') { setSt({ k: 'idle' }); return; } setSt({ k: 'error', e: navigator.onLine ? 'network' : 'offline' }); }
   };
   return <div className="field" role="group" aria-labelledby="pl-h">
@@ -51,7 +54,7 @@ export function ParcelLookup({ p, commit }: { p: Project; commit: (next: Project
       {st.k === 'loading' && L('Asking the city map about this address...')}
       {st.k === 'error' && <span style={{ color: 'var(--info-text)' }}>{L(ERR[st.e])}</span>}
       {st.k === 'done' && <>
-        {L('Found')} <strong>{st.matched}</strong>. {L('Filled from the parcel map:')} {st.filled.map(f => L(NAMES[f])).join(', ')}. {L('Verify these on site. Change any value below; Undo puts back what you had.')}
+        {L('Found')} <strong>{st.matched}</strong>. {L('Filled from the parcel map:')} {st.filled.join('; ')}. {L('Verify these on site. Change any value below; Undo puts back what you had.')}
         {st.failed.length > 0 && <> {L('These map layers did not answer, so enter them by hand:')} {st.failed.join(', ')}.</>}
         {st.multi && <> {L('This parcel is mapped as more than one piece, so the lot shape was not drawn. Enter the lot size by hand.')}</>}
       </>}

@@ -7,7 +7,7 @@ import { evaluate } from '../rules/engine';
 import { RULES, PACK_ID } from '../rules/la-city';
 import { lookupParcel, splitAddress, houseKey, fmtApn, ringToLot, type FetchLike, PARCEL_SOURCES } from '../io/parcel';
 import { applyParcel, unmark, fromMap } from '../io/parcel-apply';
-import { addCorner, applyTape, newRoom, roomFits, roomSize, withRooms, footLocal, openingProblems, clampMove } from '../core/rooms';
+import { addCorner, addRoom, overlappingRooms, applyTape, newRoom, roomFits, roomSize, withRooms, footLocal, openingProblems, clampMove } from '../core/rooms';
 import { rect, bbox, area, polyInside } from '../core/geom';
 import { ft, inch, toSqFt } from '../core/units';
 import { migrate, serialize, MAX_PINS } from '../core/permitpack';
@@ -138,6 +138,14 @@ describe('room drawing feeds the rules', () => {
     m.poly = rect(ft(15), 0, ft(10), ft(10)); expect(st(p, 'ROM-01')).toBe('FAIL');
     m.poly = rect(0, 0, ft(6), ft(10)); expect(st(p, 'ROM-01')).toBe('FAIL');
     expect(st(blankProject(), 'ROM-01')).toBeUndefined();
+  });
+  it('adding a room splits a room that fills the garage; overlapping rooms are flagged, shared walls are not', () => {
+    const p = base(); p.adu.rooms = addRoom(p, 'a', 'Main', 'living'); expect(roomFits(p.adu.rooms[0].poly, footLocal(p))).toBe(true);
+    p.adu.rooms = addRoom(p, 'b', 'Bed', 'sleeping'); expect(p.adu.rooms.length).toBe(2); expect(overlappingRooms(p.adu.rooms)).toEqual([]);
+    p.adu.rooms.forEach(r => expect(roomFits(r.poly, footLocal(p))).toBe(true));
+    const a = room(p, 'A', 'living', 0, 0, ft(10), ft(10)), b = room(p, 'B', 'living', ft(10), 0, ft(8), ft(10)), c = room(p, 'C', 'living', ft(5), ft(5), ft(8), ft(8));
+    expect(overlappingRooms([a, b])).toEqual([]); expect(overlappingRooms([a, b, c]).length).toBe(2);
+    p.adu.rooms = [a, c]; a.openings.push(door(0)); expect(st(p, 'ROM-01')).toBe('FAIL');
   });
   it('tape-measured sizes override the drawing', () => {
     const p = base(); const r = room(p, 'Bed', 'sleeping', 0, 0, ft(10), ft(10)); r.tape.w = ft(11) + inch(3);

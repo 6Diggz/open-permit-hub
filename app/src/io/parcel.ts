@@ -1,5 +1,5 @@
 // Parcel autofill from free official City of Los Angeles map services (opt-in; nothing is sent until the user taps "Look up").
-// Every source below was opened and tested for browser access (CORS) on 2026-10-25. See docs/parcel-sources.md.
+// Every source below was opened and tested for browser access (CORS) on 2026-10-25.
 // This file has no runtime imports so the fixture recorder (scripts/record-parcel.mjs) can load it directly in Node.
 import type { Poly, Pt } from '../core/geom';
 

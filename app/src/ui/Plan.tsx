@@ -15,7 +15,7 @@ export function Plan({ p, onMove, es = false, pins }: { p: Project; es?: boolean
   const zp = pins?.zoom && pins.sel ? p.markup.pins.find(x => x.id === pins.sel) : undefined;
   const vb = zp ? { x: zp.x - ft(15), y: Y(zp.y) - ft(15), w: ft(30), h: ft(30) } : full;
   const pts = (pl: { x: number; y: number }[]) => pl.map(q => `${q.x},${Y(q.y)}`).join(' ');
-  const s = Math.max(full.w, full.h) / 520; const ps = Math.max(vb.w, vb.h) / 520; // stroke/text unit tuned to on-screen size
+  const s = Math.max(vb.w, vb.h) / 520; const ps = s; // stroke/text unit tuned to on-screen size
   const toModel = (e: React.PointerEvent) => { const m = svg.current!.getScreenCTM()!.inverse(); const pt = new DOMPoint(e.clientX, e.clientY).matrixTransform(m); return { x: pt.x, y: Y(pt.y) }; };
   const fp = p.adu.footprint; const fb = bbox(fp); const fs = Math.min(s * 13, (fb.maxX - fb.minX) / 8);
   const dims = lot.map((a, i) => ({ i, d: clearanceToEdge(fp, lot, i), a, b: lot[(i + 1) % lot.length] }));
@@ -26,7 +26,7 @@ export function Plan({ p, onMove, es = false, pins }: { p: Project; es?: boolean
   };
   return (
     <svg ref={svg} viewBox={`${vb.x} ${vb.y} ${vb.w} ${vb.h}`} role="group" aria-label={es ? 'Plano del lote. El ADU se puede mover con las flechas cuando está seleccionado.' : 'Site plan. The ADU can be moved with arrow keys when focused.'}
-      style={pins?.placing ? { cursor: 'crosshair' } : undefined}
+      style={{ userSelect: 'none', ...(pins?.placing ? { cursor: 'crosshair' } : {}) }}
       onPointerDown={e => { if (!pins?.placing) return; e.preventDefault(); const m = toModel(e); pins.onPlace(m.x, m.y); }}>
       <defs><pattern id="hatch" width={ft(1.2)} height={ft(1.2)} patternUnits="userSpaceOnUse" patternTransform="rotate(45)"><line x1="0" y1="0" x2="0" y2={ft(1.2)} stroke="currentColor" strokeWidth={s * 0.8} opacity=".35" /></pattern></defs>
       <g color="var(--ink)">
