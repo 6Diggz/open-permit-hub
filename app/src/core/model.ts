@@ -28,6 +28,28 @@ export interface Response { id: string; ref: string; text: string; response: str
 export interface ParcelInfo { at: string; matched: string; cityName: string; fromMap: string[]; failed: string[]; pin: string }
 
 export interface Window { id: string; room: string; sleeping: boolean; clearWidthMm: number | null; clearHeightMm: number | null; sillMm: number | null; gradeFloor: boolean }
+/** County-only questions (LA County Public Works Garage Conversion Standard Notes, Fire Access and Flow; ADU Checklist V4.2). */
+export interface CountyInputs {
+  /** The user opted in to "Beta: LA County (unincorporated)". Without it, County lots are not checked. */
+  betaOptIn: boolean;
+  /** Fire flow from the water purveyor's LACoFD Form 195/196, gallons per minute at 20 psi. */
+  fireFlowGpm: number | null;
+  /** Distance from the property front to the nearest public hydrant, along vehicle access, in feet. */
+  hydrantFt: number | null;
+  /** Distance from the ADU to the vehicle access road, in feet. */
+  vehicleAccessFt: number | null;
+  /** Clear width of that vehicle access road, in feet. */
+  roadWidthFt: number | null;
+  /** The vehicle access road is paved and not steeper than 15%. */
+  roadGradeOk: Tri;
+  /** Narrowest width of the walking path from the road to the ADU, in feet. */
+  pathWidthFt: number | null;
+  /** That walking path is not steeper than 15%. */
+  pathGradeOk: Tri;
+  /** The lot is in an Alquist-Priolo earthquake fault zone (LAC-GIS layer). */
+  faultZone: Tri;
+}
+export const blankCounty = (): CountyInputs => ({ betaOptIn: false, fireFlowGpm: null, hydrantFt: null, vehicleAccessFt: null, roadWidthFt: null, roadGradeOk: 'unknown', pathWidthFt: null, pathGradeOk: 'unknown', faultZone: 'unknown' });
 export interface Project {
   format: typeof FORMAT; version: number; id: string; createdAt: string; updatedAt: string;
   name: string;
@@ -61,6 +83,8 @@ export interface Project {
     otherBuildingGapMm: number | null;
     /** The user checked ZIMAS and the lot is in LA City (needed when the address names another city). */
     jurisdictionConfirmed?: boolean;
+    /** OUT-15 / r4juris-07: answers only the LA County (unincorporated) beta pack asks. Absent = not answered. */
+    county?: CountyInputs;
   };
   adu: {
     mode: Mode; footprint: Poly; heightMm: number; interiorLivableSqFt: number | null;

@@ -1,6 +1,27 @@
 # Jurisdiction packs (design)
 
-Today one pack exists: LA City (`app/src/rules/la-city.ts`, metadata in `app/src/rules/pack.ts`). Lots outside LA City get **NOT_SUPPORTED** and export is blocked. This is the design for adding more.
+Two packs exist. LA City (`app/src/rules/la-city.ts`, metadata in `app/src/rules/pack.ts`) is the main pack. LA County unincorporated (`app/src/rules/la-county.ts`, metadata and checklist in `app/src/rules/county-pack.ts`) is a **beta** behind the "Beta: LA County (unincorporated)" opt-in on the Lot step. Other lots get **NOT_SUPPORTED** and export is blocked.
+
+## The seam (how the app picks a pack)
+- `app/src/rules/registry.ts`: `packFor(jurisdiction, { beta })` returns a pack or null. Beta packs need the user's opt-in. `packForProject(p)` routes by `p.site.jurisdiction` (parcel lookup already returns `la-county` for unincorporated parcels) and falls back to LA City, whose JUR-01 gives an honest NOT_SUPPORTED. `packById(id)` finds the pack a report was made with.
+- The UI (`ui/App.tsx`), the shared verdict (`core/verdict.ts`) and readiness (`rules/readiness.ts`) load rules, the checklist catalog and rule-to-item links through the registry.
+- Pack-declared inputs (r4juris-07): County-only answers live in `p.site.county` (LACoFD Form 195/196 fire flow, hydrant distance, access distance, road width and grade, path width and grade, fault zone), typed and range-checked in `core/permitpack.ts`.
+- Beta packs: plain answer is capped at "Maybe", export is blocked, the score names the pack's own checklist.
+
+## LA County beta pack: sources (each opened 2026-10-25)
+| Source | Edition printed |
+|---|---|
+| [DPW Expedited ADU Checklist V4.2](https://pw.lacounty.gov/bsd/lib/fp/Building/Residential/Accessory%20Dwelling%20Units/ADU%20Checklist.V4.2.pdf) | Updated 8/6/2019 |
+| [DPW Garage Conversion to ADU & JADU Standard Notes and Details](https://pw.lacounty.gov/bsd/lib/fp/Building/Residential/Accessory%20Dwelling%20Units/Garage%20Conversion%20to%20ADU%20%26%20JADU%20Standard%20Notes%20and%20Details.pdf) | Rev. 01/06/2023, 03/20/23; cites 2023 LACBC |
+| [DPW Homeowner Guide to Garage Conversion to ADU & JADU](https://pw.lacounty.gov/bsd/lib/fp/Building/Residential/Accessory%20Dwelling%20Units/Homeowner%20Guide%20to%20Garage%20Conversion%20to%20ADU%20%26%20JADU.pdf) | No date printed |
+| [DPW ADU Guidelines (LACoFD requirements, FAQ)](https://pw.lacounty.gov/bsd/lib/fp/Building/Residential/Accessory%20Dwelling%20Units/ADU%20Guidelines.pdf) | v4.1, 10/10/2024 |
+| [DRP memo on Title 22 §22.140.640, Ord. 2025-0029](https://planning.lacounty.gov/wp-content/uploads/2025/08/ADU_Ordinance_Amendment.pdf) | Adopted 7/29/2025, effective 8/28/2025 (memo 8/21/2025) |
+| [HCD findings letter to LA County](https://www.hcd.ca.gov/sites/default/files/docs/policy-and-research/ordinance-review-letters/los-angeles-county-adu-findings-120125.pdf) | 12/1/2025 |
+| Gov. Code §66314, §66323 (leginfo) | Text current as of 1/1/2026 |
+
+28 rules (26 County rules plus GEO-01 and INP-01 reused from LA City). Fire access numbers sit in `COUNTY_PARAMS`. What still needs a person: `docs/WAITING_ON_PEOPLE.md`.
+
+This is the design for adding more.
 
 ## A pack is
 | Part | What | Where it lives |
@@ -40,4 +61,4 @@ Each axis is its own small module the pack composes. A rule names the axis it be
 3. LA County unincorporated second (largest "Los Angeles" mailing-address confusion). HCD's letter of Dec 1, 2025 (`los-angeles-county-adu-findings-120125.pdf`) found County ordinance 2025-0029 out of line with state law on front-setback siting (22.140.640 G.1.c.i, G.1.f.7.a), attached ADU height (G.1.b.iii; state law allows 25 ft, Gov. Code §66321(b)(4)(D)), unit counts (Table 22.140.640-A) and subjective "character-defining features" (G.1.f.2.i). Where HCD found a conflict, the County pack applies state law, cites the HCD letter, and marks the rule with a "conflicts with state law" status instead of the County number.
 4. Pasadena, then San Diego.
 
-Status: design only. Building a second pack needs a maintainer who knows that city's plan check.
+Status: LA County beta built (OUT-15); the state-rules split (step 1) and Long Beach are not done yet. Each pack still needs a maintainer who knows that jurisdiction's plan check before its beta flag comes off.

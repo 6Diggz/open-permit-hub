@@ -2,7 +2,7 @@
 // all read this computation (r6logic-07: the plan-set check reads plan text only, not the verdict), so they can never tell different stories about one project.
 import type { Project } from './model';
 import { evaluate, type Report } from '../rules/engine';
-import { RULES, PACK_ID } from '../rules/la-city';
+import { packForProject } from '../rules/registry';
 import { readiness, scoreLine, plainAnswer, type Readiness, type PlainVerdict } from '../rules/readiness';
 
 export interface Verdict {
@@ -18,4 +18,4 @@ export function verdictOf(p: Project, report: Report): Verdict {
 }
 
 /** Evaluate and derive in one step. */
-export function getVerdict(p: Project, today = new Date()): Verdict { return verdictOf(p, evaluate(p, RULES, PACK_ID, today)); }
+export function getVerdict(p: Project, today = new Date()): Verdict { return verdictOf(p, (() => { const k = packForProject(p); return evaluate(p, k.rules, k.id, today); })()); }

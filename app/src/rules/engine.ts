@@ -51,7 +51,7 @@ export function evaluate(p: Project, rules: Rule[], packId: string, today = new 
   const counts = { PASS: 0, FAIL: 0, UNKNOWN: 0, NOT_CHECKED: 0, INFO: 0 } as Record<Status, number>;
   results.forEach(r => counts[r.status]++);
   let overall: Report['overall'] = 'READY_FOR_PREPARER';
-  if (results.length === 0 || results.some(r => (r.rule.id === 'JUR-01' && r.status === 'FAIL') || r.unsupported)) overall = 'NOT_SUPPORTED';
+  if (results.length === 0 || results.some(r => ((r.rule.id === 'JUR-01' || r.rule.id === 'CJUR-01') && r.status === 'FAIL') || r.unsupported)) overall = 'NOT_SUPPORTED';
   else if (results.some(r => r.rule.id === 'GEO-01' && r.status !== 'PASS')) overall = 'FIX_ISSUES';
   else if (results.some(r => r.status === 'FAIL' && !r.dismissed)) overall = 'FIX_ISSUES';
   else if (suspend || results.some(r => (r.status === 'UNKNOWN' && r.rule.kind === 'city') || r.status === 'NOT_CHECKED')) overall = 'INCOMPLETE';
@@ -67,7 +67,9 @@ export function exportBlockers(p: Project, rep: Report): string[] {
   SAFETY_MODULES.forEach(m => { if (!p.modules[m]) b.push(`Turn the "${m}" checks back on. Safety checks can't be off when you export.`); });
   if (p.site.apn.startsWith('0000-')) b.push('This is the demo lot. Start your own project to export a handoff packet.');
   // r4juris-04: blocked when the report was not made with this jurisdiction's own pack (pack id "<jurisdiction>@<version>").
-  if (!rep.pack.startsWith(p.site.jurisdiction + '@')) b.push('Set the city to LA City. Only LA City is supported right now.');
+  if (!rep.pack.startsWith(p.site.jurisdiction + '@')) b.push(p.site.jurisdiction === 'la-county' ? 'Turn on "Beta: LA County (unincorporated)" to check this lot. Export stays off for the beta.' : 'Set the city to LA City. Only LA City is supported right now.');
+  // OUT-15: beta packs (LA County) check only; the handoff packet and PDF are written for the LADBS sheet.
+  if (rep.pack.includes('-beta')) b.push('The LA County rules are a beta. Export is off until a reviewer checks them.');
   if (rep.overall === 'NOT_SUPPORTED') b.push('These rules do not cover this project or date.');
   if (rep.results.some(r => r.rule.id === 'GEO-01' && r.status !== 'PASS')) b.push('Fix the drawing first: the lot or ADU shape is not valid.');
   if (rep.results.some(r => r.rule.id === 'INP-01' && r.status !== 'PASS')) b.push('Enter your real lot, house and garage sizes. The sheets still show example numbers.');

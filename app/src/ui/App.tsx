@@ -3,6 +3,9 @@ import { blankProject, demoProject, isDemo, MODULES, SAFETY_MODULES, uid, type P
 import { History } from '../core/undo';
 import { nextPinNumber } from '../core/markup';
 import { canDismiss, evaluate, exportBlockers, type Report, type Result } from '../rules/engine';
+import { packForProject, packById } from '../rules/registry';
+import { COUNTY_RULE_ITEMS, COUNTY_PACK } from '../rules/county-pack';
+import { blankCounty } from '../core/model';
 import { RULES, PACK_ID, addressCity, mayHaveUpperFloor, houseHalfGap } from '../rules/la-city';
 import { PACK, packFreshness, rulesLine } from '../rules/pack';
 import { bbox, rect, translate } from '../core/geom';
@@ -22,7 +25,7 @@ import { ask, AskHost } from './Ask';
 import { autoFit } from '../rules/fit';
 import { readiness, scoreLine, applies as itemApplies } from '../rules/readiness';
 import { verdictOf } from '../core/verdict';
-import { CATALOG, RULE_ITEMS } from '../rules/ladbs-adu-2025';
+import { RULE_ITEMS } from '../rules/ladbs-adu-2025';
 import { citeText } from '../rules/cites-es';
 import { tr, type Lang } from './i18n';
 import { L, setUiLang, uiLang } from './lang';
@@ -98,10 +101,11 @@ export default function App() {
   const setStep = (i: number) => { moved.current = true; setStepRaw(i); history.pushState(null, '', `#step=${STEP_KEYS[i]}`); };
   const openTool = (t: 'adu' | 'clean' | 'field') => { setTool(t); history.pushState(null, '', t === 'clean' ? '#clean' : t === 'field' ? '#field' : `#step=${STEP_KEYS[step]}`); };
 
-  const report: Report | null = useMemo(() => (p ? evaluate(p, RULES, PACK_ID) : null), [p]);
+  // OUT-15: the UI loads rules through the registry (packFor), not LA City directly.
+  const report: Report | null = useMemo(() => { if (!p) return null; const k = packForProject(p); return evaluate(p, k.rules, k.id); }, [p]);
   const verdict = useMemo(() => (p && report ? verdictOf(p, report) : null), [p, report]); // one shared verdict for the card
   const commit = (next: Project, key?: string) => { hist.current!.push(next, key); setP(next); };
-  const update = (fn: (d: Project) => void, key?: string) => { const d: Project = structuredClone(p!); fn(d); d.rulePack = PACK_ID; commit(d, key); };
+  const update = (fn: (d: Project) => void, key?: string) => { const d: Project = structuredClone(p!); fn(d); d.rulePack = packForProject(d).id; commit(d, key); };
   const undo = () => { if (hist.current?.undo()) setP(hist.current.present); };
   const redo = () => { if (hist.current?.redo()) setP(hist.current.present); };
   useEffect(() => {
@@ -177,7 +181,7 @@ export default function App() {
           <span className="hint">{step === 2 ? L("Drag a room, or drag a corner to resize. Keys: arrows move, Alt+arrows resize.") : step === 5 ? (pinSel ? <button type="button" className="btn quiet" onClick={() => setPinSel(null)}>{L("Show the whole lot")}</button> : L("Pins: red = open, green = resolved.")) : L("Drag the ADU, or select it and use arrow keys. Shaded band = 4 ft side/rear setback.")}</span>
         </div>
         <div className="form" ref={formRef}>
-          {step === 0 && <LotStep p={p} update={update} lang={lang} replace={next => commit({ ...next, rulePack: PACK_ID })} />}
+          {step === 0 && <LotStep p={p} update={update} lang={lang} replace={next => commit({ ...next, rulePack: packForProject(next).id })} />}
           {step === 1 && <GarageStep p={p} update={update} />}
           {step === 2 && <RoomsStep p={p} update={update} sel={roomSel} setSel={setRoomSel} />}
           {step === 3 && <ChecksStep p={p} update={update} report={report} lang={lang} />}
@@ -202,7 +206,7 @@ export default function App() {
 function openNotes(x: Project): string[] {
   const n: string[] = [];
   if (x.repairNotes?.length) n.push(`${L("Some saved values were damaged and were reset. Enter them again:")} ${x.repairNotes.join(', ')}.`);
-  if (x.rulePack && x.rulePack !== PACK_ID) n.push(`${L("The rules were updated since this project was last checked. It is now checked under")} ${PACK_ID} (${L("was")} ${x.rulePack}).`);
+  const now = packForProject(x).id; if (x.rulePack && x.rulePack !== now) n.push(`${L("The rules were updated since this project was last checked. It is now checked under")} ${now} (${L("was")} ${x.rulePack}).`);
   return n;
 }
 
@@ -268,6 +272,26 @@ function Welcome({ lang, setLang, onStart, onOpen, onClean, onPick, field }: { f
 
 type U = (fn: (d: Project) => void, key?: string) => void;
 
+/** OUT-15 / r4juris-07: opt-in for the LA County beta pack, and the questions only that pack asks. */
+function CountyBeta({ p, update }: { p: Project; update: U }) {
+  const k = { ...blankCounty(), ...(p.site.county ?? {}) };
+  const set = (fn: (c: NonNullable<Project['site']['county']>) => void, key?: string) => update(d => { const c = { ...blankCounty(), ...(d.site.county ?? {}) }; fn(c); d.site.county = c; }, key);
+  return <div className="mods" data-testid="county-beta">
+    <label><input type="checkbox" checked={k.betaOptIn} onChange={e => set(c => { c.betaOptIn = e.target.checked; })} /> {L(COUNTY_PACK.label.en)}</label>
+    <span className="help">{L("Beta rules from LA County Public Works and state law. No person has reviewed them yet, so the answer is never more than \"Maybe\" and export is off.")}</span>
+    {k.betaOptIn && <div className="grid2" style={{ alignItems: 'start' }}>
+      <Num id="cff" label={L("Fire flow from LACoFD Form 195/196 (GPM at 20 psi)")} help={L("Your water company fills out this form.")} value={k.fireFlowGpm} max={10000} onChange={n => set(c => { c.fireFlowGpm = n; }, 'cff')} />
+      <Num id="chyd" label={L("Distance from the lot front to the nearest fire hydrant (ft)")} value={k.hydrantFt} max={5000} onChange={n => set(c => { c.hydrantFt = n; }, 'chyd')} />
+      <Num id="cacc" label={L("Distance from the fire truck road to the farthest ADU corner (ft)")} value={k.vehicleAccessFt} max={5000} onChange={n => set(c => { c.vehicleAccessFt = n; }, 'cacc')} />
+      <Num id="croad" label={L("Width of that road (ft)")} value={k.roadWidthFt} max={200} onChange={n => set(c => { c.roadWidthFt = n; }, 'croad')} />
+      <Q id="cgrade" label={L("Is the road paved and 15% slope or flatter?")} value={k.roadGradeOk} onChange={v => set(c => { c.roadGradeOk = v; })} />
+      <Num id="cpath" label={L("Narrowest width of the walking path to the ADU (ft)")} value={k.pathWidthFt} max={200} onChange={n => set(c => { c.pathWidthFt = n; }, 'cpath')} />
+      <Q id="cpgrade" label={L("Is the walking path flatter than 15% slope?")} value={k.pathGradeOk} onChange={v => set(c => { c.pathGradeOk = v; })} />
+      <Q id="cfault" label={L("Is the lot in an earthquake fault zone (Alquist-Priolo)?")} help={L("Shown on the LA County GIS map.")} value={k.faultZone} onChange={v => set(c => { c.faultZone = v; })} />
+    </div>}
+  </div>;
+}
+
 function LotStep({ p, update, replace }: { p: Project; update: U; lang: Lang; replace: (next: Project) => void }) {
   const lb = bbox(p.site.lot), hb = bbox(p.site.primary); const f = p.site.flags; const s = p.site;
   const zimas = `https://zimas.lacity.org/?address=${encodeURIComponent(p.site.address)}`;
@@ -290,7 +314,8 @@ function LotStep({ p, update, replace }: { p: Project; update: U; lang: Lang; re
         <span className="help" id="jur-h">{tag('jurisdiction', L("A \"Los Angeles\" mailing address is not always LA City. Pasadena, Long Beach, Glendale, Burbank and Santa Monica are separate cities, and East LA, View Park and Altadena are unincorporated county. ZIMAS shows if the lot is in LA City."))}</span></div>
     </div>
     {p.site.jurisdiction === 'la-city' && (() => { const c = addressCity(p.site.address); return c && c !== 'los angeles' && c !== 'la' ? <div className="mods"><label><input type="checkbox" checked={!!s.jurisdictionConfirmed} onChange={e => update(d => { d.site.jurisdictionConfirmed = e.target.checked; })} /> {L("I checked ZIMAS: this lot is in the City of Los Angeles")}</label></div> : null; })()}
-    {p.site.parcel && fromMap(p, 'jurisdiction') && (p.site.jurisdiction === 'other' || p.site.jurisdiction === 'la-county') && <div className="banner warn" role="status">{L("The city map shows this lot is outside the City of Los Angeles")}{p.site.parcel.cityName ? ` (${p.site.parcel.cityName})` : ''}. {L("This tool's rules are for LA City only.")}</div>}
+    {p.site.parcel && fromMap(p, 'jurisdiction') && (p.site.jurisdiction === 'other' || p.site.jurisdiction === 'la-county') && <div className="banner warn" role="status">{L("The city map shows this lot is outside the City of Los Angeles")}{p.site.parcel.cityName ? ` (${p.site.parcel.cityName})` : ''}. {p.site.jurisdiction === 'la-county' ? L("LA County rules are a beta: turn it on below to try them.") : L("This tool's rules are for LA City only.")}</div>}
+    {p.site.jurisdiction === 'la-county' && <CountyBeta p={p} update={update} />}
     <div className="grid2">
       {s.lot.length === 4 && (() => { const n = s.lot.length, l = (s.streetEdge + n - 1) % n, r = (s.streetEdge + 1) % n, rear = (s.streetEdge + 2) % n, ex = s.streetEdges ?? [];
         const v = ex.includes(l) ? 'left' : ex.includes(r) ? 'right' : ex.includes(rear) ? 'rear' : 'none';
@@ -505,15 +530,15 @@ function ExportStep({ p, update, report, lang }: { p: Project; update: U; report
 }
 
 function SheetItems({ p, update, report, lang }: { p: Project; update: U; report: Report; lang: Lang }) {
-  const rd = readiness(p, report); const linked = new Set(Object.values(RULE_ITEMS).flat());
-  const open = CATALOG.filter(i => itemApplies(i, p) && !linked.has(i.id) && i.mode !== 'auto');
+  const rd = readiness(p, report); const pk = packById(report.pack); const linked = new Set(Object.values(pk.ruleItems).flat());
+  const open = pk.catalog.filter(i => itemApplies(i, p) && !linked.has(i.id) && i.mode !== 'auto');
   const docs = open.filter(i => i.mode === 'doc'), asks = open.filter(i => i.mode === 'ask');
   const must = docs.filter(i => i.garageRelevant), maybe = docs.filter(i => !i.garageRelevant);
   const setA = (id: string, v: 'yes' | 'no' | 'na' | undefined) => update(d => { if (v) d.sheet[id] = v; else delete d.sheet[id]; });
   const docBox = (i: typeof docs[number]) => <label key={i.id}><input type="checkbox" checked={!!p.docs[i.id]} onChange={e => update(d => { d.docs[i.id] = e.target.checked; })} /> {i.id} {i.summary[lang]}</label>;
   return <>
-    <h2>{L("LADBS correction sheet")}</h2>
-    <p className="lead">{scoreLine(rd, lang === 'es')}. {L("Form")} {PACK.sheet.form}, Rev {PACK.sheet.rev}.</p>
+    <h2>{pk.beta ? pk.meta.sheet.name?.[lang] : L("LADBS correction sheet")}</h2>
+    <p className="lead">{scoreLine(rd, lang === 'es')}. {L("Form")} {pk.meta.sheet.form}, Rev {pk.meta.sheet.rev}.</p>
     <h2>{L("Documents to attach")}</h2>
     <div className="mods">
       <label><input type="checkbox" checked={!!p.docs['NRG.CF1R']} onChange={e => update(d => { d.docs['NRG.CF1R'] = e.target.checked; })} /> III.H.9 {L("Title 24 CF1R energy certificate")}</label>
@@ -558,7 +583,7 @@ function ResultList({ results, lang, compact }: { results: Result[]; lang: Lang;
       <div className="head"><span className="tag">{label[r.status]}</span><span className="title">{r.rule.title[lang]}</span></div>
       <p>{r.msg[lang]}</p>{r.next && <p className="next"><strong>{es ? 'Siguiente: ' : 'Next: '}</strong>{r.next[lang]}</p>}
       {r.dismissed && <p className="pending">{es ? 'Descartado' : 'Dismissed'}: {r.dismissed}</p>}
-      {(() => { const cite = <p className="cite">{r.rule.id} · {r.rule.cites.map(c => citeText(c, es)).join('; ')}{RULE_ITEMS[r.rule.id]?.length ? ` · ${es ? 'hoja LADBS' : 'LADBS sheet'} ${RULE_ITEMS[r.rule.id].join(', ')}` : ''}{r.rule.cites.some(c => !c.verified) && <span className="pending"> · {es ? 'cita en verificación' : 'citation being verified'}</span>}</p>;
+      {(() => { const cite = <p className="cite">{r.rule.id} · {r.rule.cites.map(c => citeText(c, es)).join('; ')}{RULE_ITEMS[r.rule.id]?.length ? ` · ${es ? 'hoja LADBS' : 'LADBS sheet'} ${RULE_ITEMS[r.rule.id].join(', ')}` : COUNTY_RULE_ITEMS[r.rule.id]?.length ? ` · ${es ? 'lista del condado' : 'County checklist'} ${COUNTY_RULE_ITEMS[r.rule.id].join(', ')}` : ''}{r.rule.cites.some(c => !c.verified) && <span className="pending"> · {es ? 'cita en verificación' : 'citation being verified'}</span>}</p>;
         // r4cold-07: the landing example keeps its sources one tap away instead of a citation wall.
         return compact ? <details><summary className="cite">{es ? 'Fuentes' : 'Sources'}</summary>{cite}</details> : cite; })()}
     </li>)}</ul>;

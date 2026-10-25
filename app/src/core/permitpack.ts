@@ -1,4 +1,4 @@
-import { FORMAT, FORMAT_VERSION, type Project, blankProject, uid, UUID_RE } from './model';
+import { FORMAT, FORMAT_VERSION, type Project, blankProject, blankCounty, uid, UUID_RE } from './model';
 import { isNum, MAX_LEN_MM } from './units';
 import type { Poly } from './geom';
 import { MAX_ROOMS, MAX_OPENINGS, MAX_ROOM_PTS } from './rooms';
@@ -76,6 +76,12 @@ export function migrate(raw: any): Project {
   for (const k of Object.keys(base.site.flags) as (keyof typeof base.site.flags)[]) s.flags[k] = tri(s.flags[k]);
   s.otherBuildings = tri(s.otherBuildings); s.existingAduAttached = tri(s.existingAduAttached); s.otherBuildingGapMm = fix('distance to other buildings', s.otherBuildingGapMm, len, null);
   s.jurisdictionConfirmed = s.jurisdictionConfirmed === true;
+  // OUT-15: County beta answers, typed and in range, or reset.
+  if (s.county !== undefined) { const c: any = s.county && typeof s.county === 'object' ? s.county : {}; const b = blankCounty();
+    const ftv = (label: string, v: any, hi: number) => fix(label, v, x => isNum(x) && x >= 0 && x <= hi, null);
+    s.county = { betaOptIn: c.betaOptIn === true, fireFlowGpm: ftv('fire flow', c.fireFlowGpm, 100000), hydrantFt: ftv('hydrant distance', c.hydrantFt, 100000),
+      vehicleAccessFt: ftv('vehicle access distance', c.vehicleAccessFt, 100000), roadWidthFt: ftv('access road width', c.roadWidthFt, 1000), roadGradeOk: tri(c.roadGradeOk ?? b.roadGradeOk),
+      pathWidthFt: ftv('access path width', c.pathWidthFt, 1000), pathGradeOk: tri(c.pathGradeOk ?? b.pathGradeOk), faultZone: tri(c.faultZone ?? b.faultZone) }; }
   if (!['la-city', 'la-county', 'other', 'unknown'].includes(s.jurisdiction)) s.jurisdiction = 'unknown';
   a.garageConstruction = (['wood', 'masonry', 'concrete', 'unknown'] as const).includes(a.garageConstruction) ? a.garageConstruction : 'unknown';
   a.ratedEaveUndersidePlanned = tri(a.ratedEaveUndersidePlanned);

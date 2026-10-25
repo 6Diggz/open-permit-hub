@@ -1,10 +1,11 @@
 import type { Project } from '../core/model';
 import type { Report } from './engine';
-import { CATALOG, RULE_ITEMS, type Route, type SheetItem } from './ladbs-adu-2025';
+import type { Route, SheetItem } from './ladbs-adu-2025';
+import { packById } from './registry';
 
 /** mayApply: a document whose trigger (grading, shared driveway, vehicle lift...) the app does not ask about; the preparer decides. */
 export type ItemState = 'covered' | 'autoPassed' | 'failing' | 'needsAnswer' | 'docsMissing' | 'mayApply';
-export interface Readiness { total: number; checked: number; covered: number; autoPassed: number; failing: number; needsAnswer: number; docsMissing: number; mayApply: number; items: { item: SheetItem; state: ItemState; why: string }[] }
+export interface Readiness { /** Name of the checklist these items come from (per pack). */ sheet: { en: string; es: string }; total: number; checked: number; covered: number; autoPassed: number; failing: number; needsAnswer: number; docsMissing: number; mayApply: number; items: { item: SheetItem; state: ItemState; why: string }[] }
 
 export function projectRoute(p: Project): Route | 'unknown' {
   if (p.adu.mode !== 'conversion') return 'new';
@@ -22,6 +23,9 @@ export function applies(i: SheetItem, p: Project): boolean {
 
 /** "Ready to submit" score against the full LADBS sheet: X of N sheet items checked. */
 export function readiness(p: Project, rep: Report): Readiness {
+  // OUT-15: items come from the pack that made the report (LADBS sheet for LA City, DPW checklist for the County beta).
+  const pk = packById(rep.pack); const CATALOG = pk.catalog, RULE_ITEMS = pk.ruleItems;
+  const sheet = pk.meta.sheet.name ?? { en: 'LADBS correction-sheet', es: 'la hoja de correcciones de LADBS' };
   const byItem = new Map<string, string[]>();
   for (const [rule, ids] of Object.entries(RULE_ITEMS)) ids.forEach(id => byItem.set(id, [...(byItem.get(id) ?? []), rule]));
   const items = CATALOG.map(item => {
@@ -45,15 +49,15 @@ export function readiness(p: Project, rep: Report): Readiness {
   const orphanFails = rep.results.filter(r => r.status === 'FAIL' && !r.dismissed && !(RULE_ITEMS[r.rule.id] ?? []).some(id => failingIds.has(id))).length;
   const n = (s: ItemState) => items.filter(x => x.state === s).length + (s === 'failing' ? orphanFails : 0);
   const covered = n('covered'), autoPassed = n('autoPassed');
-  return { total: items.length, checked: covered + autoPassed, covered, autoPassed, failing: n('failing'), needsAnswer: n('needsAnswer'), docsMissing: n('docsMissing'), mayApply: n('mayApply'), items };
+  return { sheet, total: items.length, checked: covered + autoPassed, covered, autoPassed, failing: n('failing'), needsAnswer: n('needsAnswer'), docsMissing: n('docsMissing'), mayApply: n('mayApply'), items };
 }
 
 /** One plain-language line: what is done, what is left, and who does it. */
 export const scoreLine = (r: Readiness, es = false) => {
   const left = r.needsAnswer + r.docsMissing + r.failing;
   return es
-    ? `${r.checked} de ${r.total} puntos de la hoja de correcciones de LADBS están listos. Quedan ${left}: ${r.failing} por corregir, ${r.needsAnswer} preguntas sin responder (muchas son para su preparador) y ${r.docsMissing} documentos por adjuntar. Otros ${r.mayApply} pueden aplicar: pregunte a su preparador`
-    : `${r.checked} of ${r.total} LADBS correction-sheet items are done. ${left} left: ${r.failing} to fix, ${r.needsAnswer} questions to answer (many are for your preparer) and ${r.docsMissing} documents to attach. ${r.mayApply} more may apply: ask your preparer`;
+    ? `${r.checked} de ${r.total} puntos de ${r.sheet.es} están listos. Quedan ${left}: ${r.failing} por corregir, ${r.needsAnswer} preguntas sin responder (muchas son para su preparador) y ${r.docsMissing} documentos por adjuntar. Otros ${r.mayApply} pueden aplicar: pregunte a su preparador`
+    : `${r.checked} of ${r.total} ${r.sheet.en} items are done. ${left} left: ${r.failing} to fix, ${r.needsAnswer} questions to answer (many are for your preparer) and ${r.docsMissing} documents to attach. ${r.mayApply} more may apply: ask your preparer`;
 };
 
 /**
@@ -81,6 +85,8 @@ export function plainAnswer(p: Project, rep: Report): { verdict: PlainVerdict; e
   // r5gold-04: "not sure yet" is not "outside LA": ask to confirm the city first.
   if (p.site.jurisdiction === 'unknown')
     return { verdict: 'unsure', en: `Not sure yet: first confirm which city the lot is in (look up the address on ZIMAS or your property tax bill), so the right rules can be checked.`, es: `No se sabe aún: primero confirme en qué ciudad está el lote (busque la dirección en ZIMAS o en su recibo de impuestos), para revisar las reglas correctas.` };
+  if (p.site.jurisdiction === 'la-county' && !rep.pack.startsWith('la-county@'))
+    return { verdict: 'unsure', en: `Not sure: this tool's checked rules cover the City of Los Angeles only, and this lot is in unincorporated LA County. You can try the County beta ("Beta: LA County (unincorporated)" on the Lot step); until then it cannot say if ${what.en} can become an ADU.`, es: `No se sabe: las reglas revisadas de esta herramienta son solo para la Ciudad de Los Ángeles, y este lote está en el condado de LA no incorporado. Puede probar la beta del condado en el paso Lote; hasta entonces no puede decir si ${what.es} puede ser una ADU.` };
   if (!rep.pack.startsWith(p.site.jurisdiction + '@')) // r4juris-04: any jurisdiction with its own pack can answer
     return { verdict: 'unsure', en: `Not sure: this tool's rules cover the City of Los Angeles only, so it cannot say if ${what.en} can become an ADU yet.`, es: `No se sabe: las reglas de esta herramienta son solo para la Ciudad de Los Ángeles, así que no puede decir aún si ${what.es} puede ser una ADU.` };
   // r4gold-03: an LA City project the rules do not cover gets its own reason (duplex, new story, date), not the city one.
@@ -92,7 +98,9 @@ export function plainAnswer(p: Project, rep: Report): { verdict: PlainVerdict; e
   const f = p.site.flags; const zone = p.site.zone.trim().toUpperCase();
   // r4gold-04: RAS is a commercial/residential mixed zone; a lot in two zones is not a plain answer.
   const split = /[/,;&]|\sAND\s/.test(zone);
-  const residential = !split && !/^(\[?Q\]?|\(T\)|\(Q\))*\s*RAS/.test(zone) && /^(\[?Q\]?|\(T\)|\(Q\))*\s*(R[1-5SAEWDU]|RD|RE|RS|RA|RW|RU|RZ|A[12]|R\d)/.test(zone);
+  // OUT-15: County zones are written with a hyphen (R-1, R-A, A-1) or RPD (Title 22).
+  const countyRes = !split && rep.pack.startsWith('la-county@') && /^(R-[1-4A]|A-[12]|RPD)\b/.test(zone);
+  const residential = countyRes || !split && !/^(\[?Q\]?|\(T\)|\(Q\))*\s*RAS/.test(zone) && /^(\[?Q\]?|\(T\)|\(Q\))*\s*(R[1-5SAEWDU]|RD|RE|RS|RA|RW|RU|RZ|A[12]|R\d)/.test(zone);
   // r4gold-02: these checks decide the answer, so it cannot be "likely yes" while any is open or a module is off.
   // r5gold-01: deny by default. Every check must be PASS or INFO; only the reviewed list below may stay open.
   const gate = rep.results.some(r => (r.status === 'UNKNOWN' || r.status === 'NOT_CHECKED') && !MAY_STAY_OPEN.includes(r.rule.id)) || Object.values(p.modules).some(v => !v);
@@ -101,6 +109,9 @@ export function plainAnswer(p: Project, rep: Report): { verdict: PlainVerdict; e
   if (!residential || special.length || unknownMap.length || gate)
     return { verdict: 'unsure', en: `Maybe ${what.en} can become an ADU: no blockers found in ${checks} rule checks, but ${!zone ? 'the zone is not known' : split ? 'the lot is in more than one zone' : !residential ? `zone ${zone.slice(0, 20)} is not a plain residential zone` : special.length ? 'this lot is in a special area with extra review' : unknownMap.length ? 'some map questions are not answered' : 'some key answers are still open or some checks are switched off'}; ${qEn}.`,
       es: `Tal vez ${what.es} puede ser una ADU: no se encontraron bloqueos en ${checks} revisiones de reglas, pero ${!zone ? 'no se sabe la zona' : split ? 'el lote está en más de una zona' : !residential ? `la zona ${zone.slice(0, 20)} no es residencial simple` : special.length ? 'este lote está en un área especial con revisión extra' : unknownMap.length ? 'faltan preguntas del mapa' : 'faltan respuestas clave o hay revisiones apagadas'}; ${qEs}.` };
+  // OUT-15: a beta pack never says "Likely yes" (no human-reviewed golden cases yet).
+  if (packById(rep.pack).beta) return { verdict: 'unsure', en: `Maybe ${what.en} can become an ADU: no blockers found in ${checks} beta County rule checks, but the County rules are a beta that no reviewer has checked yet; ${qEn}. Ask LA County Public Works.`,
+    es: `Tal vez ${what.es} puede ser una ADU: no se encontraron bloqueos en ${checks} revisiones beta del condado, pero ninguna persona ha revisado aún estas reglas beta; ${qEs}. Pregunte a Obras Públicas del condado.` };
   return { verdict: 'likely-yes', en: `Likely yes, ${what.en} can become an ADU: no blockers found in ${checks} rule checks; ${qEn} for you or your preparer.`,
     es: `Probablemente sí, ${what.es} puede ser una ADU: no se encontraron bloqueos en ${checks} revisiones de reglas; ${qEs} para usted o su preparador.` };
 }
