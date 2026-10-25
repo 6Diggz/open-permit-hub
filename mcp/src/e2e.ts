@@ -123,7 +123,7 @@ ok(J(await call('edit_project', { path: P, apply: true, ops: [{ op: 'set', path:
 const ex = async (kind: string, extra: Record<string, unknown> = {}) => { const r = await call('export', { path: P, kind, ...extra }); if (r.isError) { console.log(`   export ${kind}: ${r.content[0].text}`); return null; } const j = J(r); return { ...j, abs: join(root, j.written) }; };
 const pdf = await ex('pdf_sheets', { sheet_kind: 'precheck' });
 if (pdf) { const d = await PDFDocument.load(readFileSync(pdf.abs)); const [w, h] = [d.getPage(0).getWidth(), d.getPage(0).getHeight()];
-  ok(d.getPageCount() === 3, `PDF sheets: ${d.getPageCount()} pages (A-1, A-2, G-2)`); ok(Math.round(Math.max(w, h)) === 2592 && Math.round(Math.min(w, h)) === 1728, `PDF sheet is 24x36 in (${w}x${h} pt)`);
+  ok(d.getPageCount() === 4, `PDF sheets: ${d.getPageCount()} pages (A-1, A-2, G-2, A-0 8.5x11 plot plan)`); ok(Math.round(Math.max(w, h)) === 2592 && Math.round(Math.min(w, h)) === 1728, `PDF sheet is 24x36 in (${w}x${h} pt)`);
   const ff = d.context.enumerateIndirectObjects().filter(([, o]) => String(o).includes('/FontFile2')).length; ok(ff >= 2, `PDF embeds its fonts (${ff} font files)`); ok(readFileSync(pdf.abs).subarray(0, 5).toString() === '%PDF-', 'PDF header'); } else ok(false, 'pdf_sheets export');
 const rp = await ex('pdf_report'); if (rp) { const d = await PDFDocument.load(readFileSync(rp.abs)); ok(d.getPageCount() >= 1 && Math.round(d.getPage(0).getWidth()) === 612, `PDF report: ${d.getPageCount()} letter pages`); } else ok(false, 'pdf_report export');
 const dx = await ex('dxf');
