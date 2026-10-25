@@ -8,7 +8,9 @@ import { RULE_ITEMS } from '../rules/ladbs-adu-2025';
 
 export type InspStatus = 'pass' | 'fail' | 'na';
 export interface InspResult { s: InspStatus | null; note: string; /** Photo id (the photo itself is kept on this device, not in the project). */ photo: string | null; at: string; /** r6ux-04: why a Pass/N/A overrides a failing app check (own field, cleared when the result changes). */ reason?: string }
-export interface Inspection { inspector: string; date: string; general: string; items: Record<string, InspResult> }
+export interface Inspection { inspector: string; date: string; general: string; items: Record<string, InspResult>; /** Schema version (r8-03): 2 = override reason kept in its own field. Absent = written before r8. */ v?: number }
+/** r8-03: bump when a one-time migration is added to sanitizeInspection. */
+export const INSP_SCHEMA = 2;
 /** Inspection stage, in the order of the city's inspection card (r5field-01). */
 export type InspStage = 'foundation' | 'frame' | 'insulation' | 'drywall' | 'final';
 export interface InspItem { id: string; group: 'site' | 'structure' | 'fire' | 'egress' | 'rooms' | 'systems'; en: string; es: string; sheet: string[]; code: string; stage: InspStage }
@@ -58,7 +60,7 @@ export const PHOTO_MAX_BYTES = 110 * 1024;
 export const PHOTO_INPUT_MAX_BYTES = 40 * 1024 * 1024;
 
 export const today = () => new Date(Date.now() - new Date().getTimezoneOffset() * 60000).toISOString().slice(0, 10);
-export const blankInspection = (): Inspection => ({ inspector: '', date: today(), general: '', items: {} });
+export const blankInspection = (): Inspection => ({ inspector: '', date: today(), general: '', items: {}, v: INSP_SCHEMA });
 export const result = (i: Inspection | undefined, id: string): InspResult => i?.items[id] ?? { s: null, note: '', photo: null, at: '' };
 export function tally(i: Inspection | undefined) {
   const r = INSP_ITEMS.map(x => result(i, x.id).s);
@@ -73,12 +75,14 @@ export function sanitizeInspection(raw: unknown): Inspection | undefined {
   if (!raw || typeof raw !== 'object') return undefined; const r = raw as any;
   const items: Record<string, InspResult> = {};
   const src = r.items && typeof r.items === 'object' ? r.items : {};
+  const legacy = !(typeof r.v === 'number' && r.v >= INSP_SCHEMA);
   for (const x of INSP_ITEMS) { let v = src[x.id]; if (!v || typeof v !== 'object') continue;
-    // r7-05: before r6 the override reason was appended to the note as "Reason for Pass: ..." / "Motivo de Cumple: ..."; lift it into reason.
-    if (!(typeof v.reason === 'string' && v.reason.trim()) && typeof v.note === 'string') { const m = v.note.match(/(?:^|\n)(?:Reason for Pass|Motivo de Cumple):\s*([^\n]+)\s*$/);
+    // r7-05 / r8-03: before r6 the override reason was appended to the note as "Reason for Pass: ..." / "Motivo de Cumple: ...".
+    // One-time migration: only on data written before the schema flag, only for Pass / N/A results with no reason yet.
+    if (legacy && (v.s === 'pass' || v.s === 'na') && !(typeof v.reason === 'string' && v.reason.trim()) && typeof v.note === 'string') { const m = v.note.match(/(?:^|\n)(?:Reason for Pass|Motivo de Cumple):\s*([^\n]+)\s*$/);
       if (m) v = { ...v, reason: m[1], note: v.note.slice(0, m.index).trim() }; }
     items[x.id] = { s: v.s === 'pass' || v.s === 'fail' || v.s === 'na' ? v.s : null, note: str(v.note, MAX_NOTE), photo: typeof v.photo === 'string' && PHOTO_ID.test(v.photo) ? v.photo : null, at: str(v.at, 40), ...(typeof v.reason === 'string' && v.reason.trim() ? { reason: str(v.reason, 300) } : {}) }; }
-  return { inspector: str(r.inspector, 80), date: /^\d{4}-\d{2}-\d{2}$/.test(r.date) ? r.date : today(), general: str(r.general, MAX_NOTE * 2), items };
+  return { inspector: str(r.inspector, 80), date: /^\d{4}-\d{2}-\d{2}$/.test(r.date) ? r.date : today(), general: str(r.general, MAX_NOTE * 2), items, v: INSP_SCHEMA };
 }
 const DATA_JPEG = /^data:image\/jpeg;base64,[A-Za-z0-9+/]+={0,2}$/;
 /** Photos carried in a .permitpack: only for photo ids the inspection uses, JPEG only, size-capped. */
