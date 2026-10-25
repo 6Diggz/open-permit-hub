@@ -2,11 +2,22 @@ import { useState } from 'react';
 import { cleanfix, plainWasmError } from '../out/wasm';
 
 type Report = { version: string; bytes: number; units: string; units_code: number; entities: number; by_type: Record<string, number>; layers: string[]; fonts: { style: string; font: string; standard: boolean }[]; xrefs: { name: string; path: string; absolute: boolean; fix: string }[]; warnings: string[]; blocking?: string | null; recovered?: boolean };
-type LossRow = { group: 'object' | 'data'; type: string; before: number; after: number; status: 'kept' | 'reduced' | 'dropped' | 'added' };
-type Loss = { ok: true; rows: LossRow[]; lost: number; converted: boolean; bytes: number } | { ok: false; error: string };
+type LossRow = { group: 'object' | 'data'; type: string; before: number; after: number; status: 'kept' | 'reduced' | 'dropped' | 'added' | 'converted' | 'approximated' | 'changed' | 'dropped_on_read'; changed?: number };
+type Loss = { ok: true; rows: LossRow[]; lost: number; hidden_lost?: number; changed?: number; incomplete?: boolean; best_format?: boolean; converted: boolean; bytes: number } | { ok: false; error: string };
 const UNIT_OPTS: [number, string][] = [[-1, 'Keep as is'], [1, 'Inches'], [2, 'Feet'], [4, 'Millimeters'], [5, 'Centimeters'], [6, 'Meters']];
 const TARGETS: [string, string][] = [['r2018', 'DXF 2018 (most CAD apps)'], ['r2000', 'DXF 2000 (older CAD apps)'], ['cnc', 'DXF R12 for laser / CNC'], ['dwg', 'DWG 2018 (beta)']];
-const STATUS: Record<LossRow['status'], string> = { kept: 'Kept', reduced: 'Some lost', dropped: 'Lost', added: 'New in the copy (converted)' };
+const STATUS: Record<LossRow['status'], string> = { kept: 'Kept', reduced: 'Some lost', dropped: 'Lost', added: 'New in the copy (converted)', converted: 'Kept, written in an older form', approximated: 'Kept as a polyline through the curve (close, not exact)', changed: 'Changed: shape, place or text differs', dropped_on_read: 'Lost: this tool could not read it' };
+/** The loss headline: only things you can see count; a cut-off file has an unknown loss; the format hint shows only when another format keeps more. */
+export function lossHeadline(l: Extract<Loss, { ok: true }>): { text: string; mustAccept: boolean } {
+  const changed = l.changed ?? 0; const parts: string[] = [];
+  if (l.incomplete) parts.push('This file is cut off, so the loss is unknown: anything after the cut is missing and can\'t be counted.');
+  if (l.lost > 0) parts.push(`${l.lost.toLocaleString()} drawing object(s) will not be in the clean copy.`);
+  if (changed > 0) parts.push(`${changed.toLocaleString()} object(s) come out with a different shape, place or text.`);
+  if (!parts.length) parts.push(l.converted ? 'Nothing you can see is lost. Some objects are written in another form.' : 'Nothing is lost in this format.');
+  if ((l.hidden_lost ?? 0) > 0) parts.push(`${l.hidden_lost!.toLocaleString()} hidden data item(s) (app settings, not drawing objects) are not kept.`);
+  if (l.best_format === false && (l.lost > 0 || changed > 0)) parts.push('DXF 2018 keeps more.');
+  return { text: parts.join(' '), mustAccept: !!l.incomplete || l.lost > 0 || changed > 0 };
+}
 
 export function CleanFix({ onBack }: { onBack: () => void }) {
   const [file, setFile] = useState<{ name: string; bytes: Uint8Array } | null>(null);
@@ -29,8 +40,10 @@ export function CleanFix({ onBack }: { onBack: () => void }) {
       const url = URL.createObjectURL(new Blob([out as BlobPart])); const a = document.createElement('a'); a.href = url; a.download = file.name.replace(/\.(dwg|dxf)$/i, '') + `-clean-${target}.${ext}`; a.click(); setTimeout(() => URL.revokeObjectURL(url), 2000); }
     catch (e) { setErr(plainWasmError(e)); } setBusy(false);
   };
-  const lostRows = loss?.ok ? loss.rows.filter(r => r.status !== 'kept') : [];
-  const mustAccept = !!loss?.ok && loss.lost > 0;
+  const lostRows = loss?.ok ? loss.rows.filter(r => r.status !== 'kept' && r.group === 'object') : [];
+  const hiddenRows = loss?.ok ? loss.rows.filter(r => r.status !== 'kept' && r.group === 'data') : [];
+  const head = loss?.ok ? lossHeadline(loss) : null;
+  const mustAccept = !!head?.mustAccept;
   const canSave = !busy && !rep?.blocking && !!loss?.ok && (!mustAccept || accept);
   return <main className="welcome" id="main" style={{ maxWidth: 860 }}>
     <button className="btn quiet" onClick={onBack} style={{ marginBottom: 24 }}>Back</button>
@@ -58,10 +71,12 @@ export function CleanFix({ onBack }: { onBack: () => void }) {
       <p><button className="btn" disabled={busy || !!rep.blocking} onClick={() => check()}>Check what will be lost</button></p>
       {loss && !loss.ok && <p role="alert" style={{ color: 'var(--fix)' }}>{loss.error}</p>}
       {loss?.ok && <section aria-label="What will be lost" aria-live="polite">
-        {lostRows.length === 0 ? <p className="res PASS" style={{ padding: 12 }}>Nothing is lost in this format. Every object type is kept.</p> : <>
-          <p className={'res ' + (mustAccept ? 'FAIL' : 'UNKNOWN')} style={{ padding: 12 }}>{mustAccept ? `${loss.lost.toLocaleString()} item(s) will not be in the clean copy.` : 'Some objects are converted to other types.'} Pick DXF 2018 to keep more.</p>
-          <table className="take"><thead><tr><th>What</th><th>Type</th><th>In your file</th><th>In the copy</th><th>Result</th></tr></thead>
-            <tbody>{lostRows.map(r => <tr key={r.group + r.type}><td>{r.group === 'object' ? 'Drawing object' : 'Drawing data'}</td><td>{r.type}</td><td className="q">{r.before}</td><td className="q">{r.after}</td><td>{STATUS[r.status]}</td></tr>)}</tbody></table>
+        {lostRows.length === 0 && hiddenRows.length === 0 && !mustAccept ? <p className="res PASS" style={{ padding: 12 }}>Nothing is lost in this format. Every object type is kept.</p> : <>
+          <p className={'res ' + (mustAccept ? 'FAIL' : 'UNKNOWN')} style={{ padding: 12 }}>{head!.text}</p>
+          {lostRows.length > 0 && <><h3>Things you can see</h3><table className="take"><thead><tr><th>Type</th><th>In your file</th><th>In the copy</th><th>Result</th></tr></thead>
+            <tbody>{lostRows.map(r => <tr key={r.group + r.type}><td>{r.type}</td><td className="q">{r.before}</td><td className="q">{r.after}</td><td>{STATUS[r.status]}</td></tr>)}</tbody></table></>}
+          {hiddenRows.length > 0 && <details><summary>Hidden drawing data ({hiddenRows.length})</summary><table className="take"><thead><tr><th>Type</th><th>In your file</th><th>In the copy</th><th>Result</th></tr></thead>
+            <tbody>{hiddenRows.map(r => <tr key={r.group + r.type}><td>{r.type}</td><td className="q">{r.before}</td><td className="q">{r.after}</td><td>{STATUS[r.status]}</td></tr>)}</tbody></table></details>}
           {mustAccept && <div className="mods"><label><input type="checkbox" checked={accept} onChange={e => setAccept(e.target.checked)} /> I understand these will not be in the copy.</label></div>}
         </>}
       </section>}

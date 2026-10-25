@@ -30,7 +30,126 @@ pub fn plain_error(e: &str) -> String {
 }
 
 fn read_dxf(bytes: &[u8]) -> Result<CadDocument, String> {
-    DxfReader::from_reader(Cursor::new(bytes.to_vec())).map_err(|e| e.to_string())?.read().map_err(|e| e.to_string())
+    if let Some(p) = dxf_preflight(bytes) { return Err(p); }
+    // The reader can panic on damaged tables; on native builds turn that into a plain error (WASM aborts, so the preflight above matters).
+    match std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| DxfReader::from_reader(Cursor::new(bytes.to_vec())).map_err(|e| e.to_string())?.read().map_err(|e| e.to_string()))) {
+        Ok(r) => r,
+        Err(_) => Err("invalid dxf: the reader stopped on a damaged table".into()),
+    }
+}
+
+/// (group code, value) pairs of an ASCII DXF, and the section and object each pair is in.
+fn dxf_pairs(bytes: &[u8]) -> Option<Vec<(i32, String, String, String)>> {
+    if is_dwg(bytes) || bytes.starts_with(b"AutoCAD Binary DXF") { return None; }
+    let text = std::str::from_utf8(bytes).ok()?;
+    let mut it = text.lines(); let mut out = vec![]; let (mut sec, mut obj) = (String::new(), String::new()); let mut want_name = false;
+    while let (Some(c), Some(v)) = (it.next(), it.next()) {
+        let Ok(code) = c.trim().parse::<i32>() else { return Some(out) };
+        let v = v.trim().to_string();
+        if code == 0 { if v == "SECTION" { want_name = true; } else if v == "ENDSEC" { sec.clear(); } obj = v.clone(); }
+        else if code == 2 && want_name { sec = v.clone(); want_name = false; }
+        out.push((code, v, sec.clone(), obj.clone()));
+    }
+    Some(out)
+}
+
+/// Damaged counts that make the CAD reader stop (a negative line type dash count, vertex count, loop count).
+pub fn dxf_preflight(bytes: &[u8]) -> Option<String> {
+    let pairs = dxf_pairs(bytes)?;
+    for (code, v, _sec, obj) in &pairs {
+        let neg = v.parse::<i64>().map(|n| n < 0).unwrap_or(false);
+        let count_code = matches!((obj.as_str(), *code), ("LTYPE", 73) | ("LWPOLYLINE", 90) | ("HATCH", 91) | ("HATCH", 93) | ("SPLINE", 72) | ("SPLINE", 73) | ("SPLINE", 74));
+        if neg && count_code { return Some(format!("This file is damaged: its {obj} data has a negative count (group {code}). Open it in the sender's CAD app and run Recover, or ask for a new copy.")); }
+    }
+    None
+}
+
+/// Entity names in the ENTITIES section, counted straight from the file text (before any reader can skip them).
+pub fn raw_entity_counts(bytes: &[u8]) -> Option<BTreeMap<String, usize>> {
+    let pairs = dxf_pairs(bytes)?; let mut m: BTreeMap<String, usize> = BTreeMap::new();
+    for (code, v, sec, _) in &pairs { if *code == 0 && sec == "ENTITIES" && !matches!(v.as_str(), "ENDSEC" | "VERTEX" | "SEQEND" | "ATTRIB" | "SECTION") { *m.entry(v.clone()).or_default() += 1; } }
+    Some(m)
+}
+/// The reader's type names for a DXF entity name (POLYLINE can come back as several kinds).
+fn raw_aliases(dxf: &str) -> Vec<String> {
+    let n = dxf.to_lowercase().replace(|c: char| !c.is_ascii_alphanumeric(), "");
+    match n.as_str() {
+        "3dface" => vec!["face3d".into()], "3dsolid" => vec!["solid3d".into()], "attdef" => vec!["attributedefinition".into()],
+        "polyline" => vec!["polyline".into(), "polyline2d".into(), "polyline3d".into(), "polyfacemesh".into(), "polygonmesh".into()],
+        "mleader" | "multileader" => vec!["multileader".into()], "arcdimension" | "largeradialdimension" => vec!["dimension".into()], "trace" => vec!["solid".into(), "trace".into()], "image" => vec!["rasterimage".into()], "acadtable" => vec!["table".into()],
+        "pdfunderlay" | "dwfunderlay" | "dgnunderlay" => vec!["underlay".into(), n.clone()],
+        _ if n.ends_with("surface") => vec!["surface".into(), n.clone()],
+        _ => vec![n],
+    }
+}
+fn norm_kind(k: &str) -> String { k.to_lowercase().replace(|c: char| !c.is_ascii_alphanumeric(), "") }
+/// Types the reader skipped: counted in the file text but missing (or fewer) after reading.
+pub fn dropped_on_read(bytes: &[u8], parsed: &BTreeMap<String, usize>) -> Vec<(String, usize, usize)> {
+    let Some(raw) = raw_entity_counts(bytes) else { return vec![] };
+    // Types the reader keeps without knowing them come back as Unknown or Extended: those absorb unmatched names first.
+    let mut pool: usize = ["Unknown", "Extended"].iter().map(|k| *parsed.get(*k).unwrap_or(&0)).sum();
+    raw.into_iter().filter_map(|(name, n)| {
+        let al = raw_aliases(&name);
+        let mut got: usize = parsed.iter().filter(|(k, _)| al.contains(&norm_kind(k))).map(|(_, v)| *v).sum();
+        if got < n { let take = pool.min(n - got); pool -= take; got += take; }
+        if got < n { Some((name, n, got)) } else { None }
+    }).collect()
+}
+
+/// Sample a spline (rational NURBS via de Boor) or ellipse into points, for formats that can't hold curves (R12).
+fn sample_curve(e: &EntityType) -> Option<(Vec<Vector2>, bool)> {
+    match e {
+        EntityType::Spline(sp) => {
+            let p = sp.degree.max(1) as usize; let cp = &sp.control_points; let n = cp.len();
+            if n >= p + 1 && sp.knots.len() == n + p + 1 {
+                let k = &sp.knots; let w = |i: usize| if sp.weights.len() == n && sp.weights[i] > 0.0 { sp.weights[i] } else { 1.0 };
+                let (t0, t1) = (k[p], k[n]); if !(t1 > t0) { return None; }
+                let segs = (n * 16).clamp(32, 2000); let mut pts = vec![];
+                for s in 0..=segs {
+                    let t = if s == segs { t1 - 1e-12 * (t1 - t0) } else { t0 + (t1 - t0) * s as f64 / segs as f64 };
+                    let mut span = p; while span < n - 1 && t >= k[span + 1] { span += 1; }
+                    let mut d: Vec<[f64; 3]> = (0..=p).map(|j| { let i = span - p + j; let wi = w(i); [cp[i].x * wi, cp[i].y * wi, wi] }).collect();
+                    for r in 1..=p { for j in (r..=p).rev() { let i = span - p + j; let den = k[i + p - r + 1] - k[i]; let a = if den.abs() < 1e-15 { 0.0 } else { (t - k[i]) / den };
+                        for c in 0..3 { d[j][c] = (1.0 - a) * d[j - 1][c] + a * d[j][c]; } } }
+                    let q = d[p]; if q[2].abs() < 1e-15 { return None; } pts.push(Vector2::new(q[0] / q[2], q[1] / q[2]));
+                }
+                Some((pts, sp.flags.closed))
+            } else if sp.fit_points.len() >= 2 { Some((sp.fit_points.iter().map(|v| Vector2::new(v.x, v.y)).collect(), sp.flags.closed)) } else { None }
+        }
+        EntityType::Ellipse(el) => {
+            let mj = el.major_axis; let nz = if el.normal.z < 0.0 { -1.0 } else { 1.0 };
+            let mn = (-mj.y * nz * el.minor_axis_ratio, mj.x * nz * el.minor_axis_ratio);
+            let (a0, mut a1) = (el.start_parameter, el.end_parameter); if a1 <= a0 { a1 += std::f64::consts::TAU; }
+            let full = (a1 - a0 - std::f64::consts::TAU).abs() < 1e-9; let segs = 128;
+            let pts = (0..=segs).map(|s| { let t = a0 + (a1 - a0) * s as f64 / segs as f64; Vector2::new(el.center.x + t.cos() * mj.x + t.sin() * mn.0, el.center.y + t.cos() * mj.y + t.sin() * mn.1) }).collect();
+            Some((pts, full))
+        }
+        _ => None,
+    }
+}
+/// R12 can't hold splines or ellipses: replace each with a polyline through points on the curve (same layer, color, handle).
+pub fn approximate_curves(doc: &mut CadDocument) -> usize {
+    let mut n = 0;
+    for e in doc.entities_mut() {
+        if let Some((pts, closed)) = sample_curve(e) {
+            if pts.len() < 2 || pts.iter().any(|p| !p.x.is_finite() || !p.y.is_finite()) { continue; }
+            let mut pl = LwPolyline::from_points(pts); pl.is_closed = closed; pl.common = e.common().clone();
+            *e = EntityType::LwPolyline(pl); n += 1;
+        }
+    }
+    n
+}
+
+/// Geometry fingerprint per entity: type, layer, rounded extents and text. Compared before/after to catch moved points or blanked text.
+fn fingerprints(doc: &CadDocument) -> BTreeMap<String, BTreeMap<String, usize>> {
+    let mut m: BTreeMap<String, BTreeMap<String, usize>> = BTreeMap::new();
+    for e in doc.entities() {
+        let b = e.as_entity().bounding_box(); let r = |v: f64| if v.is_finite() { format!("{:.3}", v) } else { "x".into() };
+        let txt = match e { EntityType::Text(t) => t.value.clone(), EntityType::MText(t) => t.value.clone(), _ => String::new() };
+        let key = format!("{}|{} {} {} {}|{}", e.common().layer, r(b.min.x), r(b.min.y), r(b.max.x), r(b.max.y), txt);
+        *m.entry(kind(e)).or_default().entry(key).or_default() += 1;
+    }
+    m
 }
 
 /// Lenient pass for ASCII DXF that was cut off: keep everything up to the last complete entity,
@@ -67,7 +186,11 @@ pub fn read_with_notes(bytes: &[u8]) -> Result<(CadDocument, Vec<String>), Strin
             if !has_eof {
                 if let Some((fixed, dropped)) = salvage_dxf(bytes) {
                     if let Ok(d) = read_dxf(&fixed) {
-                        return Ok((d, vec![format!("Recovered: this file was cut off. The last {dropped} lines (an unfinished object) were skipped. Ask the sender for a full copy if something is missing.")]));
+                        let seen: Vec<String> = dxf_pairs(bytes).unwrap_or_default().into_iter().filter(|(c, v, _, o)| *c == 2 && o == "SECTION" && !v.is_empty()).map(|(_, v, _, _)| v).collect();
+                        let missing: Vec<&str> = ["HEADER", "CLASSES", "TABLES", "BLOCKS", "ENTITIES", "OBJECTS"].into_iter().filter(|x| !seen.iter().any(|s| s == x)).collect();
+                        let at = seen.last().map(|s| s.as_str()).unwrap_or("the start");
+                        let miss = if missing.is_empty() { String::new() } else { format!(" Sections that never arrived: {}.", missing.join(", ")) };
+                        return Ok((d, vec![format!("Recovered, but incomplete: this file is cut off. It stops inside the {at} section with no end-of-file marker, so everything after that point is missing and can't be counted (an unfinished object of {dropped} lines was skipped).{miss} Ask the sender for a full copy.")]));
                     }
                 }
             }
@@ -128,7 +251,7 @@ pub fn inspect_doc(doc: &CadDocument, size: usize) -> Value {
     }
     if u == 0 { warnings.push("Units are not set (Unitless). Confirm inches or millimeters before scaling or sending to a machine; a 25.4x error is common.".into()); }
     else if !(0..=20).contains(&u) { warnings.push(format!("Units code {u} is not a real unit (Unknown). Confirm inches or millimeters before scaling or sending to a machine; a 25.4x error is common.")); }
-    if splines + ellipses > 0 { warnings.push(format!("{} splines/ellipses. Many laser and CNC controllers need these as arcs and lines: use the CNC export (R12).", splines + ellipses)); }
+    if splines + ellipses > 0 { warnings.push(format!("{} splines/ellipses. Many laser and CNC controllers can't read curves like these. The CNC export (R12) writes each one as a polyline through points on the curve (close, not exact).", splines + ellipses)); }
     let nonstd = fonts.iter().filter(|f| f["standard"] == false).count();
     if nonstd > 0 { warnings.push(format!("{nonstd} text style(s) use fonts other people may not have. They'll see substituted fonts.")); }
     if xrefs.iter().any(|x| x["absolute"] == true) { warnings.push("Some references use full folder paths. They break when the file is sent to someone else.".into()); }
@@ -158,6 +281,7 @@ pub fn clean_doc(mut doc: CadDocument, target: &str, units: i16) -> Result<Vec<u
         if !b.xref_path.is_empty() { let f = b.xref_path.rsplit(['/', '\\']).next().unwrap_or("").to_string(); b.xref_path = f; }
     }
     if units >= 0 { doc.header.insertion_units = units; }
+    if matches!(target, "r12" | "cnc") { approximate_curves(&mut doc); }
     let ver = match target { "r12" | "cnc" => DxfVersion::AC1009, "r14" => DxfVersion::AC1014, "r2000" => DxfVersion::AC1015, _ => DxfVersion::AC1032 };
     if target == "dwg" {
         doc.version = DxfVersion::AC1032;
@@ -168,25 +292,61 @@ pub fn clean_doc(mut doc: CadDocument, target: &str, units: i16) -> Result<Vec<u
     DxfWriter::new(&doc).with_version(ver).write_to_vec().map_err(|e| format!("Could not write DXF: {}", plain_error(&e.to_string())))
 }
 
-/// What will be lost: clean in memory, read the copy back, and compare entity and object counts by type.
+/// Entities whose geometry or text differs between two drawings (same type, different layer, extents or text).
+pub fn fingerprint_diff(a: &CadDocument, b: &CadDocument) -> usize {
+    let (x, y) = (fingerprints(a), fingerprints(b)); let mut n = 0;
+    for (k, m) in &x { for (key, c) in m { n += c.saturating_sub(*y.get(k).and_then(|z| z.get(key)).unwrap_or(&0)); } }
+    n
+}
+/// Hidden object types (dictionaries, records, styles): shown apart from the things you can see, and not in the headline count.
+fn plain_type(k: &str) -> String {
+    match k { "Unknown" => "Unnamed data the reader did not recognize".into(), "ClassObject" => "Class definition".into(), "XRecord" => "Extension record (app data)".into(), _ => k.to_string() }
+}
+/// What will be lost: clean in memory, read the copy back, and compare by type and by geometry.
+/// Before counts include what the reader skipped (counted from the file text). Converted types (a polyline written in an
+/// older form, a spline written as a polyline) are paired, not counted as lost. Hidden data is listed apart.
 pub fn loss_report(bytes: &[u8], target: &str, units: i16) -> Value {
-    let (doc, _) = match read_with_notes(bytes) { Ok(d) => d, Err(e) => return json!({ "ok": false, "error": e }) };
-    let before = type_counts(&doc); let before_obj = object_counts(&doc);
+    let (mut doc, notes) = match read_with_notes(bytes) { Ok(d) => d, Err(e) => return json!({ "ok": false, "error": e }) };
+    let incomplete = !notes.is_empty();
+    let mut before = type_counts(&doc); let before_obj = object_counts(&doc);
+    let skipped = dropped_on_read(bytes, &before);
+    let r12 = matches!(target, "r12" | "cnc");
+    let approx = if r12 { approximate_curves(&mut doc) } else { 0 };
+    let fp_before = fingerprints(&doc);
     let out = match clean_doc(doc, target, units) { Ok(o) => o, Err(e) => return json!({ "ok": false, "error": e }) };
     let back = match read(&out) { Ok(d) => d, Err(e) => return json!({ "ok": false, "error": format!("The clean copy could not be read back to check it: {e}") }) };
-    let after = type_counts(&back); let after_obj = object_counts(&back);
-    let mut rows = vec![]; let mut lost = 0usize;
-    let mut row = |group: &str, k: &String, b: usize, a: usize, lost: &mut usize| {
-        let status = if b > 0 && a == 0 { "dropped" } else if a < b { "reduced" } else if b == 0 && a > 0 { "added" } else { "kept" };
-        if status == "dropped" || status == "reduced" { *lost += b - a; }
-        rows.push(json!({ "group": group, "type": k, "before": b, "after": a, "status": status }));
-    };
+    let after = type_counts(&back); let after_obj = object_counts(&back); let fp_after = fingerprints(&back);
+    // Spline/Ellipse rows: show the original counts (they were replaced by polylines just above).
+    let orig = type_counts(&read_with_notes(bytes).map(|x| x.0).unwrap_or_else(|_| CadDocument::new()));
+    for k in ["Spline", "Ellipse"] { if let Some(v) = orig.get(k) { before.insert(k.into(), *v); } }
+    let mut rows = vec![]; let (mut lost, mut hidden_lost, mut changed) = (0usize, 0usize, 0usize);
+    for (name, n, got) in &skipped { lost += n - got; rows.push(json!({ "group": "object", "type": name, "before": n, "after": got, "status": "dropped_on_read" })); }
+    // Pair conversions: LwPolyline written as Polyline2D in old formats, Spline/Ellipse written as polylines.
+    let poly_in = *before.get("LwPolyline").unwrap_or(&0) + approx; let poly_out = *after.get("LwPolyline").unwrap_or(&0) + *after.get("Polyline2D").unwrap_or(&0);
+    let poly_converted = r12 && poly_out >= poly_in && poly_in > 0;
     let keys: std::collections::BTreeSet<&String> = before.keys().chain(after.keys()).collect();
-    for k in keys { row("object", k, *before.get(k).unwrap_or(&0), *after.get(k).unwrap_or(&0), &mut lost); }
+    for k in keys {
+        let (b, a) = (*before.get(k).unwrap_or(&0), *after.get(k).unwrap_or(&0));
+        let curve = r12 && (k == "Spline" || k == "Ellipse") && approx > 0;
+        let conv = poly_converted && (k == "LwPolyline" || k == "Polyline2D");
+        let status = if curve { "approximated" } else if conv { "converted" } else if b > 0 && a == 0 { "dropped" } else if a < b { "reduced" } else if b == 0 && a > 0 { "added" } else { "kept" };
+        if status == "dropped" || status == "reduced" { lost += b - a; }
+        // Same count but different geometry or text: "changed".
+        let mut ch = 0; if status == "kept" { if let (Some(x), Some(y)) = (fp_before.get(k), fp_after.get(k)) { for (key, n) in x { ch += n.saturating_sub(*y.get(key).unwrap_or(&0)); } } }
+        changed += ch;
+        rows.push(json!({ "group": "object", "type": k, "before": b, "after": a, "status": if ch > 0 { "changed" } else { status }, "changed": ch }));
+    }
     let okeys: std::collections::BTreeSet<&String> = before_obj.keys().chain(after_obj.keys()).collect();
-    for k in okeys { row("data", k, *before_obj.get(k).unwrap_or(&0), *after_obj.get(k).unwrap_or(&0), &mut lost); }
-    json!({ "ok": true, "target": target, "bytes": out.len(), "rows": rows, "lost": lost,
-        "converted": rows.iter().any(|r| r["status"] == "added") })
+    for k in okeys {
+        let (b, a) = (*before_obj.get(k).unwrap_or(&0), *after_obj.get(k).unwrap_or(&0));
+        let status = if b > 0 && a == 0 { "dropped" } else if a < b { "reduced" } else if b == 0 && a > 0 { "added" } else { "kept" };
+        if status == "dropped" || status == "reduced" { hidden_lost += b - a; }
+        rows.push(json!({ "group": "data", "type": plain_type(k), "before": b, "after": a, "status": status }));
+    }
+    let best = if lost + changed == 0 { true } else { target == "r2018" };
+    json!({ "ok": true, "target": target, "bytes": out.len(), "rows": rows, "lost": lost, "hidden_lost": hidden_lost, "changed": changed,
+        "approximated": approx, "incomplete": incomplete, "notes": notes, "best_format": best,
+        "converted": rows.iter().any(|r| r["status"] == "added" || r["status"] == "converted" || r["status"] == "approximated") })
 }
 
 /// Site plan from the permit app as a real DXF 2018: units set to inches, closed polylines,

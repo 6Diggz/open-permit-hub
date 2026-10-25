@@ -266,3 +266,17 @@ describe('rule pages', () => {
     }
   });
 });
+
+import { lossHeadline } from '../ui/CleanFix';
+describe('Clean and Fix headline', () => {
+  const base = { ok: true as const, rows: [], converted: false, bytes: 1 };
+  it('qa2-02 a cut-off file never reads as nothing lost', () => { const h = lossHeadline({ ...base, lost: 0, incomplete: true }); expect(h.text).toMatch(/loss is unknown/); expect(h.mustAccept).toBe(true); });
+  it('parity2-07 the "DXF 2018 keeps more" hint shows only when another format keeps more', () => {
+    expect(lossHeadline({ ...base, lost: 1, best_format: true }).text).not.toMatch(/DXF 2018 keeps more/);
+    expect(lossHeadline({ ...base, lost: 1, best_format: false }).text).toMatch(/DXF 2018 keeps more/);
+  });
+  it('parity2-06 / OUT2-14 hidden data is apart from the headline; changed geometry must be accepted', () => {
+    const h = lossHeadline({ ...base, lost: 0, hidden_lost: 300, converted: true }); expect(h.text).toMatch(/^Nothing you can see is lost/); expect(h.mustAccept).toBe(false);
+    expect(lossHeadline({ ...base, lost: 0, changed: 2 }).mustAccept).toBe(true);
+  });
+});

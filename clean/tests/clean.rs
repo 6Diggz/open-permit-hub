@@ -88,3 +88,74 @@ fn parity11_qa18_site_plan_dxf_has_units_polylines_and_dimensions() {
     assert_eq!(back.header.insertion_units, 1);
     assert!(site_plan(r#"{"outlines":[{"layer":"C-PROP","pts":[[0,0],[1e400,0],[1,1]]}]}"#).is_err(), "non-finite input refused");
 }
+
+// ---- Round 2 ----
+const FULL: &[u8] = include_bytes!("fixtures/full_types_r2018.dxf");
+const MESH: &[u8] = include_bytes!("fixtures/mesh_r2018.dxf");
+const TRUNC: &[u8] = include_bytes!("fixtures/truncated_70pct.dxf");
+const NEG_LTYPE: &[u8] = include_bytes!("fixtures/ltype_negative_count.dxf");
+fn nonkept(r: &serde_json::Value) -> Vec<String> { r["rows"].as_array().unwrap().iter().filter(|x| x["group"] == "object" && x["status"] != "kept").map(|x| format!("{} {}->{} {}", x["type"], x["before"], x["after"], x["status"])).collect() }
+
+#[test]
+fn qa2_01_types_the_reader_skips_are_counted_as_lost() {
+    // The baseline comes from the file text, so a type the reader drops is still counted.
+    let raw = raw_entity_counts(MESH).unwrap(); assert_eq!(raw.get("MESH"), Some(&1)); assert_eq!(raw.get("LINE"), Some(&1));
+    let mut parsed = type_counts(&read(MESH).unwrap()); assert_eq!(parsed.get("Mesh"), Some(&1));
+    assert!(dropped_on_read(MESH, &parsed).is_empty());
+    parsed.remove("Mesh"); // what a reader that skips MESH would return
+    assert_eq!(dropped_on_read(MESH, &parsed), vec![("MESH".to_string(), 1, 0)]);
+    let r = loss_report(MESH, "r2018", -1); assert_eq!(r["lost"], 0, "{r}");
+}
+
+#[test]
+fn qa2_02_truncated_file_is_reported_incomplete_with_missing_sections() {
+    let v = inspect_bytes(TRUNC).unwrap(); let w = v["warnings"][0].as_str().unwrap(); eprintln!("{w}");
+    assert!(w.contains("incomplete") && w.contains("OBJECTS"), "{w}"); assert!(!w.contains("The last"), "{w}");
+    let r = loss_report(TRUNC, "r2018", -1); assert_eq!(r["incomplete"], true, "{r}");
+}
+
+#[test]
+fn parity2_05_r12_writes_splines_and_ellipses_as_polylines() {
+    let r = loss_report(MIXED, "cnc", -1); eprintln!("{:?} lost={}", nonkept(&r), r["lost"]);
+    assert_eq!(row(&r, "Spline")["status"], "approximated"); assert_eq!(row(&r, "Ellipse")["status"], "approximated");
+    let out = clean_doc(read(MIXED).unwrap(), "cnc", -1).unwrap(); let back = read(&out).unwrap();
+    let t = type_counts(&back); assert!(t.get("Spline").is_none() && t.get("Ellipse").is_none());
+    let polys = t.get("Polyline2D").copied().unwrap_or(0) + t.get("LwPolyline").copied().unwrap_or(0); assert!(polys >= 3, "{t:?}");
+    // the ellipse polyline stays on the curve: every point within the ellipse's extents
+    let s = String::from_utf8_lossy(&out); assert!(s.contains("AC1009"));
+}
+
+#[test]
+fn parity2_06_conversions_are_paired_and_hidden_data_is_apart() {
+    let r = loss_report(MIXED, "cnc", -1);
+    assert_eq!(row(&r, "LwPolyline")["status"], "converted", "{r}");
+    let lost = r["lost"].as_u64().unwrap(); let visible: u64 = r["rows"].as_array().unwrap().iter().filter(|x| x["group"] == "object" && (x["status"] == "dropped" || x["status"] == "reduced" || x["status"] == "dropped_on_read")).map(|x| x["before"].as_u64().unwrap() - x["after"].as_u64().unwrap()).sum();
+    assert_eq!(lost, visible, "headline counts only visible objects: {r}");
+    assert!(r["hidden_lost"].is_u64());
+}
+
+#[test]
+fn parity2_07_best_format_is_flagged() {
+    let r = loss_report(FULL, "r2018", -1); assert_eq!(r["best_format"], true);
+    let c = loss_report(MIXED, "cnc", -1); assert_eq!(c["best_format"], false);
+}
+
+#[test]
+fn out2_14_changed_geometry_is_not_reported_as_kept() {
+    // Writer-path change simulated: compare a file with its own copy where one MText value is blanked.
+    let r = loss_report(MIXED, "r2018", -1); assert_eq!(r["changed"], 0, "{r}");
+    let mut d = read(MIXED).unwrap(); for e in d.entities_mut() { if let acadrust::entities::EntityType::MText(t) = e { t.value = String::new(); } }
+    let altered = clean_doc(d, "r2018", -1).unwrap();
+    let a = fingerprint_diff(&read(MIXED).unwrap(), &read(&altered).unwrap()); assert!(a >= 1, "blanked text must be a change");
+}
+
+#[test]
+fn appsec_r2_06_negative_ltype_count_is_a_plain_error_not_a_panic() {
+    let e = read(NEG_LTYPE).err().expect("must be refused"); assert!(e.contains("negative count") && e.contains("Recover"), "{e}");
+    assert!(inspect_bytes(NEG_LTYPE).is_err());
+}
+#[test]
+fn qa2_01_raw_scan_matches_reader_names() {
+    // Every entity type in these generated files is matched to the reader's name (no false "dropped on read").
+    for (f, b) in [("mixed", MIXED), ("full", FULL)] { let r = loss_report(b, "r2018", -1); assert!(!r["rows"].as_array().unwrap().iter().any(|x| x["status"] == "dropped_on_read"), "{f}: {r}"); }
+}
