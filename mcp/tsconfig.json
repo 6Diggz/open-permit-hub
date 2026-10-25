@@ -1,0 +1,34 @@
+{
+ "compilerOptions": {
+  "target": "es2023",
+  "lib": [
+   "ES2023",
+   "DOM"
+  ],
+  "module": "esnext",
+  "moduleResolution": "bundler",
+  "strict": true,
+  "noEmit": true,
+  "skipLibCheck": true,
+  "allowImportingTsExtensions": true,
+  "allowArbitraryExtensions": true,
+  "noUnusedLocals": true,
+  "noUnusedParameters": true,
+  "types": [],
+  "typeRoots": [],
+  "paths": {
+   "pdf-lib": [
+    "../app/node_modules/pdf-lib"
+   ],
+   "fflate": [
+    "../app/node_modules/fflate"
+   ]
+  }
+ },
+ "files": [
+  "src/env.d.ts"
+ ],
+ "include": [
+  "src"
+ ]
+}

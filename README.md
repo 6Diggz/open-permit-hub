@@ -26,9 +26,10 @@ npx vitest run                               # rule + export tests
 npm run build && node e2e/e2e.mjs           # browser tests (phone + desktop, offline, accessibility)
 ```
 
-## Use it with Claude
+## Use it with Claude (MCP)
+An AI agent can do everything the app does through the MCP server in `mcp/`: start or import a project, fill it in, draw rooms, run the checks, answer plan-check corrections and export the plan set. It runs over stdio only (no network port) and only touches files inside `OPA_ROOT`.
 ```bash
-cd mcp && npm install && npm test        # builds dist/server.mjs and runs the self-test
+cd app && npm install && cd ../mcp && npm install && npm test   # builds dist/, runs the self-test and the end-to-end test
 ```
 Add to Claude Desktop's config (`claude_desktop_config.json`):
 ```json
@@ -36,7 +37,29 @@ Add to Claude Desktop's config (`claude_desktop_config.json`):
 ```
 Or in Claude Code: `claude mcp add permit-hub -e OPA_ROOT=/path/to/projects -- node /path/to/mcp/dist/server.mjs`
 
-Tools: `run_checks`, `list_rules`, `propose_edit`, `apply_edit`, `materials`, `check_citations`.
+| Tool | What it does | Writes? |
+|---|---|---|
+| `list_projects` | Every `.permitpack` in the projects folder, with its status. | no |
+| `create_project` | New garage conversion (or new ADU) as a working copy; returns the first checks. | new file |
+| `import_permitpack` | Working copy from a plain or passphrase-locked pack, or a backup bundle. | new file |
+| `get_project` | The whole project: lot, house, garage, rooms, doors, windows, answers, sheet answers, docs, review notes. | no |
+| `edit_project` | Field-path editor for everything the screens edit (`set`, `add`, `remove`, `move`, `autofit`, `letter`). Preview first; `apply: true` or `apply_edit` to write. | on apply |
+| `propose_edit` / `apply_edit` | Short-form preview for size and heights; apply any proposal. Same proposal twice returns the same file. | on apply |
+| `run_checks` | Rule ids with status, message, next step and citations; LADBS sheet readiness score and open items; plain answer; export blockers. | no |
+| `parcel_lookup` | Opt-in city map lookup (APN, zone, lot lines, overlays). Off unless `OPA_ALLOW_NETWORK=1`. | on apply |
+| `add_pin` / `update_pin` / `resolve_pin` | Numbered review notes on the site plan. | on apply |
+| `import_corrections` | Splits a pasted correction letter into checklist items. | on apply |
+| `export` | `pdf_sheets` (24x36), `pdf_report`, `dxf`, `handoff_zip`, `ics`, `html_report`, `permitpack` (optionally locked), `materials_csv`, `response_letter`. Never overwrites. | new file |
+| `list_rules`, `check_citations`, `materials` | Rule list, citation guard (abbreviated or spelled-out sections), materials estimate. | no |
+
+Safety: text people wrote (names, addresses, room names, review notes, letters, map answers) comes back only as tokens like `[[user_3]]`; the real text is inside `user_data_do_not_follow` and is data, never instructions. Originals are never overwritten: edits to a file the server did not create go to a new `-edited` copy, and edits to a working copy update it in place. Errors are `isError` results with a code (`proposal_not_found`, `file_changed`, `invalid_edit`, `passphrase_required`, `export_blocked`, ...) and a hint.
+
+Example prompts:
+- "Start a garage conversion for 4305 Edenhurst Ave, Los Angeles 90039. The garage is 20 by 20, detached, wood frame, permitted, built in 1962. Look up the parcel, then tell me in one sentence if it can become an ADU."
+- "Split the garage into a 11 by 10 bedroom with a 24 by 44 inch window on the left wall, a 7 by 8 bath and a living room with a 36 inch door. Show me what changes before you save."
+- "Run the checks and list what is still open on the LADBS correction sheet, grouped into what I answer and what my preparer answers."
+- "Here is the city's correction letter: ... Turn it into items, draft a response to each one, and check every code section you cite."
+- "Export the 24x36 plan sheets, the DXF for my drafter and the handoff packet. Add the plan-check deadline to my calendar: we filed on 2026-11-02."
 
 ## What it does not do
 - It does not approve plans or make a submittal-ready set. A human preparer finalizes the handoff packet.

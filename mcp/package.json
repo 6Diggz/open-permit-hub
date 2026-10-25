@@ -2,10 +2,12 @@
   "name": "mcp",
   "version": "1.0.0",
   "description": "Open Permit Hub MCP server (stdio)",
-  "main": "index.js",
   "scripts": {
-    "build": "esbuild src/server.ts --bundle --platform=node --format=esm --banner:js=\"import{createRequire}from'module';const require=createRequire(import.meta.url);\" --outfile=dist/server.mjs && esbuild src/selftest.ts --bundle --platform=node --format=esm --banner:js=\"import{createRequire}from'module';const require=createRequire(import.meta.url);\" --outfile=dist/selftest.mjs",
-    "test": "npm run build && node dist/selftest.mjs"
+    "build": "node build.mjs",
+    "typecheck": "../app/node_modules/.bin/tsc -p .",
+    "selftest": "node dist/selftest.mjs",
+    "e2e": "node dist/e2e.mjs",
+    "test": "node build.mjs && node dist/selftest.mjs && node dist/e2e.mjs"
   },
   "keywords": [],
   "author": "",

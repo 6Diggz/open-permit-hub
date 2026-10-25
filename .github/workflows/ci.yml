@@ -32,8 +32,8 @@ jobs:
         run: cd app && test $(du -cb dist/assets/index-*.js | tail -1 | cut -f1) -lt 3000000
       - name: Browser tests (390 and 1440 wide, offline, deploy update, accessibility)
         run: cd app && npx playwright install --with-deps chromium && node e2e/e2e.mjs && node e2e/feat.mjs
-      - name: MCP server self-test
-        run: cd mcp && npm ci && npm test
+      - name: MCP server (typecheck, fresh build of dist, self-test incl. dist-matches-src, end-to-end garage conversion, agent tests)
+        run: cd mcp && npm ci && npm run typecheck && npm test && cd ../app && npx vitest run --root ../mcp/test
       - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
         with: { name: web-build, path: app/dist }
   audit:
