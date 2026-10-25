@@ -10,7 +10,8 @@ export { missingGlyphNote };
 import { toSqFt } from '../core/units';
 import { MM_PER_FT, fmtFtIn, fmtSqFt } from '../core/units';
 import { area } from '../core/geom';
-import { readiness, scoreLine, plainAnswer } from '../rules/readiness';
+import { readiness, scoreLine } from '../rules/readiness';
+import { verdictOf } from '../core/verdict';
 import { RULE_ITEMS } from '../rules/ladbs-adu-2025';
 import { citeText } from '../rules/cites-es';
 import { withRooms, roomSize, roomArea, roomCeiling, wallPoint } from '../core/rooms';
@@ -237,7 +238,7 @@ export async function reportPDF(p: Project, rep: Report, lang: 'en' | 'es' = p.p
   line(p.name, 20, fb); line(`${p.site.address || '-'}   APN ${p.site.apn || '-'}`, 10, f, MUTE); y -= 6;
   const ov = { READY_FOR_PREPARER: es ? 'Listo para su preparador' : 'Ready for your preparer', FIX_ISSUES: es ? 'Hay cosas que corregir' : 'Issues to fix', INCOMPLETE: es ? 'Incompleto: falta información' : 'Incomplete: information missing', NOT_SUPPORTED: es ? 'Dirección no soportada' : 'Address not supported' }[rep.overall];
   line(ov, 16, fb, rep.overall === 'READY_FOR_PREPARER' ? GREEN : rep.overall === 'FIX_ISSUES' ? RED : AMBER);
-  line(plainAnswer(p, rep)[es ? 'es' : 'en'], 10, fb, INK); // r5whole-05: the same plain answer as the check card
+  line(verdictOf(p, rep).plain[es ? 'es' : 'en'], 10, fb, INK); // r5whole-05: the same plain answer as the check card
   const fr = rulesLine(p.applicationDate, rep.pack, es);
   line(fr.text, 9, f, fr.stale ? AMBER : MUTE);
   line(es ? `Base del código: la hoja LADBS cita ${PACK.sheet.codes}; ciclo estatal ${PACK.stateCycle}. ${PACK.localCycleNote}` : `Code basis: the LADBS sheet cites ${PACK.sheet.codes}; state cycle ${PACK.stateCycle}. ${PACK.localCycleNote}`, 8, f, MUTE);

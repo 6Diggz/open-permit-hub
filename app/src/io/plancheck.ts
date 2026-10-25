@@ -82,9 +82,12 @@ export function parseInches(s: string): number | null {
 const LEN_G = /\d{1,3}\s*'\s*-?\s*(?:\d{1,2}(?:\.\d+)?)?(?:\s+\d\/\d{1,2})?\s*"?|\d{1,3}(?:\.\d+)?\s*(?:"|in\b|ft\b|feet\b)|\d{2,5}(?:\.\d+)?\s*mm\b|\d{1,4}(?:\.\d+)?\s*cm\b|\d{1,2}\.\d+\s*m\b/gi;
 const lengthsIn = (s: string) => [...s.matchAll(LEN_G)].map(m => ({ t: m[0].trim(), v: parseInches(m[0]) })).filter((x): x is { t: string; v: number } => x.v != null && x.v > 0);
 /** The first length after the keyword (else the last one before it): "Outside 20' x 20' Ceiling 8'" -> 8'. */
-function lenNear(s: string, re: RegExp): { t: string; v: number }[] {
-  const m = re.exec(s); if (!m) return []; const at = m.index + m[0].length;
-  const after = lengthsIn(s.slice(at)); if (after.length) return [after[0]]; const before = lengthsIn(s.slice(0, m.index)); return before.length ? [before[before.length - 1]] : [];
+/** The length next to a keyword. r6logic-06: tries every keyword hit and skips lengths outside [min, max] (a "1.5 m" fan is not a ceiling). */
+function lenNear(s: string, re: RegExp, min = -Infinity, max = Infinity): { t: string; v: number }[] {
+  const ok = (x: { v: number }) => x.v >= min && x.v <= max;
+  const g = new RegExp(re.source, re.flags.includes('g') ? re.flags : re.flags + 'g'); const hits = [...s.matchAll(g)]; if (!hits.length) return [];
+  for (const m of hits) { const a = lengthsIn(s.slice(m.index! + m[0].length)).find(ok); if (a) return [a]; }
+  const before = lengthsIn(s.slice(0, hits[0].index!)).filter(ok); return before.length ? [before[before.length - 1]] : [];
 }
 export const fmtIn = (inches: number) => { const f = Math.floor(inches / 12); const i = Math.round((inches - f * 12) * 10) / 10; return `${f}' ${i}"`; };
 
@@ -125,8 +128,12 @@ const INLINE: [TitleField, RegExp][] = [
 const ADDRESS = /\b\d{2,6}\s+(?:[NSEW]\.?\s+)?[A-Za-z0-9.' ]{2,30}?\s(?:st|street|ave|avenue|blvd|boulevard|dr|drive|rd|road|pl|place|way|ln|lane|ct|court|ter|terrace|cir|circle)\b\.?/i;
 
 /** r5plan-01: a note that says the thing is not there. "No gas" is the all-electric note itself, so it is not a negation. */
-const NEG = /\b(not provided|not shown|not included|n\/a|none|tbd|t\.b\.d\.|not required|see (?:structural |the )?(?:engineer|engineering|structural|s-sheets)|by others|non[- ]rated)\b|^\s*no\s|\bnot\s/i;
-export const negated = (t: string) => NEG.test(t.replace(/\bno gas\b/gi, ''));
+// r6logic-01: no bare "not": code-minimum wording ("not less than", "shall not be"), double negatives ("not non-rated", "not N/A")
+// and "not required" (an answer, e.g. sprinklers) are mentions. Only "not provided/shown/included", N/A, TBD, by others, see
+// engineer, non-rated, a leading "NO <item>" and a trailing ": NO" negate.
+const NEG = /\b(not provided|not shown|not included|n\/a|none|tbd|t\.b\.d\.|see (?:structural |the )?(?:engineer|engineering|structural|s-sheets)|by others|non[- ]rated)\b|^\s*no\s|^\s*not\s|:\s*no\.?\s*$/i;
+const NOT_NEG = /\bno gas\b|\bnot\s+(?:less|more|greater|smaller|larger|exceed(?:ing)?|to exceed|over|under)\b|\bshall not\b|\bnot\s+(?:non[- ]rated|n\/a)\b|\bnot required\b/gi;
+export const negated = (t: string) => NEG.test(t.replace(NOT_NEG, ' '));
 const clip = (s: string, n = 90) => (s.length > n ? s.slice(0, n - 1) + '…' : s);
 
 export function analyze(pagesIn: PageText[], totalPages = pagesIn.length): PlanCheck {
@@ -191,7 +198,7 @@ export function analyze(pagesIn: PageText[], totalPages = pagesIn.length): PlanC
       for (const x of lengthsIn(l.text)) if (x.v <= 12 * 200) setbacks.push({ page: l.page, inches: x.v, text: clip(l.text), side });
     }
     const CEIL = /\b(ceiling|clg\.?)\s*(height|ht\.?)?\b|\bc\.h\.\s|\bplate (height|ht)/i;
-    if (CEIL.test(l.text)) for (const x of lenNear(l.text, CEIL)) if (x.v >= 60 && x.v <= 240) ceilings.push({ page: l.page, inches: x.v, text: clip(l.text) });
+    if (CEIL.test(l.text)) for (const x of lenNear(l.text, CEIL, 60, 240)) ceilings.push({ page: l.page, inches: x.v, text: clip(l.text) });
     if (/window|egress|escape|opening|net clear|\bw\d|\bclr\.?/i.test(l.text)) {
       for (const m of l.text.matchAll(/(\d)\s*'\s*-?\s*(\d{1,2})?\s*"?\s*[xX]\s*(\d)\s*'\s*-?\s*(\d{1,2})?\s*"?|\b(\d{2})\s*"?\s*[xX]\s*(\d{2})\s*"?/g)) {
         const w = m[5] ? Number(m[5]) : Number(m[1]) * 12 + Number(m[2] ?? 0), h = m[6] ? Number(m[6]) : Number(m[3]) * 12 + Number(m[4] ?? 0);
@@ -259,8 +266,11 @@ export function analyze(pagesIn: PageText[], totalPages = pagesIn.length): PlanC
   kw('III.E.3', /carbon monoxide|\bco (alarm|detector)s?\b|smoke\/co|smoke & co/i, 'a carbon monoxide alarm', 'una alarma de monóxido de carbono', /carbon monoxide (alarm|detector)|R315/i);
   kw('III.E.4', /sprinkler/i, 'sprinklers', 'rociadores', /(nfpa ?13d|fire sprinkler system|sprinklers? (required|provided|not required))/i);
   // III.F.1 escape windows (sizes checked against the numbers on the sheet: 24" high, 20" wide, 5.7 sq ft, 5.0 at grade)
-  { const h = find(/\b(egress|escape|emergency escape)\b/i); const ew = windows.filter(w => h.some(x => x.page === w.page) || /egress|escape/i.test(w.text));
-    const E = PARAMS.egress; const small = ew.filter(w => w.w < E.minWidthIn || w.h < E.minHeightIn || (w.w * w.h) / 144 < E.gradeSqFt);
+  { const h = find(/\b(egress|escape|emergency escape)\b/i); // r6logic-02: only sizes on an egress-tagged line count; on an egress page, untagged sizes count unless tagged bath/obscure/(E)/remove.
+    const tagged = windows.filter(w => /egress|escape|\be\.?w\.?\b/i.test(w.text));
+    const ew = tagged.length ? tagged : windows.filter(w => h.some(x => x.page === w.page) && !/\bbath|obscure|\(e\)|remov/i.test(w.text));
+    const E = PARAMS.egress; const bad = (w: WindowSize) => w.w < E.minWidthIn || w.h < E.minHeightIn || (w.w * w.h) / 144 < E.gradeSqFt;
+    const small = ew.every(bad) ? ew : []; // conflict only when no escape-window size passes
     add('III.F.1', !h.length ? (windows.length ? 'partial' : 'missing') : ew.length ? (small.length ? 'conflict' : 'addressed') : 'partial', h.length && ew.length ? 'medium' : 'low', [...h.slice(0, 2), ...ew.slice(0, 2).map(w => ({ page: w.page, text: `${w.w}" x ${w.h}" — ${w.text}` }))],
       !h.length ? (windows.length ? { en: `${windows.length} window sizes found, but no note says which is the escape window.`, es: `Se encontraron ${windows.length} medidas de ventanas, pero ninguna nota dice cuál es la de escape.` } : { en: 'No escape window note or window size was found.', es: 'No se encontró nota de ventana de escape ni medidas de ventanas.' })
         : ew.length ? { en: `Escape window note with ${ew.length} size${ew.length > 1 ? 's' : ''} read from the text.`, es: `Nota de ventana de escape con ${ew.length} medida${ew.length > 1 ? 's' : ''} leída${ew.length > 1 ? 's' : ''} del texto.` } : { en: 'Escape windows are mentioned, but no size was read next to them.', es: 'Se mencionan ventanas de escape, pero no se leyó una medida junto a ellas.' },

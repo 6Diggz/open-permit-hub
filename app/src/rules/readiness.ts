@@ -40,7 +40,10 @@ export function readiness(p: Project, rep: Report): Readiness {
     if (a === 'yes' || a === 'na') return { item, state: 'covered' as ItemState, why: a === 'na' ? 'does not apply' : 'shown on plans' };
     return { item, state: (a === 'no' ? 'failing' : 'needsAnswer') as ItemState, why: a === 'no' ? 'not on plans yet' : 'not answered' };
   });
-  const n = (s: ItemState) => items.filter(x => x.state === s).length;
+  // r6logic-03: a failing check that lands on no applicable sheet item still counts as one item to fix, so every surface agrees.
+  const failingIds = new Set(items.filter(x => x.state === 'failing').map(x => x.item.id));
+  const orphanFails = rep.results.filter(r => r.status === 'FAIL' && !r.dismissed && !(RULE_ITEMS[r.rule.id] ?? []).some(id => failingIds.has(id))).length;
+  const n = (s: ItemState) => items.filter(x => x.state === s).length + (s === 'failing' ? orphanFails : 0);
   const covered = n('covered'), autoPassed = n('autoPassed');
   return { total: items.length, checked: covered + autoPassed, covered, autoPassed, failing: n('failing'), needsAnswer: n('needsAnswer'), docsMissing: n('docsMissing'), mayApply: n('mayApply'), items };
 }
@@ -58,7 +61,9 @@ export const scoreLine = (r: Readiness, es = false) => {
  * designs on the plans (alarms, energy, vapor retarder, engineering, room layout, ceiling finish, escape window size), not a
  * question of whether the garage can become an ADU at all. A rule not on this list blocks "Likely yes" until someone adds it here.
  */
-export const MAY_STAY_OPEN: readonly string[] = ['ALM-01', 'ALM-02', 'VAP-01', 'NRG-01', 'ENG-01', 'ROM-01', 'CEI-01', 'EGR-01'];
+// r6logic-04: ENG-01 (wall material is a homeowner fact; unreinforced masonry is a seismic risk) and EGR-01 (a bedroom may have
+// no escape window at all) were removed: their FAIL value is a homeowner fact, not a preparer design detail.
+export const MAY_STAY_OPEN: readonly string[] = ['ALM-01', 'ALM-02', 'VAP-01', 'NRG-01', 'ROM-01', 'CEI-01'];
 export type PlainVerdict = 'likely-yes' | 'likely-no' | 'unsure';
 /**
  * The homeowner's question in one short sentence: "Can I turn my garage into an ADU?". Never stronger than the checks:
@@ -81,7 +86,7 @@ export function plainAnswer(p: Project, rep: Report): { verdict: PlainVerdict; e
   // r4gold-03: an LA City project the rules do not cover gets its own reason (duplex, new story, date), not the city one.
   if (rep.overall === 'NOT_SUPPORTED') { const u = rep.results.find(r => r.unsupported || (r.status === 'FAIL' && r.rule.id === 'JUR-01'));
     return { verdict: 'unsure', en: `Not sure: this app does not check this kind of project yet. ${u ? u.msg.en : ''}`.trim(), es: `No se sabe: esta app aún no revisa este tipo de proyecto. ${u ? u.msg.es : ''}`.trim() }; }
-  const fx = Math.max(1, rd.failing);
+  const fx = rd.failing; // r6logic-03: no fudge; readiness counts every failing check
   if (fails > 0)
     return { verdict: 'likely-no', en: `Not as entered: ${fx === 1 ? '1 sheet item' : `${fx} sheet items`} to fix before ${what.en} can become an ADU; ${qEn}.`, es: `No como está: ${fx === 1 ? '1 punto de la hoja' : `${fx} puntos de la hoja`} por corregir antes de que ${what.es} pueda ser una ADU; ${qEs}.` };
   const f = p.site.flags; const zone = p.site.zone.trim().toUpperCase();
@@ -94,8 +99,8 @@ export function plainAnswer(p: Project, rep: Report): { verdict: PlainVerdict; e
   const special = (['hillside', 'vhfhsz', 'hpoz', 'coastal', 'fireRebuild'] as const).filter(k => f[k] === 'yes');
   const unknownMap = (['hillside', 'vhfhsz', 'hpoz', 'coastal', 'fireRebuild'] as const).filter(k => f[k] === 'unknown');
   if (!residential || special.length || unknownMap.length || gate)
-    return { verdict: 'unsure', en: `Maybe ${what.en} can become an ADU: no blockers found in ${checks} checks, but ${!zone ? 'the zone is not known' : split ? 'the lot is in more than one zone' : !residential ? `zone ${zone.slice(0, 20)} is not a plain residential zone` : special.length ? 'this lot is in a special area with extra review' : unknownMap.length ? 'some map questions are not answered' : 'some key answers are still open or some checks are switched off'}; ${qEn}.`,
-      es: `Tal vez ${what.es} puede ser una ADU: no se encontraron bloqueos en ${checks} revisiones, pero ${!zone ? 'no se sabe la zona' : split ? 'el lote está en más de una zona' : !residential ? `la zona ${zone.slice(0, 20)} no es residencial simple` : special.length ? 'este lote está en un área especial con revisión extra' : unknownMap.length ? 'faltan preguntas del mapa' : 'faltan respuestas clave o hay revisiones apagadas'}; ${qEs}.` };
-  return { verdict: 'likely-yes', en: `Likely yes, ${what.en} can become an ADU: no blockers found in ${checks} checks; ${qEn} for you or your preparer.`,
-    es: `Probablemente sí, ${what.es} puede ser una ADU: no se encontraron bloqueos en ${checks} revisiones; ${qEs} para usted o su preparador.` };
+    return { verdict: 'unsure', en: `Maybe ${what.en} can become an ADU: no blockers found in ${checks} rule checks, but ${!zone ? 'the zone is not known' : split ? 'the lot is in more than one zone' : !residential ? `zone ${zone.slice(0, 20)} is not a plain residential zone` : special.length ? 'this lot is in a special area with extra review' : unknownMap.length ? 'some map questions are not answered' : 'some key answers are still open or some checks are switched off'}; ${qEn}.`,
+      es: `Tal vez ${what.es} puede ser una ADU: no se encontraron bloqueos en ${checks} revisiones de reglas, pero ${!zone ? 'no se sabe la zona' : split ? 'el lote está en más de una zona' : !residential ? `la zona ${zone.slice(0, 20)} no es residencial simple` : special.length ? 'este lote está en un área especial con revisión extra' : unknownMap.length ? 'faltan preguntas del mapa' : 'faltan respuestas clave o hay revisiones apagadas'}; ${qEs}.` };
+  return { verdict: 'likely-yes', en: `Likely yes, ${what.en} can become an ADU: no blockers found in ${checks} rule checks; ${qEn} for you or your preparer.`,
+    es: `Probablemente sí, ${what.es} puede ser una ADU: no se encontraron bloqueos en ${checks} revisiones de reglas; ${qEs} para usted o su preparador.` };
 }
