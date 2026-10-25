@@ -1,6 +1,6 @@
 //! Clean and Fix (Layer 2 MVP). Never touches the original: reads bytes, returns a report and a clean copy.
-use acadrust::entities::{Dimension, DimensionAligned, EntityType, LwPolyline, Text};
-use acadrust::tables::Layer;
+use acadrust::entities::{Dimension, DimensionAligned, EntityType, Line, LwPolyline, Text};
+use acadrust::tables::{BlockRecord, Layer};
 use acadrust::types::{DxfVersion, Vector2, Vector3};
 use acadrust::{CadDocument, DwgReader, DxfReader, DxfWriter};
 use serde_json::{json, Value};
@@ -375,6 +375,13 @@ pub fn loss_report(bytes: &[u8], target: &str, units: i16) -> Value {
 /// Site plan from the permit app as a real DXF 2018: units set to inches, closed polylines,
 /// true aligned DIMENSION entities and text, on US National CAD Standard layer names.
 /// Input JSON (inches): { outlines: [{layer, pts:[[x,y]..]}], dims: [{layer, a:[x,y], b:[x,y], offset, text?}], texts: [{layer, x, y, h, text}] }
+/// Feet-inches to the nearest 1/4", matching the app's fmtFtIn.
+fn ft_in(inches: f64) -> String {
+    let q = (inches.abs() * 4.0).round() / 4.0; let f = (q / 12.0).floor(); let i = q - f * 12.0; let w = i.floor();
+    let fr = match ((i - w) * 4.0).round() as i32 { 1 => " 1/4", 2 => " 1/2", 3 => " 3/4", _ => "" };
+    format!("{}' {}{}\"", f as i64, w as i64, fr)
+}
+
 pub fn site_plan(spec: &str) -> Result<Vec<u8>, String> {
     let v: Value = serde_json::from_str(spec).map_err(|e| format!("bad site plan data: {e}"))?;
     let mut doc = CadDocument::new();
@@ -390,12 +397,36 @@ pub fn site_plan(spec: &str) -> Result<Vec<u8>, String> {
         let mut e = EntityType::LwPolyline(pl); e.common_mut().layer = o["layer"].as_str().unwrap_or("0").to_string();
         doc.add_entity(e).map_err(|e| e.to_string())?;
     }
+    let mut dim_n = 0usize;
     for d in v["dims"].as_array().into_iter().flatten() {
         let a = Vector3::new(f(&d["a"][0])?, f(&d["a"][1])?, 0.0); let b = Vector3::new(f(&d["b"][0])?, f(&d["b"][1])?, 0.0);
         if a.distance(&b) < 1e-6 { continue; }
-        let mut dim = DimensionAligned::new(a, b); dim.set_offset(d["offset"].as_f64().unwrap_or(24.0));
+        let off = d["offset"].as_f64().filter(|v| v.is_finite()).unwrap_or(24.0);
+        let layer = d["layer"].as_str().unwrap_or("A-ANNO-DIMS").to_string();
+        let mut dim = DimensionAligned::new(a, b); dim.set_offset(off);
         if let Some(t) = d["text"].as_str() { dim.base.set_text_override(Some(t.to_string())); }
-        let mut e = EntityType::Dimension(Box::new(Dimension::Aligned(dim))); e.common_mut().layer = d["layer"].as_str().unwrap_or("A-ANNO-DIMS").to_string();
+        // Render the dimension's geometry into its own anonymous *D block, as AutoCAD does.
+        // Viewers that do not regenerate dimensions (ezdxf, LibreCAD, Bluebeam, TrueView) draw only this block.
+        let dir = (b - a).normalize(); let nrm = Vector3::new(-dir.y, dir.x, 0.0);
+        let (da, db) = (a + nrm * off, b + nrm * off); let sgn = if off < 0.0 { -1.0 } else { 1.0 };
+        let mid = (da + db) * 0.5 + nrm * (sgn * 6.0);
+        let label = d["text"].as_str().unwrap_or("<>").replace("<>", &ft_in(a.distance(&b)));
+        let name = format!("*D{}", dim_n); dim_n += 1;
+        let mut blk = BlockRecord::new(&name); blk.handle = doc.allocate_handle();
+        blk.block_entity_handle = doc.allocate_handle(); blk.block_end_handle = doc.allocate_handle(); blk.flags.anonymous = true;
+        let bh = blk.handle; doc.block_records.add(blk).map_err(|e| e.to_string())?;
+        let ext = |p: Vector3, q: Vector3| (p + nrm * (sgn * 2.0), q + nrm * (sgn * 3.0));
+        let (e1a, e1b) = ext(a, da); let (e2a, e2b) = ext(b, db);
+        let tick = (dir + nrm) * 2.5;
+        let mut parts: Vec<EntityType> = [(da, db), (e1a, e1b), (e2a, e2b), (da - tick, da + tick), (db - tick, db + tick)]
+            .into_iter().map(|(p, q)| EntityType::Line(Line::from_points(p, q))).collect();
+        let mut tx = Text::with_value(&label, mid).with_height(6.0);
+        tx.rotation = dir.y.atan2(dir.x); tx.horizontal_alignment = acadrust::entities::TextHorizontalAlignment::Center;
+        tx.vertical_alignment = acadrust::entities::TextVerticalAlignment::Middle; tx.alignment_point = Some(mid);
+        parts.push(EntityType::Text(tx));
+        for mut pe in parts { pe.common_mut().layer = layer.clone(); pe.common_mut().owner_handle = bh; doc.add_entity(pe).map_err(|e| e.to_string())?; }
+        dim.base.block_name = name; dim.base.text_middle_point = mid;
+        let mut e = EntityType::Dimension(Box::new(Dimension::Aligned(dim))); e.common_mut().layer = layer;
         doc.add_entity(e).map_err(|e| e.to_string())?;
     }
     for t in v["texts"].as_array().into_iter().flatten() {

@@ -2,6 +2,7 @@
 // Every source below was opened and tested for browser access (CORS) on 2026-10-25.
 // This file has no runtime imports so the fixture recorder (scripts/record-parcel.mjs) can load it directly in Node.
 import type { Poly, Pt } from '../core/geom';
+import { MAX_LEN_MM } from '../core/units';
 
 const LAHUB = 'https://maps.lacity.org/lahub/rest/services';
 const ZIMAS = 'https://zimas.lacity.org/arcgis/rest/services';
@@ -168,7 +169,7 @@ export async function lookupParcel(address: string, opts: LookupOpts = {}): Prom
   if (pf && pieces === 1) {
     const rings = (pf.geometry?.rings ?? []).filter(r => Array.isArray(r) && r.length >= 4 && r.every(pt => Array.isArray(pt) && Number.isFinite(pt[0]) && Number.isFinite(pt[1])));
     const ring = rings.sort((a, b) => Math.abs(signedArea(b.map(p => ({ x: p[0], y: p[1] })))) - Math.abs(signedArea(a.map(p => ({ x: p[0], y: p[1] })))))[0];
-    if (ring) { const l = ringToLot(ring, c.location); if (l.length >= 3) lot = l; probe = interiorPoint(ring); }
+    if (ring) { const l = ringToLot(ring, c.location); if (l.length >= 3 && l.every(p => Math.abs(p.x) <= MAX_LEN_MM && Math.abs(p.y) <= MAX_LEN_MM)) lot = l; else failed.push('parcel'); probe = interiorPoint(ring); }
   } else if (pf) { multiPiece = true; probe = interiorPoint(pf.geometry?.rings?.[0] ?? [[c.location.x, c.location.y]]); }
   if (near && !pf) failed.push('parcel');
   const onLot = !!pf;
@@ -186,8 +187,8 @@ export async function lookupParcel(address: string, opts: LookupOpts = {}): Prom
   const jurisdiction = inCity === true ? 'la-city' : inCity === false ? 'other' : 'unknown';
   const w = lot ? Math.hypot(lot[1].x - lot[0].x, lot[1].y - lot[0].y) : null; const d = lot ? Math.max(...lot.map(p => p.y)) : null;
   return { ok: true, fill: {
-    matched: c.address, zip: cz, at: (opts.now ?? new Date()).toISOString(), lot, widthMm: w, depthMm: d,
-    apn: fmtApn(attr.BPP ?? ''), zone: String(zf?.ZONE_CMPLT ?? '').trim(), jurisdiction, cityName: inCity ? 'Los Angeles' : otherCity,
-    flags: { hillside: tri(hillside), vhfhsz: tri(vhfhsz), coastal, hpoz: tri(hpoz) }, failed: [...new Set(failed)], zimasPin: String(attr.PIND ?? ''), multiPiece,
+    matched: String(c.address ?? '').slice(0, 120), zip: cz, at: (opts.now ?? new Date()).toISOString(), lot, widthMm: w, depthMm: d,
+    apn: fmtApn(attr.BPP ?? '').slice(0, 40), zone: String(zf?.ZONE_CMPLT ?? '').trim().slice(0, 40), jurisdiction, cityName: (inCity ? 'Los Angeles' : otherCity).slice(0, 60),
+    flags: { hillside: tri(hillside), vhfhsz: tri(vhfhsz), coastal, hpoz: tri(hpoz) }, failed: [...new Set(failed)], zimasPin: String(attr.PIND ?? '').slice(0, 40), multiPiece,
   } };
 }
