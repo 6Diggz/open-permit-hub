@@ -68,8 +68,9 @@ export async function replaceFile(abs: string, data: string): Promise<string> {
   try { await fh.writeFile(data); } catch { await fh.close(); await unlink(tmp).catch(() => {}); throw new ToolError('write_failed', 'Could not write the working copy.'); }
   await fh.close(); await rename(tmp, real); return real;
 }
-/** Every .permitpack under ROOT (depth 4, at most 500), never following links out. */
-export async function listPacks(maxDepth = 4, cap = 500) {
+/** Every .permitpack under `base` (default ROOT; depth 4 from base, at most `cap`), never following links out.
+ * r7-03: the walk starts at the requested folder, so the cap applies after choosing the folder, not to the whole root. */
+export async function listPacks(maxDepth = 4, cap = 500, base: string = ROOT) {
   const out: { abs: string; size: number; mtime: string }[] = [];
   const walk = async (d: string, depth: number) => {
     if (out.length >= cap) return; let ents; try { ents = await readdir(d, { withFileTypes: true }); } catch { return; }
@@ -79,5 +80,5 @@ export async function listPacks(maxDepth = 4, cap = 500) {
       else if (e.isFile() && /\.permitpack$/i.test(e.name)) { try { const s = await stat(f); if (s.nlink === 1 && s.dev === ROOT_DEV) out.push({ abs: f, size: s.size, mtime: s.mtime.toISOString() }); } catch { /* gone */ } }
     }
   };
-  await walk(ROOT, 0); return out;
+  await walk(base, 0); return out;
 }
