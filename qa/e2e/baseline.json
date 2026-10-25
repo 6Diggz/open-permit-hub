@@ -1,0 +1,580 @@
+{
+ "base": "https://6diggz.github.io/open-permit-hub/",
+ "at": "2026-10-25T05:33:12.514Z",
+ "repeat": 2,
+ "totals": {
+  "pass": 28,
+  "fail": 1,
+  "error": 0,
+  "flaky": 0
+ },
+ "tests": [
+  {
+   "id": "home-happy-390",
+   "area": "happy path",
+   "title": "Homeowner, detached garage, 390x844: score line and check results render",
+   "findings": [],
+   "status": "PASS",
+   "ms": 12941,
+   "error": "",
+   "note": "106 of 221 sheet items",
+   "screenshots": [],
+   "pageErrors": [],
+   "rep": 1,
+   "runs": [
+    "PASS",
+    "PASS"
+   ]
+  },
+  {
+   "id": "drafter-export-1440",
+   "area": "happy path",
+   "title": "Drafter at 1440x900 to export: PDF, DXF, handoff ZIP downloaded and validated",
+   "findings": [],
+   "status": "PASS",
+   "ms": 16354,
+   "error": "",
+   "note": "zip: 10 files",
+   "screenshots": [],
+   "pageErrors": [],
+   "rep": 1,
+   "runs": [
+    "PASS",
+    "PASS"
+   ]
+  },
+  {
+   "id": "qa-01-plain-restore",
+   "area": "r1 sev5",
+   "title": "A plain (unlocked) .permitpack backup restores",
+   "findings": [
+    "qa-01"
+   ],
+   "status": "PASS",
+   "ms": 8067,
+   "error": "",
+   "note": "",
+   "screenshots": [],
+   "pageErrors": [],
+   "rep": 1,
+   "runs": [
+    "PASS",
+    "PASS"
+   ]
+  },
+  {
+   "id": "qa-01b-garbage-pack-error",
+   "area": "r1 sev5",
+   "title": "Opening a non-pack file shows an error",
+   "findings": [
+    "qa-01"
+   ],
+   "status": "PASS",
+   "ms": 2804,
+   "error": "",
+   "note": "",
+   "screenshots": [],
+   "pageErrors": [],
+   "rep": 1,
+   "runs": [
+    "PASS",
+    "PASS"
+   ]
+  },
+  {
+   "id": "qa-02-infinity-length",
+   "area": "r1 sev5",
+   "title": "Typing 1/0\" in a length field is rejected and does not brick the project",
+   "findings": [
+    "qa-02"
+   ],
+   "status": "PASS",
+   "ms": 4283,
+   "error": "",
+   "note": "",
+   "screenshots": [],
+   "pageErrors": [],
+   "rep": 1,
+   "runs": [
+    "PASS",
+    "PASS"
+   ]
+  },
+  {
+   "id": "qa-04-two-tabs",
+   "area": "r1 sev4",
+   "title": "Two tabs on one project: no silent lost edit",
+   "findings": [
+    "qa-04"
+   ],
+   "status": "PASS",
+   "ms": 3041,
+   "error": "",
+   "note": "",
+   "screenshots": [],
+   "pageErrors": [],
+   "rep": 1,
+   "runs": [
+    "PASS",
+    "PASS"
+   ]
+  },
+  {
+   "id": "qa-05-mobile-all-projects",
+   "area": "r1 sev4",
+   "title": "At 390px, \"All projects\" is reachable from inside a project",
+   "findings": [
+    "qa-05",
+    "parity-04"
+   ],
+   "status": "PASS",
+   "ms": 1306,
+   "error": "",
+   "note": "",
+   "screenshots": [],
+   "pageErrors": [],
+   "rep": 1,
+   "runs": [
+    "PASS",
+    "PASS"
+   ]
+  },
+  {
+   "id": "qa-05b-mobile-not-saved",
+   "area": "r1 sev4",
+   "title": "At 390px with storage blocked, the \"Not saved\" warning is visible",
+   "findings": [
+    "qa-05"
+   ],
+   "status": "PASS",
+   "ms": 1776,
+   "error": "",
+   "note": "",
+   "screenshots": [],
+   "pageErrors": [],
+   "rep": 1,
+   "runs": [
+    "PASS",
+    "PASS"
+   ]
+  },
+  {
+   "id": "qa-06-deploy-blank",
+   "area": "r1 sev4",
+   "title": "First load after a deploy renders the new build (no blank page)",
+   "findings": [
+    "qa-06",
+    "OUT-04"
+   ],
+   "status": "PASS",
+   "ms": 15410,
+   "error": "",
+   "note": "served new build on first load",
+   "screenshots": [],
+   "pageErrors": [],
+   "rep": 1,
+   "runs": [
+    "PASS",
+    "PASS"
+   ]
+  },
+  {
+   "id": "qa-06b-lazy-chunk-after-deploy",
+   "area": "r1 sev4",
+   "title": "Export still works (or asks to reload) when a deploy lands while the app is open",
+   "findings": [
+    "qa-06"
+   ],
+   "status": "PASS",
+   "ms": 11592,
+   "error": "",
+   "note": "",
+   "screenshots": [],
+   "pageErrors": [],
+   "rep": 1,
+   "runs": [
+    "PASS",
+    "PASS"
+   ]
+  },
+  {
+   "id": "qa-07-offline-export",
+   "area": "offline",
+   "title": "Offline: install SW, go offline, reload, export PDF + DXF + Clean and Fix",
+   "findings": [
+    "qa-07"
+   ],
+   "status": "PASS",
+   "ms": 23678,
+   "error": "",
+   "note": "",
+   "screenshots": [],
+   "pageErrors": [],
+   "rep": 1,
+   "runs": [
+    "PASS",
+    "PASS"
+   ]
+  },
+  {
+   "id": "qa-08-ics-month-end",
+   "area": "r1 sev4",
+   "title": "ICS plan-check expiry for a 2026-08-31 filing is 2028-02-29",
+   "findings": [
+    "qa-08"
+   ],
+   "status": "PASS",
+   "ms": 1179,
+   "error": "",
+   "note": "",
+   "screenshots": [],
+   "pageErrors": [],
+   "rep": 1,
+   "runs": [
+    "PASS",
+    "PASS"
+   ]
+  },
+  {
+   "id": "qa-09-truncated-dwg",
+   "area": "r1 sev4",
+   "title": "Clean and Fix warns on a truncated DWG instead of \"cleaning\" it to empty",
+   "findings": [
+    "qa-09"
+   ],
+   "status": "PASS",
+   "ms": 6806,
+   "error": "",
+   "note": "",
+   "screenshots": [],
+   "pageErrors": [],
+   "rep": 1,
+   "runs": [
+    "PASS",
+    "PASS"
+   ]
+  },
+  {
+   "id": "qa-10-loss-report",
+   "area": "r1 sev4",
+   "title": "Clean and Fix says what R12/CNC output will lose before saving",
+   "findings": [
+    "qa-10",
+    "OUT-18"
+   ],
+   "status": "PASS",
+   "ms": 7216,
+   "error": "",
+   "note": "",
+   "screenshots": [],
+   "pageErrors": [],
+   "rep": 1,
+   "runs": [
+    "PASS",
+    "PASS"
+   ]
+  },
+  {
+   "id": "parity-01-csv",
+   "area": "r1 sev4",
+   "title": "Materials CSV parses with a constant column count and keeps 16\"",
+   "findings": [
+    "parity-01"
+   ],
+   "status": "PASS",
+   "ms": 1920,
+   "error": "",
+   "note": "",
+   "screenshots": [],
+   "pageErrors": [],
+   "rep": 1,
+   "runs": [
+    "PASS",
+    "PASS"
+   ]
+  },
+  {
+   "id": "parity-02-one-pack-id",
+   "area": "r1 sev4",
+   "title": "Site plan PDF and check report print the same rule-pack id",
+   "findings": [
+    "parity-02"
+   ],
+   "status": "PASS",
+   "ms": 1437,
+   "error": "",
+   "note": "",
+   "screenshots": [],
+   "pageErrors": [],
+   "rep": 1,
+   "runs": [
+    "PASS",
+    "PASS"
+   ]
+  },
+  {
+   "id": "cor-01-fire-sep-house",
+   "area": "r1 sev5",
+   "title": "Detached garage 2 ft from the house, openings, no rated wall: not a pass",
+   "findings": [
+    "COR-01"
+   ],
+   "status": "PASS",
+   "ms": 10201,
+   "error": "",
+   "note": "FIR-02:FAIL FIR-01:UNKNOWN",
+   "screenshots": [],
+   "pageErrors": [],
+   "rep": 1,
+   "runs": [
+    "PASS",
+    "PASS"
+   ]
+  },
+  {
+   "id": "cor-02-egress-two-bedrooms",
+   "area": "r1 sev5",
+   "title": "2 bedrooms with both escape windows in one room: EGR-01 not a pass",
+   "findings": [
+    "COR-02"
+   ],
+   "status": "PASS",
+   "ms": 10755,
+   "error": "",
+   "note": "UNKNOWN",
+   "screenshots": [],
+   "pageErrors": [],
+   "rep": 1,
+   "runs": [
+    "PASS",
+    "PASS"
+   ]
+  },
+  {
+   "id": "cor-03-irregular-lot",
+   "area": "r1 sev4",
+   "title": "Lot vertex 1 ft behind the ADU rear wall: FIR-01 not a pass",
+   "findings": [
+    "COR-03"
+   ],
+   "status": "PASS",
+   "ms": 12322,
+   "error": "",
+   "note": "UNKNOWN Fire-rated walls near the property line or the house",
+   "screenshots": [],
+   "pageErrors": [],
+   "rep": 1,
+   "runs": [
+    "PASS",
+    "PASS"
+   ]
+  },
+  {
+   "id": "cor-04-dismiss-hs",
+   "area": "r1 sev4",
+   "title": "A health-and-safety fail (6'6\" ceiling) cannot be dismissed away",
+   "findings": [
+    "COR-04"
+   ],
+   "status": "PASS",
+   "ms": 10218,
+   "error": "",
+   "note": "",
+   "screenshots": [],
+   "pageErrors": [],
+   "rep": 1,
+   "runs": [
+    "PASS",
+    "PASS"
+   ]
+  },
+  {
+   "id": "cor-05-studio-egress",
+   "area": "r1 sev4",
+   "title": "Studio with no windows still gets an escape-window check",
+   "findings": [
+    "COR-05"
+   ],
+   "status": "PASS",
+   "ms": 10088,
+   "error": "",
+   "note": "UNKNOWN",
+   "screenshots": [],
+   "pageErrors": [],
+   "rep": 1,
+   "runs": [
+    "PASS",
+    "PASS"
+   ]
+  },
+  {
+   "id": "cor-06-entry-addition-setback",
+   "area": "r1 sev4",
+   "title": "150 sq ft entry addition 1 ft from the side line is flagged",
+   "findings": [
+    "COR-06"
+   ],
+   "status": "PASS",
+   "ms": 9842,
+   "error": "",
+   "note": "ADD-01:UNKNOWN SCP-01:PASS SET-01:PASS SET-03:PASS",
+   "screenshots": [],
+   "pageErrors": [],
+   "rep": 1,
+   "runs": [
+    "PASS"
+   ]
+  },
+  {
+   "id": "cor-07-unpermitted-garage",
+   "area": "r1 sev4",
+   "title": "Unpermitted pre-2020 garage 1 ft from the line is not given AB 2533 setback relief",
+   "findings": [
+    "COR-07"
+   ],
+   "status": "PASS",
+   "ms": 10724,
+   "error": "",
+   "note": "UNKNOWN",
+   "screenshots": [],
+   "pageErrors": [],
+   "rep": 1,
+   "runs": [
+    "PASS",
+    "PASS"
+   ]
+  },
+  {
+   "id": "cor-08-existing-sfd-only",
+   "area": "r1 sev4",
+   "title": "A duplex main building is flagged for the II-C conversion path",
+   "findings": [
+    "COR-08"
+   ],
+   "status": "PASS",
+   "ms": 11256,
+   "error": "",
+   "note": "",
+   "screenshots": [],
+   "pageErrors": [],
+   "rep": 1,
+   "runs": [
+    "PASS",
+    "PASS"
+   ]
+  },
+  {
+   "id": "out-02-pack-version-shown",
+   "area": "r1 sev4",
+   "title": "Rule pack version and rule date are visible",
+   "findings": [
+    "OUT-02"
+   ],
+   "status": "PASS",
+   "ms": 995,
+   "error": "",
+   "note": "",
+   "screenshots": [],
+   "pageErrors": [],
+   "rep": 1,
+   "runs": [
+    "PASS",
+    "PASS"
+   ]
+  },
+  {
+   "id": "out-05-terms-privacy",
+   "area": "r1 sev4",
+   "title": "Welcome links Terms/warranty disclaimer and privacy notice",
+   "findings": [
+    "OUT-05"
+   ],
+   "status": "FAIL",
+   "ms": 623,
+   "error": "no terms/warranty and privacy text on the welcome screen",
+   "note": "",
+   "screenshots": [
+    "out/out-05-terms-privacy-r1/fail-0.png"
+   ],
+   "pageErrors": [],
+   "rep": 1,
+   "runs": [
+    "FAIL",
+    "FAIL"
+   ]
+  },
+  {
+   "id": "a11y-390",
+   "area": "a11y",
+   "title": "axe-core WCAG 2.2 AA scan at 390x844 (welcome, 5 steps, Clean and Fix)",
+   "findings": [],
+   "status": "PASS",
+   "ms": 23597,
+   "error": "",
+   "note": "critical 0, serious 0, moderate 0, minor 0",
+   "summary": {
+    "bySeverity": {
+     "critical": 0,
+     "serious": 0,
+     "moderate": 0,
+     "minor": 0
+    },
+    "rules": {}
+   },
+   "screenshots": [],
+   "pageErrors": [],
+   "rep": 1,
+   "runs": [
+    "PASS",
+    "PASS"
+   ]
+  },
+  {
+   "id": "a11y-1440",
+   "area": "a11y",
+   "title": "axe-core WCAG 2.2 AA scan at 1440x900 (welcome, 5 steps, Clean and Fix)",
+   "findings": [],
+   "status": "PASS",
+   "ms": 22653,
+   "error": "",
+   "note": "critical 0, serious 0, moderate 0, minor 0",
+   "summary": {
+    "bySeverity": {
+     "critical": 0,
+     "serious": 0,
+     "moderate": 0,
+     "minor": 0
+    },
+    "rules": {}
+   },
+   "screenshots": [],
+   "pageErrors": [],
+   "rep": 1,
+   "runs": [
+    "PASS",
+    "PASS"
+   ]
+  },
+  {
+   "id": "spanish-no-english",
+   "area": "i18n",
+   "title": "Spanish toggle: no English strings on welcome, 5 steps and check card",
+   "findings": [
+    "parity-08"
+   ],
+   "status": "PASS",
+   "ms": 3779,
+   "error": "",
+   "note": "0 English strings",
+   "summary": {},
+   "screenshots": [],
+   "pageErrors": [],
+   "rep": 1,
+   "runs": [
+    "PASS",
+    "PASS"
+   ]
+  }
+ ],
+ "note": "cor-06 rerun after test fix (ADD-01 included); oldbuild-results.json = same suite vs the round-1 build"
+}
