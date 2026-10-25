@@ -6,7 +6,6 @@ import { createServer } from 'node:http';
 import { readFileSync, existsSync, statSync, readdirSync, mkdirSync, mkdtempSync } from 'node:fs';
 import { join, extname, resolve } from 'node:path';
 import { tmpdir } from 'node:os';
-import { execFileSync } from 'node:child_process';
 
 const here = new URL('.', import.meta.url).pathname; const DIST = resolve(here, '../dist'); const FIX = resolve(here, '../src/test/fixtures/parcel');
 const SHOTS = process.env.SHOTS; if (SHOTS) mkdirSync(SHOTS, { recursive: true });
@@ -236,7 +235,7 @@ for (const width of process.env.ONLY_STORAGE ? [] : [390, 1440]) {
     const egt = await page.locator('li.fm-item').filter({ hasText: 'Bedroom escape window' }).innerText(); ok(/From the project:.*\d+" x \d+" clear.*sill \d+"/.test(egt), `field: escape window size from the project ${W}`, egt.slice(0, 300));
     await page.waitForTimeout(400);
     const [pdf2] = await Promise.all([page.waitForEvent('download', { timeout: 20000 }), page.getByRole('button', { name: 'Save the visit record (PDF)' }).click()]);
-    const pt = execFileSync('pdftotext', ['-layout', await pdf2.path(), '-'], { encoding: 'utf8' }); const np = (pt.match(/\f/g) || []).length;
+    const pdfjs = await import('pdfjs-dist/legacy/build/pdf.mjs'); const pdoc = await pdfjs.getDocument({ data: new Uint8Array(readFileSync(await pdf2.path())) }).promise; const np = pdoc.numPages; let pt = ''; for (let i = 1; i <= np; i++) pt += (await (await pdoc.getPage(i)).getTextContent()).items.map(x => x.str).join(' ') + '\n';
     ok(/Permit: 25010-10000-01234/.test(pt) && /Stage: Final/.test(pt) && /Type: Building/.test(pt) && new RegExp(`Page ${np} of ${np}`).test(pt), `field: PDF has permit, stage, type, Page X of N ${W}`, pt.slice(0, 200));
     // r5field-08 + appsec-08: lock the visit file with a generated passphrase; it opens only with it.
     await page.getByRole('button', { name: 'Save it locked with a passphrase' }).click(); const dlg = page.locator('dialog.ask');
