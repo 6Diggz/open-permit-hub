@@ -151,6 +151,7 @@ async function floorPlanSheet(doc: PDFDocument, p: Project, kind: Kind) {
   // Long schedules continue on the next sheet instead of running off the page.
   const need = (h: number) => { if (y - h >= 110) return; pg = doc.addPage([W, H]); pg.drawRectangle({ x: 36, y: 36, width: W - 72, height: H - 72, borderColor: INK, borderWidth: 1.5 });
     pg.drawText(safe(`A-2 Floor plan data (continued)   ${p.site.address || p.name}`), { x: 60, y: 54, size: 10, font: f, color: INK });
+    titleBlock(pg, p, 'FLOOR PLAN', 'A-2 Floor plan data (continued)', null, f, fb);
     if (kind === 'draft') pg.drawText('DRAFT - NOT FOR SUBMITTAL', { x: W * 0.2, y: H * 0.25, size: 96, font: fb, color: rgb(0.85, 0.2, 0.15), opacity: 0.13, rotate: degrees(28) });
     y = H - 90; };
   if (p.adu.rooms.length) {
