@@ -229,3 +229,40 @@ describe('service worker', () => {
     expect(await nav(w.handlers, w.base + 'rules/NOPE.html')).toBe('ERROR');
   });
 });
+
+import { fromRoomPlanJSON } from '../io/scan';
+describe('scan import', () => {
+  const room = (w: any, d: any, h: any = 2.6) => JSON.stringify({ walls: [
+    { dimensions: [w, h, 0.1], transform: [1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1] },
+    { dimensions: [d, h, 0.1], transform: [0, 0, 1, 0, 0, 1, 0, 0, -1, 0, 0, 0, 3, 0, 3, 1] }] });
+  it('appsec-r2-04 huge, NaN and negative scan sizes are refused, a normal room is read', () => {
+    expect(() => fromRoomPlanJSON(room(1e9, 1e9))).toThrow(/6 to 200 ft/);
+    expect(() => fromRoomPlanJSON(room('a', 'b'))).toThrow();
+    expect(() => fromRoomPlanJSON(room(-6, -6))).toThrow();
+    expect(() => fromRoomPlanJSON('{not json')).toThrow(/not RoomPlan JSON/);
+    const r = fromRoomPlanJSON(room(6, 6)); expect(r.heightMm).toBeCloseTo(2600);
+    expect(fromRoomPlanJSON(room(6, 6, 1e12)).heightMm).toBe(0);
+  });
+});
+
+import { updateText } from '../rules/pack';
+describe('update toast', () => {
+  it('parity2-11 the update toast says whether the rule pack changed', () => {
+    expect(updateText({ pack: 'la-city@2099.1.1', verifiedOn: '2099-01-01' }, false)).toMatch(/^An update is ready: new rules la-city@2099\.1\.1/);
+    expect(updateText({ pack: PACK_ID }, false)).toMatch(/Rules unchanged/);
+    expect(updateText(null, true)).toMatch(/^Hay una actualización/);
+  });
+});
+
+import { rulePages } from '../../rule-pages';
+describe('rule pages', () => {
+  it('OUT2-08 rule pages have their own description, canonical, hreflang, scope and check date; Spanish has no English edition label', () => {
+    const pages = rulePages();
+    for (const [f, html] of Object.entries(pages).filter(([f]) => f.endsWith('.html'))) {
+      const title = html.match(/<title>(.*?)<\/title>/)![1], desc = html.match(/name="description" content="(.*?)"/)![1];
+      expect(desc, f).not.toBe(title); expect(html, f).toMatch(/rel="canonical"/); expect(html, f).toMatch(/hreflang="es"/);
+      if (f.startsWith('rules/es/')) expect(html, f).not.toMatch(/as cited by/);
+      if (!f.endsWith('index.html')) expect(html, f).toContain(PACK.verifiedOn);
+    }
+  });
+});

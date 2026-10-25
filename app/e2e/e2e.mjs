@@ -131,8 +131,9 @@ for (const width of [390, 1440]) {
 
   // Accessibility (qa-26, qa-27, qa-28, qa-30, OUT-09): key axe rules on every screen, EN and ES, light and dark
   for (const scheme of ['light', 'dark']) { const c = await ctx(width, { colorScheme: scheme, bypassCSP: true }); const page = await c.newPage(); await page.goto(BASE);
-    const rules = ['nested-interactive', 'page-has-heading-one', 'landmark-one-main', 'scrollable-region-focusable', 'color-contrast', 'button-name', 'label', 'aria-allowed-role'];
-    const v0 = await axe(page, rules); ok(v0.length === 0, `OUT-09 axe welcome ${scheme} ${W}`, v0.join(' | '));
+    const rules = ['nested-interactive', 'page-has-heading-one', 'landmark-one-main', 'scrollable-region-focusable', 'color-contrast', 'button-name', 'label', 'aria-allowed-role', 'heading-order'];
+    const v0 = await axe(page, rules); ok(v0.length === 0, `OUT-09 qa2-06 axe welcome ${scheme} ${W}`, v0.join(' | '));
+    ok(await page.getByText('Example result (demo lot, not your project)').isVisible(), `parity2-02 home sample card is labeled as an example ${scheme} ${W}`);
     await startDemo(page);
     for (const k of ['lot', 'garage', 'rooms', 'checks', 'export']) { await step(page, k); const v = await axe(page, rules); ok(v.length === 0, `OUT-09 qa-27 qa-30 axe ${k} ${scheme} ${W}`, v.join(' | ')); }
     await page.getByRole('combobox', { name: 'Language' }).selectOption('es'); await step(page, 'checks'); const ves = await axe(page, rules); ok(ves.length === 0, `OUT-09 axe checks (es) ${scheme} ${W}`, ves.join(' | '));

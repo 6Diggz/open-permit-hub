@@ -1,6 +1,6 @@
 import type { Project } from '../core/model';
 
-/** Add calendar months; a day that does not exist in the target month becomes that month's last day (Aug 31 + 18 = Feb 29). */
+/** Add calendar months; a day that does not exist in the target month becomes that month's last day (2026-08-31 + 18 months = 2028-02-29, a leap year; 2027-08-31 + 18 = 2029-02-28). */
 export function addMonths(isoDate: string, months: number): string {
   const [y, m, d] = isoDate.split('-').map(Number);
   const t = (m - 1) + months, ty = y + Math.floor(t / 12), tm = ((t % 12) + 12) % 12;

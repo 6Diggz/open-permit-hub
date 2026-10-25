@@ -7,6 +7,7 @@ import './ui/styles.css';
 import App from './ui/App';
 import { Component, type ReactNode } from 'react';
 import { errorReport } from './core/errorreport';
+import { updateText } from './rules/pack';
 
 // Frame protection (GitHub Pages can't send frame-ancestors): refuse to run inside another site's frame.
 if (window.top !== window.self) { try { window.top!.location.href = window.self.location.href; } catch { document.documentElement.innerHTML = '<p style="font:16px system-ui;padding:16px">Open this tool directly: <a href="https://6diggz.github.io/open-permit-hub/" target="_top">6diggz.github.io/open-permit-hub</a></p>'; throw new Error('framed'); } }
@@ -28,11 +29,11 @@ class Boundary extends Component<{ children: ReactNode }, { err: Error | null; c
 let swapRequested = false;
 /** "Update ready" prompt: a new service worker waits until the user reloads, so open work is never cut off. */
 function UpdatePrompt() {
-  const [reg, setReg] = useState<ServiceWorkerRegistration | null>(null);
-  useEffect(() => { const on = (e: Event) => setReg((e as CustomEvent).detail); window.addEventListener('opa-update', on); return () => window.removeEventListener('opa-update', on); }, []);
+  const [reg, setReg] = useState<ServiceWorkerRegistration | null>(null); const [next, setNext] = useState<{ pack?: string; verifiedOn?: string } | null>(null);
+  useEffect(() => { const on = (e: Event) => { setReg((e as CustomEvent).detail); fetch('./version.json', { cache: 'no-store' }).then(r => r.json()).then(setNext, () => {}); }; window.addEventListener('opa-update', on); return () => window.removeEventListener('opa-update', on); }, []);
   if (!reg) return null;
   const es = document.documentElement.lang === 'es';
-  return <div className="toast" role="status">{es ? 'Hay una actualización (reglas o arreglos).' : 'An update is ready (rules or fixes).'} <button className="btn quiet" style={{ color: 'inherit' }} onClick={() => { swapRequested = true; if (reg.waiting) reg.waiting.postMessage('SKIP_WAITING'); else location.reload(); }}>{es ? 'Recargar' : 'Reload'}</button></div>;
+  return <div className="toast" role="status">{updateText(next, es)} <button className="btn quiet" style={{ color: 'inherit' }} onClick={() => { swapRequested = true; if (reg.waiting) reg.waiting.postMessage('SKIP_WAITING'); else location.reload(); }}>{es ? 'Recargar' : 'Reload'}</button></div>;
 }
 
 createRoot(document.getElementById('root')!).render(<StrictMode><Boundary><App /><UpdatePrompt /></Boundary></StrictMode>);

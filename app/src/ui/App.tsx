@@ -22,7 +22,7 @@ import { encryptPack, passphraseProblem, readPackFile, serialize, serializeAll, 
 import { takeoff, takeoffCSV } from '../out/takeoff';
 import { plainWasmError } from '../out/wasm';
 import { missingGlyphNote } from '../out/glyphs';
-import { fromGLTF, fromRoomPlanJSON, tapeCheck } from '../io/scan';
+import { fromGLTF, fromRoomPlanJSON, tapeCheck, SCAN_LIMITS } from '../io/scan';
 
 import * as store from '../core/store';
 import type { SaveResult } from '../core/store';
@@ -362,6 +362,7 @@ function GarageStep({ p, update }: { p: Project; update: U }) {
       <div className="field"><label htmlFor="scan">{L("Scan file")}</label><input id="scan" type="file" accept=".gltf,.glb,.json" onChange={async e => {
         const file = e.target.files?.[0]; if (!file) return; setScanMsg(L('Reading scan...'));
         try {
+          if (file.size > SCAN_LIMITS.bytes) throw new Error(L('This scan file is too large.'));
           const r = file.name.endsWith('.json') ? fromRoomPlanJSON(await file.text()) : await fromGLTF(await file.arrayBuffer());
           let fp = r.footprint; let msg = `${r.source}: ${fmtFtIn(bbox(fp).maxX)} x ${fmtFtIn(bbox(fp).maxY)}. ${r.note}`;
           if (tape) { const t = tapeCheck(bbox(fp).maxX, tape); if (t.rescan) { setScanMsg(`The scan is ${t.driftPct.toFixed(1)}% off your tape. Scan again in better light.`); return; } fp = fp.map(q => ({ x: q.x * t.factor, y: q.y * t.factor })); msg += ` Scaled to your tape (${t.driftPct.toFixed(1)}% change).`; }
@@ -494,7 +495,7 @@ function InspectionCard({ report, lang, score, appDate = null, example }: { repo
   const v = { READY_FOR_PREPARER: es ? 'Listo para su preparador' : 'Ready for your preparer', FIX_ISSUES: es ? 'Hay cosas que corregir' : 'Some things need fixing', INCOMPLETE: es ? 'Falta información' : 'Some answers are missing', NOT_SUPPORTED: es ? 'Dirección no soportada' : 'Address not supported yet' }[report.overall];
   const c = report.counts; const fr = rulesLine(appDate, report.pack, es);
   return <section className="card" aria-live="polite">
-    <h3>{example ? (es ? 'Resultado de ejemplo (lote de demostración, no es su proyecto)' : 'Example result (demo lot, not your project)') : es ? 'Tarjeta de revisión' : 'Check card'}</h3>
+    {example ? <h2 className="card-h">{es ? 'Resultado de ejemplo (lote de demostración, no es su proyecto)' : 'Example result (demo lot, not your project)'}</h2> : <h3>{es ? 'Tarjeta de revisión' : 'Check card'}</h3>}
     <div className="verdict">{v}</div>
     <div className="sub">{es ? 'Revisión por software, no de la ciudad' : 'Software check, not a city review'} · {fr.text}</div>
     {score && <div className="sub">{es ? 'Puntos de la hoja: ' : 'Sheet items: '}{score}</div>}

@@ -45,7 +45,7 @@ button { cursor: pointer; }
 .tri button + button { border-left: 1.5px solid var(--rule); }
 .tri button[aria-pressed="true"] { background: var(--ink); color: var(--sheet); }
 .card { background: var(--card); color: var(--card-ink); margin: 16px; border-radius: var(--r-md); padding: 18px 18px 8px; box-shadow: 0 1px 0 rgba(0,0,0,.08); }
-.card h3 { margin: 0; font-size: .95rem; font-weight: 800; }
+.card h3, .card h2.card-h { margin: 0; font-size: .95rem; font-weight: 800; }
 .card .verdict { font-size: 1.5rem; font-weight: 800; line-height: 1.15; margin: 6px 0 2px; }
 .card .sub { font-size: .82rem; opacity: .85; margin-bottom: 12px; }
 .punch { display: grid; grid-template-columns: repeat(4, 1fr); gap: 0; border-top: 1.5px solid currentColor; border-bottom: 1.5px solid currentColor; margin-bottom: 10px; }

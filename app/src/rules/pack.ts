@@ -50,3 +50,10 @@ export function rulesLine(applicationDate: string | null, pack: string, es: bool
   const base = es ? `paquete de reglas ${pack}, revisado por última vez el ${PACK.verifiedOn}` : `rule pack ${pack}, last checked ${PACK.verifiedOn}`;
   return { text: filed + base + (fr.stale ? ` · ${es ? fr.reasonEs : fr.reason}` : ''), stale: fr.stale };
 }
+
+/** What the "update ready" toast says: whether the rule pack changed, from the new build's version.json. */
+export function updateText(next: { pack?: string; verifiedOn?: string } | null, es: boolean): string {
+  if (next?.pack && next.pack !== PACK_ID) return es ? `Hay una actualización: reglas nuevas ${next.pack} (revisadas el ${next.verifiedOn ?? '?'}; ahora ${PACK_ID}).` : `An update is ready: new rules ${next.pack} (checked ${next.verifiedOn ?? '?'}; you have ${PACK_ID}).`;
+  if (next?.pack) return es ? `Hay una actualización: arreglos de la app. Las reglas no cambian (${PACK_ID}).` : `An update is ready: app fixes. Rules unchanged (${PACK_ID}).`;
+  return es ? 'Hay una actualización (reglas o arreglos).' : 'An update is ready (rules or fixes).';
+}

@@ -6,6 +6,7 @@ import { buildServiceWorker } from './sw-build.ts'
 import { rulePages } from './rule-pages.ts'
 import { mkdirSync } from 'node:fs'
 import { dirname } from 'node:path'
+import { PACK, PACK_ID } from './src/rules/pack.ts'
 
 /** Content-Security-Policy for the built site (GitHub Pages can't send headers). 'wasm-unsafe-eval' is for the CAD WASM. */
 const CSP = "default-src 'self'; script-src 'self' 'wasm-unsafe-eval'; style-src 'self' 'unsafe-inline'; img-src 'self' data: blob:; font-src 'self'; connect-src 'self' blob: data:; worker-src 'self'; manifest-src 'self'; object-src 'none'; base-uri 'self'; form-action 'none'";
@@ -24,7 +25,7 @@ function serviceWorker(): Plugin {
       const files = walk(outDir).map(f => relative(outDir, f).split('\\').join('/'));
       const sw = buildServiceWorker(files, readFileSync(join(outDir, 'index.html'), 'utf8'));
       writeFileSync(join(outDir, 'sw.js'), sw.source);
-      writeFileSync(join(outDir, 'version.json'), JSON.stringify({ version: sw.version, files: sw.precache.length }));
+      writeFileSync(join(outDir, 'version.json'), JSON.stringify({ version: sw.version, files: sw.precache.length, pack: PACK_ID, verifiedOn: PACK.verifiedOn }));
     },
   };
 }
