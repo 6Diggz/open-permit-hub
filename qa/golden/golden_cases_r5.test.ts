@@ -3,7 +3,7 @@
  * Targets the round-4 logic: MIX-01 combinations (LADBS ADU/JADU/MTH correction sheet 2023 LABC/LARC, rev. Dec 8 2025:
  * II-C.5a, II-D.1, II-D.5a, II-G.3a), SIZ-01 (II-D.2, Gov. Code 66323(a)(2)), the house-wall rating (LARC Table R302.1(1),
  * LABC 705.3, sheet III-D.1), the assumed line on a rated blank ADU wall, plain-answer gating (EN + ES), other-city /
- * county / unknown jurisdiction, and LADBS item I.A.1 (now asked).
+ * county / unknown jurisdiction, and LADBS item I.A.1 (auto again since r3market-06 added the 8.5x11 plot plan page).
  * Only the listed rules are asserted (no BASE spread), so a case stays readable. Cases tagged red: are expected to fail
  * on main d26ad77 until that r5gold finding is fixed.
  */
@@ -77,10 +77,10 @@ const CASES: Case[] = [
   { id: 'R5-23', title: 'City not known yet', red: 'r5gold-04', why: 'The lot may well be in LA City: the plain answer must ask to confirm the city, not say the tool is LA-only.',
     make: () => { const p = base(); p.site.jurisdiction = 'unknown' as never; return p; }, exp: { 'JUR-01': 'UNKNOWN' }, overall: 'INCOMPLETE', plain: 'unsure', plainNotEn: /Los Angeles only/, plainNotEs: /solo para la Ciudad/ },
   // --- I.A.1 ---
-  { id: 'R5-24', title: 'I.A.1 (8.5x11 plot plan) not answered', why: 'r4reach-04: the app makes 24x36 sheets only, so I.A.1 is asked, never auto-passed.',
-    make: () => { const p = base(); delete p.sheet['I.A.1']; return p; }, exp: {}, items: { 'I.A.1': 'needsAnswer' } },
-  { id: 'R5-25', title: 'I.A.1 answered "no"', why: 'No 8.5x11 plot plan: the sheet item is failing.',
-    make: () => { const p = base(); p.sheet['I.A.1'] = 'no' as never; return p; }, exp: {}, items: { 'I.A.1': 'failing' } },
+  { id: 'R5-24', title: 'I.A.1 (8.5x11 plot plan) not answered', why: 'r3market-06: the plan PDF now ends with a dimensioned 8.5x11 plot plan page, so I.A.1 is checked by the app (auto).',
+    make: () => { const p = base(); delete p.sheet['I.A.1']; return p; }, exp: {}, items: { 'I.A.1': 'autoPassed' } },
+  { id: 'R5-25', title: 'I.A.1 answered "no"', why: 'r3market-06: I.A.1 is now auto (the app makes the 8.5x11 plot plan); a stale "no" answer does not override the app\'s own check.',
+    make: () => { const p = base(); p.sheet['I.A.1'] = 'no' as never; return p; }, exp: {}, items: { 'I.A.1': 'autoPassed' } },
 ];
 
 describe('golden r5 cases (round-4 logic)', () => {

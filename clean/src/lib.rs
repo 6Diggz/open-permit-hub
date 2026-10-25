@@ -8,6 +8,9 @@ use std::collections::BTreeMap;
 use std::io::Cursor;
 use wasm_bindgen::prelude::*;
 
+pub mod ops;
+pub use ops::{run_cleaning, CleanOpts, CleanRun};
+
 const UNITS: [&str; 21] = ["Unitless","Inches","Feet","Miles","Millimeters","Centimeters","Meters","Kilometers","Microinches","Mils","Yards","Angstroms","Nanometers","Microns","Decimeters","Decameters","Hectometers","Gigameters","Astronomical units","Light years","Parsecs"];
 const STD_FONTS: [&str; 8] = ["txt", "simplex", "romans", "arial", "isocp", "romand", "complex", "monotxt"];
 
@@ -27,6 +30,13 @@ pub fn plain_error(e: &str) -> String {
         "This file is damaged and can't be read. Ask the sender to save it again, or open it in their CAD app and run Recover.".to_string()
     } else { return e.to_string(); };
     format!("{msg} (Details: {})", e.chars().take(160).collect::<String>())
+}
+
+/// Like plain_error, but for reading: a feature the reader lacks is "can't read yet", never "can't write".
+pub fn plain_read_error(e: &str) -> String {
+    let l = e.to_lowercase();
+    if l.contains("not implemented") || l.contains("unsupported") { return format!("This file uses a DWG version or feature this tool can't read yet. Open it in a CAD app and save it as DXF, then try again. (Details: {})", e.chars().take(160).collect::<String>()); }
+    plain_error(e)
 }
 
 fn read_dxf(bytes: &[u8]) -> Result<CadDocument, String> {
@@ -142,22 +152,10 @@ pub fn approximate_curves(doc: &mut CadDocument) -> usize {
 
 /// Cleaning passes (like AutoCAD OVERKILL for the simple cases): zero-length lines and exact duplicate lines, circles
 /// and points on the same layer with the same color are removed. Returns how many of each type were removed.
+/// Kept for callers of the old API: it is the `zero` + `overkill` passes of [`CleanOpts`].
 pub fn tidy(doc: &mut CadDocument) -> BTreeMap<String, usize> {
-    let r = |v: f64| format!("{:.9}", v); let mut seen = std::collections::HashSet::new(); let mut drop = vec![];
-    for e in doc.entities() {
-        let c = e.common(); let base = format!("{}|{:?}|{:?}", c.layer, c.color, c.linetype);
-        let key = match e {
-            EntityType::Line(l) => { let (a, b) = ((r(l.start.x), r(l.start.y), r(l.start.z)), (r(l.end.x), r(l.end.y), r(l.end.z)));
-                if a == b { drop.push((c.handle, "Line".to_string())); continue; } let (p, q) = if a <= b { (a, b) } else { (b, a) }; Some(format!("L|{base}|{p:?}|{q:?}|{}", r(l.thickness))) }
-            EntityType::Circle(k) => Some(format!("C|{base}|{} {} {} {}", r(k.center.x), r(k.center.y), r(k.center.z), r(k.radius))),
-            EntityType::Point(p) => Some(format!("P|{base}|{} {} {}", r(p.location.x), r(p.location.y), r(p.location.z))),
-            _ => None,
-        };
-        if let Some(k) = key { if !seen.insert(k) { drop.push((c.handle, kind(e))); } }
-    }
-    let mut out: BTreeMap<String, usize> = BTreeMap::new();
-    for (h, k) in drop { if doc.remove_entity(h).is_some() { *out.entry(k).or_default() += 1; } }
-    out
+    let opts = CleanOpts { purge: false, overkill: true, zero: true, empty_text: false, audit: false };
+    let r = run_cleaning(doc, &opts); r.removed
 }
 
 /// Geometry fingerprint per entity: type, layer, rounded extents and text. Compared before/after to catch moved points or blanked text.
@@ -193,10 +191,49 @@ pub fn salvage_dxf(bytes: &[u8]) -> Option<(Vec<u8>, usize)> {
     Some((out.into_bytes(), lines.len() - cut))
 }
 
+/// Best-effort salvage of a damaged DWG (qa-13): the reader's failsafe mode skips pages and records it can't decode,
+/// then the safe structure repairs run. Says plainly how much was read. None when nothing usable came back.
+pub fn recover_dwg(bytes: &[u8]) -> Option<(CadDocument, Vec<String>)> {
+    let r = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| DwgReader::from_stream(Cursor::new(bytes.to_vec())).recover())).ok()?.ok()?;
+    let s = &r.stats; let ents = r.document.entities().count();
+    if ents == 0 { return None; }
+    let total = s.source_records.max(s.decoded_source_records);
+    let pct = if total > 0 { (s.decoded_source_records as f64 * 100.0 / total as f64).floor() as usize } else { 0 };
+    let skipped = s.skipped_source_records + total.saturating_sub(s.decoded_source_records + s.skipped_source_records);
+    let mut stages: Vec<String> = s.diagnostics.iter().map(|d| d.stage.to_string()).collect(); stages.sort(); stages.dedup();
+    let fixed = r.repair.actions.len();
+    let mut note = format!("Recovered from a damaged DWG: {} of {} records were read ({}%), giving {} drawing object(s). {} record(s) could not be read and are missing from the copy",
+        s.decoded_source_records, total, pct, ents, skipped);
+    if !stages.is_empty() { note.push_str(&format!(" (damage found in: {})", stages.join(", "))); }
+    note.push('.');
+    if fixed > 0 { note.push_str(&format!(" {fixed} structure repair(s) were made.")); }
+    note.push_str(" What is missing can't be listed by type. Check the drawing, and ask the sender for an undamaged copy if you can.");
+    Some((r.document, vec![note]))
+}
+
+/// Lenient DXF read for damage other than a cut-off end (bad group codes, a broken record): the reader's failsafe mode
+/// skips what it can't decode. The negative-count preflight still runs first, because that damage aborts the WASM engine.
+pub fn recover_dxf(bytes: &[u8]) -> Option<(CadDocument, Vec<String>)> {
+    if dxf_preflight(bytes).is_some() { return None; }
+    let r = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| DxfReader::from_reader(Cursor::new(bytes.to_vec())).ok().map(|x| x.recover()))).ok()??.ok()?;
+    let ents = r.document.entities().count(); if ents == 0 { return None; }
+    let raw: usize = raw_entity_counts(bytes).map(|m| m.values().sum()).unwrap_or(0);
+    let s = &r.stats;
+    let mut note = format!("Recovered from a damaged DXF: {} drawing object(s) were read", ents);
+    if raw > ents { note.push_str(&format!(" of about {raw} in the file; about {} could not be read and are missing", raw - ents)); }
+    note.push_str(&format!(". The reader skipped {} damaged record(s)", s.skipped_source_records.max(s.diagnostics.len())));
+    if let Some(l) = s.diagnostics.iter().find_map(|d| d.source_line) { note.push_str(&format!(" (first one near line {l})")); }
+    note.push_str(". Check the drawing, and ask the sender for an undamaged copy if you can.");
+    Some((r.document, vec![note]))
+}
+
 /// Read a DWG or DXF. For a cut-off DXF, retry once with `salvage_dxf` and report what was skipped.
 pub fn read_with_notes(bytes: &[u8]) -> Result<(CadDocument, Vec<String>), String> {
     if is_dwg(bytes) {
-        return DwgReader::from_stream(Cursor::new(bytes.to_vec())).read().map(|d| (d, vec![])).map_err(|e| format!("Could not read DWG: {}", plain_error(&e.to_string())));
+        return match DwgReader::from_stream(Cursor::new(bytes.to_vec())).read() {
+            Ok(d) => Ok((d, vec![])),
+            Err(e) => match recover_dwg(bytes) { Some(r) => Ok(r), None => Err(format!("Could not read DWG: {}", plain_read_error(&e.to_string()))) },
+        };
     }
     match read_dxf(bytes) {
         Ok(d) => Ok((d, vec![])),
@@ -214,14 +251,15 @@ pub fn read_with_notes(bytes: &[u8]) -> Result<(CadDocument, Vec<String>), Strin
                     }
                 }
             }
+            if let Some(r) = recover_dxf(bytes) { return Ok(r); }
             Err(format!("Could not read DXF: {}", plain_error(&e)))
         }
     }
 }
 pub fn read(bytes: &[u8]) -> Result<CadDocument, String> { read_with_notes(bytes).map(|(d, _)| d) }
 
-fn kind(e: &EntityType) -> String { let d = format!("{e:?}"); d.split(|c: char| c == '(' || c == ' ' || c == '{').next().unwrap_or("Unknown").to_string() }
-fn obj_kind(o: &acadrust::objects::ObjectType) -> String { let d = format!("{o:?}"); d.split(|c: char| c == '(' || c == ' ' || c == '{').next().unwrap_or("Unknown").to_string() }
+pub(crate) fn kind(e: &EntityType) -> String { let d = format!("{e:?}"); d.split(|c: char| c == '(' || c == ' ' || c == '{').next().unwrap_or("Unknown").to_string() }
+pub(crate) fn obj_kind(o: &acadrust::objects::ObjectType) -> String { let d = format!("{o:?}"); d.split(|c: char| c == '(' || c == ' ' || c == '{').next().unwrap_or("Unknown").to_string() }
 
 pub fn type_counts(doc: &CadDocument) -> BTreeMap<String, usize> {
     let mut types: BTreeMap<String, usize> = BTreeMap::new();
@@ -295,14 +333,20 @@ pub fn inspect_bytes(bytes: &[u8]) -> Result<Value, String> {
     Ok(v)
 }
 
-pub fn clean_doc(mut doc: CadDocument, target: &str, units: i16) -> Result<Vec<u8>, String> {
-    if doc.entities().next().is_none() { return Err("Nothing to save: this drawing has no objects. If it should have some, the file is cut off or damaged; ask the sender to send it again.".into()); }
+pub fn clean_doc(doc: CadDocument, target: &str, units: i16) -> Result<Vec<u8>, String> { clean_doc_with(doc, target, units, &CleanOpts::default()).map(|x| x.0) }
+
+/// Everything a clean copy gets before it is written: relative reference paths, the units label, curves as polylines
+/// for R12, and the chosen cleaning operations. Returns the cleaning report.
+pub fn prepare(doc: &mut CadDocument, target: &str, units: i16, opts: &CleanOpts) -> (CleanRun, usize) {
     for b in doc.block_records.iter_mut() {
         if !b.xref_path.is_empty() { let f = b.xref_path.rsplit(['/', '\\']).next().unwrap_or("").to_string(); b.xref_path = f; }
     }
     if units >= 0 { doc.header.insertion_units = units; }
-    if matches!(target, "r12" | "cnc") { approximate_curves(&mut doc); }
-    tidy(&mut doc);
+    let approx = if matches!(target, "r12" | "cnc") { approximate_curves(doc) } else { 0 };
+    (run_cleaning(doc, opts), approx)
+}
+
+pub fn write_doc(mut doc: CadDocument, target: &str) -> Result<Vec<u8>, String> {
     let ver = match target { "r12" | "cnc" => DxfVersion::AC1009, "r14" => DxfVersion::AC1014, "r2000" => DxfVersion::AC1015, _ => DxfVersion::AC1032 };
     if target == "dwg" {
         doc.version = DxfVersion::AC1032;
@@ -310,7 +354,15 @@ pub fn clean_doc(mut doc: CadDocument, target: &str, units: i16) -> Result<Vec<u
         let r = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| acadrust::io::dwg::DwgWriter::write_to_vec(&doc)));
         return match r { Ok(Ok(v)) => Ok(v), Ok(Err(e)) => Err(format!("Could not write DWG: {}", plain_error(&e.to_string()))), Err(_) => Err("Could not write DWG: this drawing has objects DWG 2018 can't hold yet. Save as DXF 2018 instead.".into()) };
     }
-    DxfWriter::new(&doc).with_version(ver).write_to_vec().map_err(|e| format!("Could not write DXF: {}", plain_error(&e.to_string())))
+    let r = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| DxfWriter::new(&doc).with_version(ver).write_to_vec()));
+    match r { Ok(Ok(v)) => Ok(v), Ok(Err(e)) => Err(format!("Could not write DXF: {}", plain_error(&e.to_string()))), Err(_) => Err("Could not write DXF: the writer stopped on this drawing. Try DXF 2018.".into()) }
+}
+
+pub fn clean_doc_with(mut doc: CadDocument, target: &str, units: i16, opts: &CleanOpts) -> Result<(Vec<u8>, CleanRun), String> {
+    if doc.entities().next().is_none() { return Err("Nothing to save: this drawing has no objects. If it should have some, the file is cut off or damaged; ask the sender to send it again.".into()); }
+    let (run, _) = prepare(&mut doc, target, units, opts);
+    if doc.entities().next().is_none() { return Err("Nothing to save: cleaning removed every object. Switch off a cleaning step and try again.".into()); }
+    write_doc(doc, target).map(|b| (b, run))
 }
 
 /// Entities whose geometry or text differs between two drawings (same type, different layer, extents or text).
@@ -326,26 +378,31 @@ fn plain_type(k: &str) -> String {
 /// What will be lost: clean in memory, read the copy back, and compare by type and by geometry.
 /// Before counts include what the reader skipped (counted from the file text). Converted types (a polyline written in an
 /// older form, a spline written as a polyline) are paired, not counted as lost. Hidden data is listed apart.
-pub fn loss_report(bytes: &[u8], target: &str, units: i16) -> Value {
+pub fn loss_report(bytes: &[u8], target: &str, units: i16) -> Value { loss_report_with(bytes, target, units, &CleanOpts::default()) }
+pub fn loss_report_with(bytes: &[u8], target: &str, units: i16, opts: &CleanOpts) -> Value {
     let (mut doc, notes) = match read_with_notes(bytes) { Ok(d) => d, Err(e) => return json!({ "ok": false, "error": e }) };
     let incomplete = !notes.is_empty();
     let mut before = type_counts(&doc); let before_obj = object_counts(&doc);
     let skipped = dropped_on_read(bytes, &before);
     let r12 = matches!(target, "r12" | "cnc");
-    let approx = if r12 { approximate_curves(&mut doc) } else { 0 };
-    let cleaned = tidy(&mut doc);
+    if doc.entities().next().is_none() { return json!({ "ok": false, "error": "Nothing to save: this drawing has no objects. If it should have some, the file is cut off or damaged; ask the sender to send it again." }); }
+    let (run, approx) = prepare(&mut doc, target, units, opts);
+    let cleaned = run.removed.clone();
     let fp_before = fingerprints(&doc);
-    let out = match clean_doc(doc, target, units) { Ok(o) => o, Err(e) => return json!({ "ok": false, "error": e }) };
+    if doc.entities().next().is_none() { return json!({ "ok": false, "error": "Nothing to save: cleaning removed every object. Switch off a cleaning step and try again." }); }
+    let out = match write_doc(doc, target) { Ok(o) => o, Err(e) => return json!({ "ok": false, "error": e }) };
     let back = match read(&out) { Ok(d) => d, Err(e) => return json!({ "ok": false, "error": format!("The clean copy could not be read back to check it: {e}") }) };
     let after = type_counts(&back); let after_obj = object_counts(&back); let fp_after = fingerprints(&back);
-    // Spline/Ellipse rows: show the original counts (they were replaced by polylines just above).
+    // Spline/Ellipse rows: show the original counts (they were replaced by polylines in prepare).
     let orig = type_counts(&read_with_notes(bytes).map(|x| x.0).unwrap_or_else(|_| CadDocument::new()));
     for k in ["Spline", "Ellipse"] { if let Some(v) = orig.get(k) { before.insert(k.into(), *v); } }
     let mut rows = vec![]; let (mut lost, mut hidden_lost, mut changed) = (0usize, 0usize, 0usize);
     for (name, n, got) in &skipped { lost += n - got; rows.push(json!({ "group": "object", "type": name, "before": n, "after": got, "status": "dropped_on_read" })); }
     // Pair conversions: LwPolyline written as Polyline2D in old formats, Spline/Ellipse written as polylines.
-    let poly_in = *before.get("LwPolyline").unwrap_or(&0) + approx; let poly_out = *after.get("LwPolyline").unwrap_or(&0) + *after.get("Polyline2D").unwrap_or(&0);
-    let poly_converted = r12 && poly_out >= poly_in && poly_in > 0;
+    // Any format: a 2D POLYLINE can come back as an LWPOLYLINE (and the other way in R12). Same total = converted, not lost.
+    let g = |m: &BTreeMap<String, usize>, k: &str| *m.get(k).unwrap_or(&0);
+    let poly_in = (g(&before, "LwPolyline") + g(&before, "Polyline2D") + approx).saturating_sub(g(&cleaned, "LwPolyline") + g(&cleaned, "Polyline2D")); let poly_out = g(&after, "LwPolyline") + g(&after, "Polyline2D");
+    let poly_converted = poly_in > 0 && poly_out >= poly_in && (r12 || (g(&before, "LwPolyline") + approx).saturating_sub(g(&cleaned, "LwPolyline")) != g(&after, "LwPolyline"));
     // R12 has no MTEXT: the writer explodes each one into TEXT lines (one per line of the paragraph), so the words stay.
     let (mt_in, tx_in, tx_out) = (*before.get("MText").unwrap_or(&0), *before.get("Text").unwrap_or(&0), *after.get("Text").unwrap_or(&0));
     let mtext_converted = r12 && mt_in > 0 && *after.get("MText").unwrap_or(&0) == 0 && tx_out >= tx_in + mt_in;
@@ -355,12 +412,14 @@ pub fn loss_report(bytes: &[u8], target: &str, units: i16) -> Value {
         let curve = r12 && (k == "Spline" || k == "Ellipse") && approx > 0;
         let conv = (poly_converted && (k == "LwPolyline" || k == "Polyline2D")) || (mtext_converted && k == "MText");
         let tidied = *cleaned.get(k).unwrap_or(&0);
-        let status = if curve { "approximated" } else if conv { "converted" } else if tidied > 0 && b >= a && b - a <= tidied { "cleaned" } else if b > 0 && a == 0 { "dropped" } else if a < b { "reduced" } else if b == 0 && a > 0 { "added" } else { "kept" };
-        if status == "dropped" || status == "reduced" { lost += b - a; }
+        // Removed on purpose by a cleaning step: not lost. Anything missing beyond that still counts as lost.
+        let (b_eff, status0) = if tidied > 0 && b >= tidied { (b - tidied, true) } else { (b, false) };
+        let status = if curve { "approximated" } else if conv { "converted" } else if status0 && a == b_eff { "cleaned" } else if b_eff > 0 && a == 0 { "dropped" } else if a < b_eff { "reduced" } else if b == 0 && a > 0 { "added" } else { "kept" };
+        if status == "dropped" || status == "reduced" { lost += b_eff - a; }
         // Same count but different geometry or text: "changed".
         let mut ch = 0; if status == "kept" { if let (Some(x), Some(y)) = (fp_before.get(k), fp_after.get(k)) { for (key, n) in x { ch += n.saturating_sub(*y.get(key).unwrap_or(&0)); } } }
         changed += ch;
-        rows.push(json!({ "group": "object", "type": k, "before": b, "after": a, "status": if ch > 0 { "changed" } else { status }, "changed": ch }));
+        rows.push(json!({ "group": "object", "type": k, "before": b, "after": a, "status": if ch > 0 { "changed" } else { status }, "changed": ch, "cleaned": tidied }));
     }
     let okeys: std::collections::BTreeSet<&String> = before_obj.keys().chain(after_obj.keys()).collect();
     for k in okeys {
@@ -371,7 +430,7 @@ pub fn loss_report(bytes: &[u8], target: &str, units: i16) -> Value {
     }
     let best = if lost + changed == 0 { true } else { target == "r2018" };
     json!({ "ok": true, "target": target, "bytes": out.len(), "rows": rows, "lost": lost, "hidden_lost": hidden_lost, "changed": changed,
-        "approximated": approx, "cleaned": cleaned, "incomplete": incomplete, "notes": notes, "best_format": best,
+        "approximated": approx, "cleaned": cleaned, "ops": run.ops, "audit": run.audit, "incomplete": incomplete, "notes": notes, "best_format": best,
         "converted": rows.iter().any(|r| r["status"] == "added" || r["status"] == "converted" || r["status"] == "approximated") })
 }
 
@@ -465,4 +524,34 @@ pub fn site_plan(spec: &str) -> Result<Vec<u8>, String> {
 #[wasm_bindgen] pub fn inspect(bytes: &[u8]) -> Result<String, JsValue> { inspect_bytes(bytes).map(|v| v.to_string()).map_err(|e| JsValue::from_str(&e)) }
 #[wasm_bindgen] pub fn clean(bytes: &[u8], target: &str, units: i16) -> Result<Vec<u8>, JsValue> { let d = read(bytes).map_err(|e| JsValue::from_str(&e))?; clean_doc(d, target, units).map_err(|e| JsValue::from_str(&e)) }
 #[wasm_bindgen] pub fn loss(bytes: &[u8], target: &str, units: i16) -> String { loss_report(bytes, target, units).to_string() }
+/// Loss report with chosen cleaning operations (JSON like {"purge":true,"overkill":false}).
+#[wasm_bindgen] pub fn loss_with(bytes: &[u8], target: &str, units: i16, opts: &str) -> String { loss_report_with(bytes, target, units, &CleanOpts::from_json(opts)).to_string() }
+#[wasm_bindgen] pub fn clean_with(bytes: &[u8], target: &str, units: i16, opts: &str) -> Result<Vec<u8>, JsValue> { let d = read(bytes).map_err(|e| JsValue::from_str(&e))?; clean_doc_with(d, target, units, &CleanOpts::from_json(opts)).map(|x| x.0).map_err(|e| JsValue::from_str(&e)) }
 #[wasm_bindgen] pub fn site_plan_dxf(spec: &str) -> Result<Vec<u8>, JsValue> { site_plan(spec).map_err(|e| JsValue::from_str(&e)) }
+
+/// One file of a batch: the loss report with the chosen cleaning, then the clean copy (None when it could not be made).
+pub fn batch_one(bytes: &[u8], target: &str, units: i16, opts: &CleanOpts) -> (Value, Option<Vec<u8>>) {
+    let rep = loss_report_with(bytes, target, units, opts);
+    if rep["ok"] != true { return (json!({ "ok": false, "error": rep["error"] }), None); }
+    let doc = match read(bytes) { Ok(d) => d, Err(e) => return (json!({ "ok": false, "error": e }), None) };
+    match clean_doc_with(doc, target, units, opts) {
+        Ok((out, _)) => (json!({ "ok": true, "bytes": out.len(), "lost": rep["lost"], "changed": rep["changed"], "hidden_lost": rep["hidden_lost"], "incomplete": rep["incomplete"], "notes": rep["notes"],
+            "ops": rep["ops"].as_array().map(|a| a.iter().map(|o| json!({ "id": o["id"], "before": o["before"], "after": o["after"] })).collect::<Vec<_>>()) }), Some(out)),
+        Err(e) => (json!({ "ok": false, "error": e }), None),
+    }
+}
+
+/// Fidelity of one file through read -> write -> read with no cleaning (OUT-19). `pass` means every drawing object
+/// came back with the same type, layer, extents and text; `hidden_pass` also needs every hidden data item kept.
+pub fn fidelity(bytes: &[u8], target: &str) -> Value {
+    let read_ok = read_with_notes(bytes);
+    let (read, recovered, read_error) = match &read_ok { Ok((_, n)) => (true, !n.is_empty(), Value::Null), Err(e) => (false, false, json!(e.chars().take(200).collect::<String>())) };
+    drop(read_ok);
+    if !read { return json!({ "target": target, "read": false, "read_error": read_error, "pass": false, "hidden_pass": false }); }
+    let r = loss_report_with(bytes, target, -1, &CleanOpts::none());
+    if r["ok"] != true { return json!({ "target": target, "read": true, "recovered": recovered, "write": false, "write_error": r["error"], "pass": false, "hidden_pass": false }); }
+    let pass = r["incomplete"] != true && r["lost"] == 0 && r["changed"] == 0;
+    let rows: Vec<Value> = r["rows"].as_array().cloned().unwrap_or_default().into_iter().filter(|x| x["status"] != "kept").collect();
+    json!({ "target": target, "read": true, "recovered": recovered, "write": true, "lost": r["lost"], "changed": r["changed"], "hidden_lost": r["hidden_lost"],
+        "pass": pass, "hidden_pass": pass && r["hidden_lost"] == 0, "not_kept": rows })
+}

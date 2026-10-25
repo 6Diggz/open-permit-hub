@@ -149,7 +149,7 @@ for (const width of process.env.ONLY_STORAGE ? [] : [390, 1440]) {
     await step(page, 'export'); const [dl] = await Promise.all([page.waitForEvent('download'), page.getByRole('button', { name: 'Draft site plan (PDF, 24x36)' }).click()]);
     const own = readFileSync(await dl.path()); await step(page, 'review');
     await setFile(page, pick, 'own-sheets.pdf', own, 'application/pdf');
-    ok(await page.getByText(/2 pages read/).waitFor({ timeout: 20000 }).then(() => true, () => false), `precheck: the app's own sheets are read ${W}`, errs.join(' | '));
+    ok(await page.getByText(/3 pages read/).waitFor({ timeout: 20000 }).then(() => true, () => false), `precheck: the app's own sheets are read (A-1, A-2, A-0 letter plot plan) ${W}`, errs.join(' | '));
     const i2 = page.locator('li.res', { hasText: 'I.C.2 ·' }); ok((await i2.textContent()).includes('Partly found') && (await i2.textContent()).includes('missing the owner') && (await i2.textContent()).includes('Confidence: Medium'), `precheck: demo has no owner, so I.C.2 is partly found with medium confidence ${W}`, await i2.textContent());
     ok((await page.locator('li.res', { hasText: 'III.G.1 ·' }).textContent()).includes("8' 0\""), `precheck: ceiling height read from the floor plan sheet ${W}`);
     ok((await page.locator('li.res', { hasText: 'I.C.7 ·' }).textContent()).includes('Page 1'), `precheck: page reference shown ${W}`);

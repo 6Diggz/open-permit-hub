@@ -207,6 +207,8 @@ export const ES = {
 "Download": "Descargar",
 "Draft sheets and the check report still work.": "Los borradores y el informe aún funcionan.",
 "Draft site plan (PDF, 24x36)": "Borrador del plano del sitio (PDF, 24x36)",
+"Draft plot plan (PDF, 11x17)": "Borrador del plano del lote (PDF, 11x17)",
+"Draft plot plan (PDF, 8.5x11)": "Borrador del plano del lote (PDF, 8.5x11)",
 "Drag the ADU, or select it and use arrow keys. Shaded band = 4 ft side/rear setback.": "Arrastre el ADU, o selecciónelo y use las flechas. Banda sombreada = retiro de 4 pies.",
 "English": "English",
 "Enter the address, then check the parcel in ZIMAS. It's the city's free map, and it answers most of the questions below.": "Ingrese la dirección y revise la parcela en ZIMAS. Es el mapa gratuito de la ciudad y responde la mayoría de las preguntas.",

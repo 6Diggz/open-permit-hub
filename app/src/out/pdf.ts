@@ -220,10 +220,71 @@ function exampleBanner(pg: PDFPage, p: Project, fb: PDFFont, H: number) {
   const miss = [!p.confirmed?.lot && 'LOT SIZE', !p.confirmed?.house && 'HOUSE SIZE AND POSITION', !p.confirmed?.adu && 'GARAGE SIZE AND POSITION'].filter(Boolean);
   if (miss.length) drawT(pg, safe(`EXAMPLE SIZES - NOT MEASURED: ${miss.join(', ')}`), { x: 44, y: H - 66, size: 12, font: fb, color: RED });
 }
-export async function sheetsPDF(p: Project, kind: Kind) { const d = await PDFDocument.create(); d.setTitle(`${p.name} - site plan`); setLang(d, p.people.language === 'es' ? 'es-US' : 'en-US'); const g2 = p.markup.pins.length > 0 || p.markup.responses.length > 0;
-  await sitePlanSheet(d, p, kind, sheetList(p)); await floorPlanSheet(d, p, kind); if (g2) await markupSheet(d, p); return d.save(); }
+/** Plan sheets. ARCH D (default): the full 24x36 set, ending with the 8.5x11 plot plan page for the application (I.A.1).
+ *  11x17 or letter: the plot plan at that size (the 24x36 floor-plan data sheet does not fit smaller paper at 9 pt). */
+export async function sheetsPDF(p: Project, kind: Kind, paper: Paper = 'archd') { const d = await PDFDocument.create(); d.setTitle(`${p.name} - ${paper === 'archd' ? 'site plan' : 'plot plan ' + PAPER[paper].label}`); setLang(d, p.people.language === 'es' ? 'es-US' : 'en-US'); const g2 = p.markup.pins.length > 0 || p.markup.responses.length > 0;
+  if (paper !== 'archd') { await plotPlanSheet(d, p, kind, paper, `A-0 Plot plan ${PAPER[paper].label}`); return d.save(); }
+  await sitePlanSheet(d, p, kind, sheetList(p)); await floorPlanSheet(d, p, kind); if (g2) await markupSheet(d, p); await plotPlanSheet(d, p, kind, 'letter', 'A-0 Plot plan 8.5x11'); return d.save(); }
 /** The sheets site-plan.pdf holds, in order (also listed in the handoff README). */
-export const sheetList = (p: Project) => ['A-1 Site plan', 'A-2 Floor plan data', ...(p.markup.pins.length || p.markup.responses.length ? ['G-2 Review markup'] : [])];
+export const sheetList = (p: Project) => ['A-1 Site plan', 'A-2 Floor plan data', ...(p.markup.pins.length || p.markup.responses.length ? ['G-2 Review markup'] : []), 'A-0 Plot plan 8.5x11 (for the application)'];
+
+/** Paper sizes for plan output (r3market-06). ARCH D is the full set; 11x17 and letter carry the plot plan sheet. */
+export type Paper = 'archd' | 'tabloid' | 'letter';
+export const PAPER: Record<Paper, { w: number; h: number; label: string }> = { archd: { w: 36, h: 24, label: '24x36' }, tabloid: { w: 17, h: 11, label: '11x17' }, letter: { w: 8.5, h: 11, label: '8.5x11' } };
+/** Standard plan scales, largest first, as [paper inches per foot, name]. Only these are used, so the printed scale is one a reader's scale ruler has. */
+export const PLOT_SCALES: [number, string][] = [[1 / 4, '1/4" = 1\'-0"'], [1 / 8, '1/8" = 1\'-0"'], [1 / 10, '1" = 10\''], [1 / 16, '1/16" = 1\'-0"'], [1 / 20, '1" = 20\''], [1 / 30, '1" = 30\''], [1 / 32, '1/32" = 1\'-0"'], [1 / 40, '1" = 40\''], [1 / 50, '1" = 50\''], [1 / 60, '1" = 60\''], [1 / 100, '1" = 100\'']];
+/** Largest standard scale at which a wFt x hFt drawing fits in an area of aw x ah points. */
+export function fitScale(wFt: number, hFt: number, aw: number, ah: number): [number, string] {
+  return PLOT_SCALES.find(([sc]) => wFt * sc * PT_PER_IN <= aw && hFt * sc * PT_PER_IN <= ah) ?? PLOT_SCALES[PLOT_SCALES.length - 1];
+}
+/** Smallest lettering on the compact sheets: 9 pt (LADBS I.C.3 asks for 1/8" lettering; 9 pt = 1/8"). */
+export const MIN_PT = 9;
+/** Dimensioned plot plan on letter (8.5x11, LADBS item I.A.1) or 11x17: lot lines with lengths, buildings, ADU setbacks,
+ *  building separation, street, north arrow, a true-scale bar and the scale printed, plus a compact title strip. */
+export async function plotPlanSheet(doc: PDFDocument, p: Project, kind: Kind, paper: Exclude<Paper, 'archd'>, sheet: string) {
+  const W = PAPER[paper].w * PT_PER_IN, H = PAPER[paper].h * PT_PER_IN; const pg = doc.addPage([W, H]);
+  const { f, fb } = await sheetFonts(doc); const m = 36; const T = MIN_PT;
+  pg.drawRectangle({ x: m - 8, y: m - 8, width: W - 2 * m + 16, height: H - 2 * m + 16, borderColor: INK, borderWidth: 1.2 });
+  // title strip rows (bottom)
+  const strip: [string, string][] = [['Address', p.site.address || '-'], ['APN', p.site.apn || '-'], ['Owner', p.people.ownerName || '-'], ['Prepared by', `${p.people.preparerName || '-'} (${p.people.preparerRole})`],
+    ['Scope', p.adu.mode === 'conversion' ? 'Convert existing detached garage to ADU' : 'Detached ADU'], ['Lot area', fmtSqFt(area(p.site.lot))], ['ADU footprint', fmtSqFt(area(p.adu.footprint))], ['Sheet', `${sheet}, ${today()}`]].filter(([, v]) => v.trim() !== '-') as [string, string][]; // empty fields are left off, never printed as '-'
+  const colW = (W - 2 * m) / 2; const stripH = Math.ceil(strip.length / 2) * (T + 5) + 64;
+  // drawing area: above the strip and the scale bar line
+  const top = H - m - 26, bottom = m + stripH + 34; const aw = W - 2 * m - 70, ah = top - bottom - 20;
+  const bb = bbox(p.site.lot); const wFt = (bb.maxX - bb.minX) / MM_PER_FT, hFt = (bb.maxY - bb.minY) / MM_PER_FT;
+  const [s, sName] = fitScale(wFt, hFt, aw, ah);
+  const k = (s * PT_PER_IN) / MM_PER_FT; const ox = m + 10 + (aw - wFt * s * PT_PER_IN) / 2, oy = bottom + 10 + (ah - hFt * s * PT_PER_IN) / 2;
+  const X = (x: number) => ox + (x - bb.minX) * k, Y = (y: number) => oy + (y - bb.minY) * k;
+  const poly = (pl: { x: number; y: number }[], th: number, color = INK, dash?: number[]) => pl.forEach((a, i) => { const b = pl[(i + 1) % pl.length]; pg.drawLine({ start: { x: X(a.x), y: Y(a.y) }, end: { x: X(b.x), y: Y(b.y) }, thickness: th, color, dashArray: dash }); });
+  poly(p.site.lot, 1.4, INK, [8, 3, 1.5, 3]); poly(p.site.primary, 1, MUTE); poly(p.adu.footprint, 1.8, INK);
+  const lab = (pl: { x: number; y: number }[], t: string) => { const b2 = bbox(pl); const tt = safe(t); drawT(pg, tt, { x: X((b2.minX + b2.maxX) / 2) - fb.widthOfTextAtSize(tt, T) / 2, y: Y((b2.minY + b2.maxY) / 2) - T / 2, size: T, font: fb, color: INK }); };
+  lab(p.site.primary, 'EXISTING HOUSE'); lab(p.adu.footprint, 'ADU');
+  p.site.lot.forEach((a, i) => { const b = p.site.lot[(i + 1) % p.site.lot.length]; const mx = (X(a.x) + X(b.x)) / 2, my = (Y(a.y) + Y(b.y)) / 2;
+    drawT(pg, fmtFtIn(Math.hypot(b.x - a.x, b.y - a.y)), { x: mx + 4, y: my + 4, size: T, font: f, color: INK });
+    if (i !== p.site.streetEdge) drawT(pg, `ADU SETBACK ${fmtFtIn(clearanceToEdge(p.adu.footprint, p.site.lot, i))}`, { x: mx + 4, y: my - T - 6, size: T, font: fb, color: INK }); });
+  { const se = p.site.streetEdge, a = p.site.lot[se], b = p.site.lot[(se + 1) % p.site.lot.length]; const st = streetName(p.site.address);
+    const t = safe(st ? `STREET: ${st.toUpperCase()}` : 'STREET'); drawT(pg, t, { x: (X(a.x) + X(b.x)) / 2 - fb.widthOfTextAtSize(t, 10) / 2, y: (Y(a.y) + Y(b.y)) / 2 - 22, size: 10, font: fb, color: INK }); }
+  { const g = gap(p.adu.footprint, p.site.primary); const hb = bbox(p.site.primary), ab = bbox(p.adu.footprint);
+    if (g > 0 && Number.isFinite(g)) { const x = (Math.max(hb.minX, ab.minX) + Math.min(hb.maxX, ab.maxX)) / 2; const [y1, y2] = hb.maxY <= ab.minY ? [hb.maxY, ab.minY] : ab.maxY <= hb.minY ? [ab.maxY, hb.minY] : [NaN, NaN];
+      if (Number.isFinite(y1)) { pg.drawLine({ start: { x: X(x), y: Y(y1) }, end: { x: X(x), y: Y(y2) }, thickness: 0.8, color: INK }); drawT(pg, `SEPARATION ${fmtFtIn(g)}`, { x: X(x) + 5, y: (Y(y1) + Y(y2)) / 2, size: T, font: fb, color: INK }); } } }
+  // heading, north arrow
+  drawT(pg, 'PLOT PLAN', { x: m, y: H - m - 12, size: 14, font: fb, color: INK });
+  drawT(pg, `Scale ${sName} on ${PAPER[paper].label} sheet`, { x: m + 92, y: H - m - 11, size: T, font: f, color: INK });
+  northArrow(pg, W - m - 100, top - 36, p.site.northDeg, f, fb); // room for the 'North not set' line inside the border
+  // true-size scale bar: 4 segments of a round number of feet
+  const ftSeg = [5, 10, 20, 25, 50, 100].find(x => x * s * PT_PER_IN >= 24) ?? 100; const seg = ftSeg * s * PT_PER_IN; const sbX = m, sbY = bottom - 16;
+  for (let i = 0; i < 4; i++) pg.drawRectangle({ x: sbX + i * seg, y: sbY, width: seg, height: 5, color: i % 2 ? rgb(1, 1, 1) : INK, borderColor: INK, borderWidth: 0.5 });
+  for (let i = 0; i <= 4; i++) { const t = String(i * ftSeg); drawT(pg, t, { x: sbX + i * seg - f.widthOfTextAtSize(t, T) / 2, y: sbY + 8, size: T, font: f, color: INK }); }
+  drawT(pg, `FEET  (scale ${sName})`, { x: sbX + 4 * seg + 12, y: sbY + 8, size: T, font: f, color: INK });
+  // title strip
+  pg.drawLine({ start: { x: m - 8, y: m + stripH }, end: { x: W - m + 8, y: m + stripH }, thickness: 0.8, color: INK });
+  strip.forEach(([a, b], i) => { const cx = m + (i % 2) * colW, cy = m + stripH - 14 - Math.floor(i / 2) * (T + 5); const t = safe(`${a}: ${b}`); let tt = t; while (tt.length > 4 && f.widthOfTextAtSize(tt, T) > colW - 8) tt = tt.slice(0, -2); drawT(pg, tt === t ? t : tt + '...', { x: cx, y: cy, size: T, font: f, color: INK }); });
+  sigBlock(pg, m, m + 46, W - 2 * m, f, p); // I.C.1: the preparer signs every sheet, this one too
+  for (const [i, l] of wrap(`Rule pack ${PACK_ID}. Made with Open Permit Hub software by the person named above; not reviewed or approved by any agency. Verify all dimensions in the field.`, f, T, W - 2 * m).slice(0, 2).entries()) drawT(pg, l, { x: m, y: m + 2 + (1 - i) * (T + 2), size: T, font: f, color: MUTE });
+  if (kind === 'draft') drawT(pg, 'DRAFT - NOT FOR SUBMITTAL', { x: W * 0.12, y: H * 0.3, size: paper === 'letter' ? 40 : 60, font: fb, color: rgb(0.85, 0.2, 0.15), opacity: 0.13, rotate: degrees(28) });
+  exampleBanner(pg, p, fb, H);
+  return { page: pg, scale: s, scaleName: sName };
+}
 
 const STAT: Record<string, [string, string, ReturnType<typeof rgb>]> = {
   PASS: ['Pass', 'Cumple', GREEN], FAIL: ['Fix', 'Corregir', RED], UNKNOWN: ['Need info', 'Falta info', AMBER], NOT_CHECKED: ['NOT CHECKED', 'NO REVISADO', MUTE], INFO: ['Note', 'Nota', MUTE],

@@ -102,6 +102,14 @@ const KIND: [SheetKind, RegExp][] = [
   ['plumbing', /\bplumbing plan\b/i], ['mechanical', /\bmechanical plan\b|\bhvac plan\b/i], ['energy', /\btitle[- ]24\b|\bcf1r\b|\benergy (compliance|calc)/i],
   ['notes', /\bgeneral notes\b/i], ['structural', /\bstructural (notes|details|plan)\b|\bshear ?wall (schedule|plan|elevation)/i], ['details', /\b(construction|typical) details\b|^details$/i],
 ];
+/** r5plan-11: Simpson connector callouts (A34, A35, A21...) look like sheet ids. A bare id with no dot that is a known
+ *  connector name, or that repeats on the page (callouts repeat; a sheet's own id shows once in the title block), is skipped. */
+const SIMPSON_A = /^A(21|23|33|34|35|44|311)$/;
+export function hardwareCallout(id: string, lines: string[]): boolean {
+  if (/[.\-]/.test(id)) return false;
+  if (SIMPSON_A.test(id)) return true;
+  return lines.filter(l => l.trim().toUpperCase().replace(/\s/g, '') === id).length >= 2;
+}
 const SHEET_ID = /\b((?:A|AS|S|G|T|E|M|P|C|GN|SP|D)\s?-?\s?\d{1,2}(?:\.\d{1,2})?[A-Z]?)\b/;
 const SCALE = /\bscale\s*:?\s*((?:\d+\/\d+|\d+(?:\.\d+)?)\s*"?\s*=\s*\d+\s*'?\s*-?\s*\d*\s*"?|n\.?t\.?s\.?|not to scale|as noted)/i;
 const BARE_SCALE = /^\s*((?:\d+\/\d+|\d+(?:\.\d+)?)\s*"\s*=\s*1\s*'\s*-?\s*0\s*"?)\s*$/;
@@ -191,7 +199,8 @@ export function analyze(pagesIn: PageText[], totalPages = pagesIn.length): PlanC
   const pages = pagesIn.map(p => ({ page: p.page, lines: p.lines.map(normalize).filter(Boolean) }));
   const chars = pages.reduce((n, p) => n + p.lines.join(' ').length, 0);
   const textPages = pages.filter(p => p.lines.join(' ').length >= 40).length;
-  const all = pages.flatMap(p => p.lines.map(text => ({ page: p.page, text })));
+  // r5plan-11: overprinted text (Revit draws some labels twice) comes out as the same line twice in a row: keep one.
+  const all = pages.flatMap(p => p.lines.filter((t, i) => i === 0 || t !== p.lines[i - 1]).map(text => ({ page: p.page, text })));
   const find = (re: RegExp, max = 6): Hit[] => { const out: Hit[] = []; for (const l of all) if (re.test(l.text)) { out.push({ page: l.page, text: clip(l.text) }); if (out.length >= max) break; } return out; };
 
   // Sheets
@@ -201,7 +210,7 @@ export function analyze(pagesIn: PageText[], totalPages = pagesIn.length): PlanC
       if (!id) { const lab = l.match(/^sheet(?: no\.?| number| #)?\s*:?\s*(.*)$/i);
         const cand = lab ? (lab[1] ? lab[1] : p.lines[i + 1] ?? '') : null;
         if (cand != null) { const m = cand.match(SHEET_ID); if (m) id = m[1].replace(/\s/g, '').toUpperCase(); } } });
-    if (!id) for (const l of p.lines) { const m = l.match(new RegExp('^' + SHEET_ID.source + '(\\s|$)')); if (m && l.length < 50 && !/\s\S/.test(l.slice(m[0].length - 1).trim())) { id = m[1].replace(/\s/g, '').toUpperCase(); break; } }
+    if (!id) for (const l of p.lines) { const m = l.match(new RegExp('^' + SHEET_ID.source + '(\\s|$)')); if (m && l.length < 50 && !/\s\S/.test(l.slice(m[0].length - 1).trim())) { const c = m[1].replace(/\s/g, '').toUpperCase(); if (hardwareCallout(c, p.lines)) continue; id = c; break; } }
     p.lines.forEach(l => {
       // r5plan-03: a sheet-index row ("A3.1 ELEVATIONS") names another sheet; it is not this sheet's own title.
       const row = l.match(new RegExp('^' + SHEET_ID.source + '\\s+\\S')); if (row && row[1].replace(/\s/g, '').toUpperCase() !== id) return;

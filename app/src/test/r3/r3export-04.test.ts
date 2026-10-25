@@ -8,8 +8,8 @@ import { PDFDocument } from 'pdf-lib';
 it('every sheet carries the preparer signature line and the address', async () => {
   const p = demoProject(); p.people.preparerName = 'Pat Drafter'; p.people.preparerRole = 'designer' as any;
   p.markup.pins = [{ id: 'a', n: 1, x: p.adu.footprint[0].x, y: p.adu.footprint[0].y, comment: 'x', status: 'open', author: 'r', at: '2026-10-20' }];
-  const bytes = await sheetsPDF(p, 'handoff'); const n = (await PDFDocument.load(bytes)).getPageCount(); expect(n).toBe(3);
+  const bytes = await sheetsPDF(p, 'handoff'); const n = (await PDFDocument.load(bytes)).getPageCount(); expect(n).toBe(4); // A-1, A-2, G-2, A-0 letter plot plan
   const pages = streams(bytes).map(s => runs(s).map(r => r.t).join('\n')).filter(t => t.length > 20);
-  expect(pages.length).toBe(3);
+  expect(pages.length).toBe(4);
   for (const t of pages) { expect(t).toMatch(/Signature of preparer: Pat Drafter/); expect(t).toContain('123 Example St'); }
 });

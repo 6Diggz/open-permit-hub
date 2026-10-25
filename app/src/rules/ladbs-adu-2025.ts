@@ -59,7 +59,7 @@ const ROWS: Row[] = [
   ['FM.12', 'Structural observation form.', 'Formulario de observación estructural.', false, 'doc', true],
   ['FM.13', 'Junior ADU affidavit (PC/STR/Aff.45).', 'Declaración de ADU junior (PC/STR/Aff.45).', false, 'na-garage'],
 
-  ['I.A.1', 'Dimensioned 8.5x11 plot plan, to scale, in ink, on the application.', 'Plano del lote acotado de 8.5x11, a escala, en tinta, en la solicitud.', true, 'ask'], // r4reach-04: the app makes 24x36 sheets only, so the owner or preparer confirms the 8.5x11 plot plan
+  ['I.A.1', 'Dimensioned 8.5x11 plot plan, to scale, in ink, on the application.', 'Plano del lote acotado de 8.5x11, a escala, en tinta, en la solicitud.', true, 'auto'], // r4reach-04 / r3market-06: the plan PDF now ends with a dimensioned 8.5x11 plot plan page at a printed standard scale
   ['I.A.2', 'Full legal description and grant deed copy; info for owner and team.', 'Descripción legal completa y copia de la escritura; datos del dueño y el equipo.', true, 'doc'],
   ['I.A.3', 'Separate permits for retaining walls, grading, pools, sprinklers, MEP, demo, etc.', 'Permisos separados para muros de contención, nivelación, piscinas, rociadores, MEP, demolición, etc.', true, 'ask'],
   ['I.A.4', 'Application signed by owner, contractor or agent (owner-builder rules apply).', 'Solicitud firmada por el dueño, contratista o agente (aplican reglas de dueño-constructor).', true, 'doc'],

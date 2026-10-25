@@ -6,3 +6,8 @@ it('skips .woff when the .woff2 twin ships, keeps the WASM', () => {
   expect(precache).not.toContain('./assets/ps-400-normal-SBbinRkI.woff');
   expect(precache).toEqual(expect.arrayContaining(['./assets/ps-400-normal-8Rpg0ruU.woff2', './assets/solo-700-normal-AbCdEfGh.woff', './assets/cleanfix_bg-C1234567.wasm']));
 });
+it('r3data-10: font subsets for scripts the app never shows are not precached; latin-ext (Spanish) and the WASM are', () => {
+  const { precache } = buildServiceWorker(['assets/public-sans-vietnamese-400-normal-TxZB8OSn.woff2', 'assets/x-cyrillic-400-normal-AbCdEfGh.woff2', 'assets/public-sans-latin-ext-400-normal-mk90oQqJ.woff2', 'assets/cleanfix_bg-C1234567.wasm', 'assets/cad.worker-Cf1Yw5xW.js'], '<html>');
+  expect(precache).not.toContain('./assets/public-sans-vietnamese-400-normal-TxZB8OSn.woff2'); expect(precache).not.toContain('./assets/x-cyrillic-400-normal-AbCdEfGh.woff2');
+  expect(precache).toEqual(expect.arrayContaining(['./assets/public-sans-latin-ext-400-normal-mk90oQqJ.woff2', './assets/cleanfix_bg-C1234567.wasm', './assets/cad.worker-Cf1Yw5xW.js']));
+});

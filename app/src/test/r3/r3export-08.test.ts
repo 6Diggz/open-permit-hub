@@ -11,5 +11,5 @@ it('README lists every sheet in site-plan.pdf and the open review notes', async 
   initCleanfix(); const p = demoProject();
   p.markup.pins = [{ id: 'a', n: 1, x: p.adu.footprint[0].x, y: p.adu.footprint[0].y, comment: 'Add window detail', status: 'open', author: 'r', at: '2026-10-20' }];
   const r = new TextDecoder().decode(unzipSync(await handoffZip(p, evaluate(p, RULES, PACK_ID, new Date('2026-10-24'))))['README.txt']);
-  expect(r).toContain('G-2'); expect(r).toContain('Add window detail');
-});
+  expect(r).toContain('G-2'); expect(r).toContain('Add window detail'); expect(r).toContain('A-0 Plot plan 8.5x11');
+}, 30000);

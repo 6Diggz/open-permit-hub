@@ -148,6 +148,13 @@ for (const width of [390, 1440]) {
     await page.selectOption('#tgt', 'cnc'); await page.getByRole('button', { name: 'Check what will be lost' }).click();
     const lostTable = page.getByRole('region', { name: 'What will be lost' }); await lostTable.waitFor({ timeout: 30000 });
     ok(await lostTable.getByRole('cell', { name: 'MText' }).isVisible(), `qa-10 OUT-18 loss report lists MText for R12 ${W}`);
+    // OUT2-13: each cleaning step shows before/after counts; switching one off is undoable.
+    const steps = page.getByRole('region', { name: 'Cleaning steps result' }); ok(await seen(steps, 30000) && await steps.getByRole('cell', { name: 'Unused layers' }).isVisible(), `OUT2-13 cleaning steps table with before/after ${W}`);
+    const undoBtn = page.getByRole('button', { name: 'Undo last change' }); ok(await undoBtn.isDisabled(), `OUT2-13 nothing to undo yet ${W}`);
+    await page.getByLabel(/Purge unused/).uncheck(); await page.waitForFunction(() => !document.querySelector('[role=status]'), null, { timeout: 30000 });
+    ok(!(await steps.getByRole('cell', { name: 'Unused layers' }).isVisible().catch(() => false)), `OUT2-13 purge switched off leaves the table ${W}`);
+    await undoBtn.click(); await page.waitForFunction(() => !document.querySelector('[role=status]'), null, { timeout: 30000 });
+    ok(await page.getByLabel(/Purge unused/).isChecked() && await steps.getByRole('cell', { name: 'Unused layers' }).isVisible(), `OUT2-13 undo brings purge back ${W}`);
     const save = page.getByRole('button', { name: 'Save clean copy' }); ok(await save.isDisabled(), `qa-10 saving with losses needs a tick ${W}`);
     await page.getByLabel('I understand these will not be in the copy.').check(); ok(await save.isEnabled(), `qa-10 tick enables save ${W}`);
     const pad = '999\n' + 'x'.repeat(3000) + '\n'; writeFileSync(join(tmp, 'cut.dxf'), `${pad}  0\nSECTION\n  2\nENTITIES\n  0\nENDSEC\n  0\nEOF\n`);
@@ -157,6 +164,18 @@ for (const width of [390, 1440]) {
     ok(blocked || errShown, `qa-09 an empty or cut-off drawing is flagged ${W}`);
     ok(await page.getByRole('button', { name: 'Save clean copy' }).isDisabled().catch(() => true), `qa-09 it can't be saved as an empty file ${W}`);
     ok(await page.locator('main#main').count() === 1, `qa-28 Clean and Fix has a main landmark ${W}`);
+    // qa-15 / appsec-16: a big file is read in a worker: the page keeps answering, and Cancel stops it.
+    if (width > 600) { const big = join(tmp, 'big.dxf'); let t = '  0\nSECTION\n  2\nENTITIES\n'; const parts = [t];
+      for (let i = 0; i < 300000; i++) parts.push(`  0\nLINE\n  8\n0\n 10\n${i}\n 20\n0\n 30\n0\n 11\n${i}\n 21\n5\n 31\n0\n`); parts.push('  0\nENDSEC\n  0\nEOF\n'); writeFileSync(big, parts.join(''));
+      await page.locator('input[type=file][accept^=".dwg,.dxf"]').setInputFiles(big); await page.getByRole('button', { name: 'Cancel' }).waitFor({ timeout: 10000 });
+      const t0 = Date.now(); await page.evaluate(() => new Promise(r => requestAnimationFrame(() => r(1)))); const lag = Date.now() - t0;
+      ok(lag < 1000, `qa-15 the page keeps answering while a big file is read (${lag} ms)`);
+      await page.getByRole('button', { name: 'Cancel' }).click(); ok(await seen(page.getByText(/Stopped\. Nothing was changed\./), 5000), 'appsec-16 Cancel stops the CAD job');
+      // OUT2-13 batch: several files make one ZIP with a report.
+      await page.locator('input[type=file][accept^=".dwg,.dxf"]').setInputFiles([FIXTURE, resolve(here, '../../qa/e2e/fixtures/sample.dxf')]);
+      await page.getByRole('heading', { name: 'Clean 2 files' }).waitFor({ timeout: 10000 }); await page.getByLabel(/Also save copies that lose objects/).check();
+      const [zip] = await Promise.all([page.waitForEvent('download', { timeout: 120000 }), page.getByRole('button', { name: 'Clean all and save a ZIP' }).click()]).catch(() => [null]);
+      ok(!!zip && /\.zip$/.test(zip.suggestedFilename()), 'OUT2-13 batch mode saves one ZIP'); }
     await c.close(); }
 }
 

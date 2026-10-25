@@ -199,8 +199,8 @@ describe('outputs with rooms and markup', () => {
   const full = () => { const p = demoProject(); const r = room(p, 'Bedroom', 'sleeping', inch(4), inch(4), ft(10), ft(10)); r.openings.push(win(3), door(1)); p.adu.rooms = [r];
     p.markup.pins.push({ id: uid(), n: 1, x: ft(35), y: ft(115), comment: 'Check eave', status: 'open', author: 'Ana', at: '2026-10-24' }); p.site.zone = 'R1-1'; return p; };
   it('PDF: A-2 draws rooms and the markup sheet is added', async () => {
-    const d = await PDFDocument.load(await sheetsPDF(full(), 'draft')); expect(d.getPageCount()).toBe(3);
-    expect((await PDFDocument.load(await sheetsPDF(demoProject(), 'draft'))).getPageCount()).toBe(2);
+    const d = await PDFDocument.load(await sheetsPDF(full(), 'draft')); expect(d.getPageCount()).toBe(4); // + A-0 letter plot plan (r3market-06)
+    expect((await PDFDocument.load(await sheetsPDF(demoProject(), 'draft'))).getPageCount()).toBe(3);
   });
   it('DXF: rooms, doors, windows and review notes on their own layers (2018 and R12)', async () => {
     const p = full(); const spec = sitePlanSpec(p);

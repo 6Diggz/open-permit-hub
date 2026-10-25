@@ -20,7 +20,7 @@ describe('outputs', () => {
     const s = await PDFDocument.load(await sheetsPDF(p, 'draft')); expect(s.getPage(0).getSize()).toEqual({ width: 2592, height: 1728 });
     const r = await PDFDocument.load(await reportPDF(p, rep, 'es')); expect(r.getPageCount()).toBeGreaterThan(0);
   });
-  it('handoff zip has all files', async () => { const z = unzipSync(await handoffZip(p, rep)); expect(Object.keys(z).sort()).toEqual(['README.txt', 'THIRD_PARTY_NOTICES.txt', 'check-report-en.html', 'check-report-en.pdf', 'check-report-es.html', 'check-report-es.pdf', 'materials.csv', 'project.permitpack', 'site-plan.dxf', 'site-plan.pdf']); });
+  it('handoff zip has all files', async () => { const z = unzipSync(await handoffZip(p, rep)); expect(Object.keys(z).sort()).toEqual(['README.txt', 'THIRD_PARTY_NOTICES.txt', 'check-report-en.html', 'check-report-en.pdf', 'check-report-es.html', 'check-report-es.pdf', 'materials.csv', 'project.permitpack', 'site-plan.dxf', 'site-plan.pdf']); }, 30000);
   it('handoff README shows the sheet score', async () => { const z = unzipSync(await handoffZip(p, rep)); expect(new TextDecoder().decode(z['README.txt'])).toMatch(/\d+ of \d+ LADBS correction-sheet items are done/); });
   it('takeoff is sane for a 20x20 garage', () => { const t = takeoff(p); const dw = t[0].qty; expect(dw).toBeGreaterThan(20); expect(dw).toBeLessThan(45); });
   it('ics has stable UID and 18-month plan check', () => { const i = deadlinesICS(p, '2026-11-01'); expect(i).toContain(`UID:${p.id}-plancheck`); expect(i).toContain('DTSTART;VALUE=DATE:20280501'); });
@@ -65,7 +65,7 @@ describe('round 1 outputs', () => {
     expect(new TextDecoder().decode(z['README.txt'])).toContain(PACK_ID);
   });
   it('parity-03 report labels rule checks and sheet items separately', async () => { const t = pdfText(await reportPDF(p, rep, 'en')); expect(t).toContain('Rule checks:'); expect(t).toContain('LADBS sheet items:'); });
-  it('parity-09 sheet set has an A-2 floor plan data sheet with the window schedule', async () => { const d = await PDFDocument.load(await sheetsPDF(p, 'draft')); expect(d.getPageCount()).toBe(2); const t = pdfText(await sheetsPDF(p, 'draft')); expect(t).toContain('WINDOW SCHEDULE'); expect(t).toContain('EGRESS'); });
+  it('parity-09 sheet set has an A-2 floor plan data sheet with the window schedule', async () => { const d = await PDFDocument.load(await sheetsPDF(p, 'draft')); expect(d.getPageCount()).toBe(3) /* A-1, A-2, A-0 letter plot plan */; const t = pdfText(await sheetsPDF(p, 'draft')); expect(t).toContain('WINDOW SCHEDULE'); expect(t).toContain('EGRESS'); });
   it('parity-10 site plan labels the street and the building separation', async () => {
     const q = { ...p, site: { ...p.site, address: '1234 W 52nd St, Los Angeles' } }; const t = pdfText(await sheetsPDF(q, 'draft'));
     expect(t).toContain('STREET: W 52ND ST'); expect(t).toContain('BUILDING SEPARATION');
