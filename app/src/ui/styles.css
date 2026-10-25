@@ -73,6 +73,12 @@ button { cursor: pointer; }
 .mods label { display: flex; gap: 10px; align-items: center; }
 table.take { border-collapse: collapse; width: 100%; font-size: .9rem; } table.take td, table.take th { border-bottom: 1px solid var(--rule); padding: 6px 4px; text-align: left; } table.take td.q { text-align: right; font-variant-numeric: tabular-nums; }
 .sr { position: absolute; width: 1px; height: 1px; overflow: hidden; clip: rect(0 0 0 0); }
+/* OUT-09 (WCAG 2.4.1 / 2.4.7): the skip link shows itself when it has keyboard focus. */
+a.sr:focus { position: fixed; top: 8px; left: 8px; width: auto; height: auto; overflow: visible; clip: auto; z-index: 1000; padding: 10px 14px; background: var(--sheet); color: var(--ink); border-radius: var(--r-sm); }
+/* OUT-09 (2.4.7): Chromium does not match :focus-visible on a date field whose inner part has focus. */
+input[type="date"]:focus, input[type="date"]:focus-within, input[type="datetime-local"]:focus, input[type="datetime-local"]:focus-within { outline: 3px solid var(--focus); outline-offset: 2px; }
+/* OUT-09 (2.5.8): "Sources" and other disclosure toggles are at least 24 px tall. */
+summary { min-height: 24px; display: list-item; padding: 2px 0; cursor: pointer; }
 @media (max-width: 1100px) { .app { grid-template-columns: 1fr; } .rail { flex-direction: row; overflow-x: auto; padding: 10px 16px; border-right: 0; border-bottom: 1px solid var(--rule); } .brand-sub, .rail-foot { display: none; } .brand { margin: 0 12px 0 0; align-self: center; white-space: nowrap; } .side { max-height: none; position: static; border-left: 0; } .drawing { height: 46vh; margin: 12px 16px 0; } .form { padding: 16px; } }
 @media (prefers-reduced-motion: reduce) { * { transition: none !important; animation: none !important; } }
 

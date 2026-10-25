@@ -8,8 +8,8 @@ import { L } from './lang';
 let testFetch: FetchLike | undefined;
 export const setParcelFetch = (f: FetchLike | undefined) => { testFetch = f; };
 
-const NAMES: Record<MapField, string> = { lot: 'lot lines and size', apn: 'APN', zone: 'zone', jurisdiction: 'city', hillside: 'Hillside Area', vhfhsz: 'fire zone', coastal: 'Coastal Zone', hpoz: 'historic district', house: 'house outline', garage: 'garage outline', burn: '2025 burn area' };
-const LAYER: Record<string, string> = { parcel: 'parcel shape', city: 'city boundary', adjacent: 'nearby cities', zoning: 'zoning', hillside: 'Hillside Area', vhfhsz: 'fire zone', hpoz: 'historic district', coastalDual: 'Coastal Zone', coastalSingle: 'Coastal Zone', coastalCommission: 'Coastal Zone', zoning1a: 'Downtown zoning', palisades: '2025 burn area', buildings: 'house and garage outlines' };
+const NAMES: Record<MapField, string> = { lot: 'lot lines and size', apn: 'APN', zone: 'zone', jurisdiction: 'city', hillside: 'Hillside Area', vhfhsz: 'fire zone', coastal: 'Coastal Zone', hpoz: 'historic district', house: 'house outline', garage: 'garage outline', burn: '2025 burn area', transit: 'half-mile transit (AB 2097)' };
+const LAYER: Record<string, string> = { hqta: 'transit map (LA County)', tpa: 'transit map (SCAG)', parcel: 'parcel shape', city: 'city boundary', adjacent: 'nearby cities', zoning: 'zoning', hillside: 'Hillside Area', vhfhsz: 'fire zone', hpoz: 'historic district', coastalDual: 'Coastal Zone', coastalSingle: 'Coastal Zone', coastalCommission: 'Coastal Zone', zoning1a: 'Downtown zoning', palisades: '2025 burn area', buildings: 'house and garage outlines' };
 const ERR: Record<ParcelError, string> = {
   offline: "You're offline. Enter the lot by hand below, or look it up when you're connected.",
   empty: 'Enter the street address with the house number first.',
@@ -22,7 +22,7 @@ const ERR: Record<ParcelError, string> = {
   'no-parcel': 'The street was found but not this exact parcel. Enter the lot by hand below.',
 };
 
-type St = { k: 'idle' } | { k: 'loading' } | { k: 'error'; e: ParcelError; near?: string; inCity?: boolean } | { k: 'done'; filled: string[]; matched: string; failed: string[]; multi: boolean; outside: string | null; condo: boolean; ch1a: boolean; split: boolean; noExact: boolean };
+type St = { k: 'idle' } | { k: 'loading' } | { k: 'error'; e: ParcelError; near?: string; inCity?: boolean } | { k: 'done'; filled: string[]; matched: string; failed: string[]; multi: boolean; outside: string | null; condo: boolean; ch1a: boolean; split: boolean; noExact: boolean; near: boolean };
 
 /** Opt-in parcel autofill. The address leaves the device only when the user taps "Look up", and the screen says so before. */
 export function ParcelLookup({ p, commit }: { p: Project; commit: (next: Project) => void }) {
@@ -44,13 +44,13 @@ export function ParcelLookup({ p, commit }: { p: Project; commit: (next: Project
       const yn = (v: string) => (v === 'yes' ? L('yes') : L('no'));
       const said: Record<MapField, string> = { lot: L(NAMES.lot), apn: `${L(NAMES.apn)} ${next.site.apn}`, zone: `${L(NAMES.zone)} ${next.site.zone}`, jurisdiction: `${L(NAMES.jurisdiction)}: ${r.fill.jurisdiction === 'la-city' ? 'Los Angeles' : r.fill.cityName || L('outside LA')}`,
         hillside: `${L(NAMES.hillside)}: ${yn(next.site.flags.hillside)}`, vhfhsz: `${L(NAMES.vhfhsz)}: ${yn(next.site.flags.vhfhsz)}`, coastal: `${L(NAMES.coastal)}: ${yn(next.site.flags.coastal)}`, hpoz: `${L(NAMES.hpoz)}: ${yn(next.site.flags.hpoz)}`,
-        house: L(NAMES.house), garage: L(NAMES.garage), burn: `${L(NAMES.burn)}: ${yn(next.site.flags.fireRebuild)}` };
-      setSt({ k: 'done', filled: filled.map(f => said[f]), matched: r.fill.matched, failed: [...new Set(r.fill.failed.map(f => L(LAYER[f] ?? f)))], multi: r.fill.multiPiece, outside, condo: !!r.fill.condo, ch1a: !!r.fill.chapter1a, split: !!r.fill.splitZone, noExact: !!r.fill.noExactParcel });
+        house: L(NAMES.house), garage: L(NAMES.garage), burn: `${L(NAMES.burn)}: ${yn(next.site.flags.fireRebuild)}`, transit: `${L(NAMES.transit)}: ${L('no')}` };
+      setSt({ k: 'done', filled: filled.map(f => said[f]), matched: r.fill.matched, failed: [...new Set(r.fill.failed.map(f => L(LAYER[f] ?? f)))], multi: r.fill.multiPiece, outside, condo: !!r.fill.condo, ch1a: !!r.fill.chapter1a, split: !!r.fill.splitZone, noExact: !!r.fill.noExactParcel, near: r.fill.transit === 'near' && p.site.flags.transitHalfMile === 'unknown' });
     } catch (e) { if ((e as Error)?.name === 'AbortError') { setSt({ k: 'idle' }); return; } setSt({ k: 'error', e: navigator.onLine ? 'network' : 'offline' }); }
   };
   return <div className="field" role="group" aria-labelledby="pl-h">
     <label id="pl-h">{L('Fill in from the city parcel map (optional)')}</label>
-    <span className="help" id="pl-priv">{L('Only the street address is sent, to the City of Los Angeles map services (maps.lacity.org and zimas.lacity.org), and only when you tap "Look up". Nothing else leaves this device.')}</span>
+    <span className="help" id="pl-priv">{L('Only when you tap "Look up": the street address is sent to the City of Los Angeles map services (maps.lacity.org and zimas.lacity.org), and the lot\'s map outline (no address) to the LA County and SCAG transit maps (services.arcgis.com and rdp.scag.ca.gov). Nothing else leaves this device.')}</span>
     <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap' }}>
       <button type="button" className="btn" aria-describedby="pl-priv" disabled={st.k === 'loading' || !p.site.address.trim()} onClick={run}>{st.k === 'loading' ? L('Looking up...') : L('Look up')}</button>
       {st.k === 'loading' && <button type="button" className="btn quiet" onClick={() => ctl.current?.abort()}>{L('Cancel')}</button>}
@@ -66,6 +66,7 @@ export function ParcelLookup({ p, commit }: { p: Project; commit: (next: Project
         {st.condo && <> {L('This is a condo or multi-unit parcel, so no APN or lot shape was filled. Use the APN on your own property tax bill, and ask the HOA about the lot.')}</>}
         {st.ch1a && <> {L('This lot uses the new Downtown zoning (Chapter 1A). The rules in this tool may not cover it: check with City Planning.')}</>}
         {st.split && <> {L('This lot touches more than one zone. Check ZIMAS to see which part the garage is in.')}</>}
+        {st.near && <> {L('The lot is within a half mile, in a straight line, of a major transit stop or frequent bus corridor on the LA County or SCAG transit map. The rule counts walking distance, so check the walk before answering the transit question.')}</>}
         {st.multi && <> {L('This parcel is mapped as more than one piece, so the lot shape was not drawn. Enter the lot size by hand.')}</>}
       </>}
     </div>

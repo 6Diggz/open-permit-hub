@@ -5,14 +5,29 @@ import type { Project } from './model';
 import type { Report } from '../rules/engine';
 import { readiness } from '../rules/readiness';
 import { RULE_ITEMS } from '../rules/ladbs-adu-2025';
+import { withRooms } from './rooms';
+import { fmtFtIn, isNum, SQMM_PER_SQFT } from './units';
 
 export type InspStatus = 'pass' | 'fail' | 'na';
 export interface InspResult { s: InspStatus | null; note: string; /** Photo id (the photo itself is kept on this device, not in the project). */ photo: string | null; at: string; /** r6ux-04: why a Pass/N/A overrides a failing app check (own field, cleared when the result changes). */ reason?: string }
-export interface Inspection { inspector: string; date: string; general: string; items: Record<string, InspResult>; /** Schema version (r8-03): 2 = override reason kept in its own field. Absent = written before r8. */ v?: number }
+export interface Inspection { inspector: string; date: string; general: string; items: Record<string, InspResult>; /** Schema version (r8-03): 2 = override reason kept in its own field. Absent = written before r8. */ v?: number;
+  /** r5field-09: ties the record to a permit. Permit number as on the permit card; inspection stage and type; the time zone the item times were taken in (IANA name). */
+  permit?: string; stage?: InspStage | ''; kind?: InspKind | ''; tz?: string }
+/** r5field-09: inspection type (trade), as on a city inspection request. */
+export type InspKind = 'building' | 'electrical' | 'plumbing' | 'mechanical' | 'combo';
+export const INSP_KINDS: Record<InspKind, { en: string; es: string }> = { building: { en: 'Building', es: 'Edificación' }, electrical: { en: 'Electrical', es: 'Eléctrica' }, plumbing: { en: 'Plumbing', es: 'Plomería' }, mechanical: { en: 'Mechanical', es: 'Mecánica' }, combo: { en: 'Combination (several trades)', es: 'Combinada (varios oficios)' } };
 /** r8-03: bump when a one-time migration is added to sanitizeInspection. */
 export const INSP_SCHEMA = 2;
 /** Inspection stage, in the order of the city's inspection card (r5field-01). */
 export type InspStage = 'foundation' | 'frame' | 'insulation' | 'drywall' | 'final';
+export const INSP_STAGES: Record<InspStage, { en: string; es: string }> = { foundation: { en: 'Foundation', es: 'Cimentación' }, frame: { en: 'Frame', es: 'Estructura' }, insulation: { en: 'Insulation', es: 'Aislamiento' }, drywall: { en: 'Drywall', es: 'Panel de yeso' }, final: { en: 'Final', es: 'Final' } };
+/** The device's time zone (IANA name), or '' when the browser does not say. */
+export const deviceTz = () => { try { return Intl.DateTimeFormat().resolvedOptions().timeZone || ''; } catch { return ''; } };
+/** "PDT" / "UTC-7" style label for a local "YYYY-MM-DDTHH:MM" time taken in `tz` (falls back to the IANA name). */
+export function tzLabel(at: string, tz: string): string {
+  if (!tz) return '';
+  try { const d = new Date(at.length >= 16 ? at.slice(0, 16) + ':00Z' : Date.now()); const parts = new Intl.DateTimeFormat('en-US', { timeZone: tz, timeZoneName: 'short' }).formatToParts(d); return parts.find(x => x.type === 'timeZoneName')?.value || tz; } catch { return tz; }
+}
 export interface InspItem { id: string; group: 'site' | 'structure' | 'fire' | 'egress' | 'rooms' | 'systems'; en: string; es: string; sheet: string[]; code: string; stage: InspStage }
 
 export const INSP_ITEMS: InspItem[] = [
@@ -82,7 +97,9 @@ export function sanitizeInspection(raw: unknown): Inspection | undefined {
     if (legacy && (v.s === 'pass' || v.s === 'na') && !(typeof v.reason === 'string' && v.reason.trim()) && typeof v.note === 'string') { const m = v.note.match(/(?:^|\n)(?:Reason for Pass|Motivo de Cumple):\s*([^\n]+)\s*$/);
       if (m) v = { ...v, reason: m[1], note: v.note.slice(0, m.index).trim() }; }
     items[x.id] = { s: v.s === 'pass' || v.s === 'fail' || v.s === 'na' ? v.s : null, note: str(v.note, MAX_NOTE), photo: typeof v.photo === 'string' && PHOTO_ID.test(v.photo) ? v.photo : null, at: str(v.at, 40), ...(typeof v.reason === 'string' && v.reason.trim() ? { reason: str(v.reason, 300) } : {}) }; }
-  return { inspector: str(r.inspector, 80), date: /^\d{4}-\d{2}-\d{2}$/.test(r.date) ? r.date : today(), general: str(r.general, MAX_NOTE * 2), items, v: INSP_SCHEMA };
+  const permit = str(r.permit, 40).replace(/[^A-Za-z0-9 ./-]/g, ''); const stage = typeof r.stage === 'string' && r.stage in INSP_STAGES ? r.stage as InspStage : ''; const kind = typeof r.kind === 'string' && r.kind in INSP_KINDS ? r.kind as InspKind : '';
+  const tz = typeof r.tz === 'string' && /^[A-Za-z0-9_+\-/]{1,64}$/.test(r.tz) ? r.tz : '';
+  return { inspector: str(r.inspector, 80), date: /^\d{4}-\d{2}-\d{2}$/.test(r.date) ? r.date : today(), general: str(r.general, MAX_NOTE * 2), items, v: INSP_SCHEMA, ...(permit ? { permit } : {}), ...(stage ? { stage } : {}), ...(kind ? { kind } : {}), ...(tz ? { tz } : {}) };
 }
 const DATA_JPEG = /^data:image\/jpeg;base64,[A-Za-z0-9+/]+={0,2}$/;
 /** Photos carried in a .permitpack: only for photo ids the inspection uses, JPEG only, size-capped. */
@@ -123,3 +140,43 @@ export function appFails(p: Project, rep: Report, itemId: string, lang: 'en' | '
   return [...new Set(rep.results.filter(r => r.status === 'FAIL' && !r.dismissed && (RULE_ITEMS_OF(r.rule.id).some(id => x.sheet.includes(id)))).map(r => r.msg[lang]))];
 }
 const RULE_ITEMS_OF = (id: string): string[] => RULE_ITEMS[id] ?? [];
+
+/**
+ * r5field-11: what the project already says about each field item, so the inspector checks against the plan instead of
+ * "as shown". Numbers come from the project; other lines are the app's own non-failing check messages for the same sheet items
+ * (failing ones are shown separately). `na` = the project says the item likely does not apply (the inspector still decides).
+ */
+export function planHints(p: Project, rep: Report, lang: 'en' | 'es'): Map<string, { text: string[]; na: boolean }> {
+  const es = lang === 'es'; const out = new Map<string, { text: string[]; na: boolean }>();
+  const add = (id: string, t: string, na = false) => { const o = out.get(id) ?? { text: [], na: false }; if (t && !o.text.includes(t)) o.text.push(t); o.na ||= na; out.set(id, o); };
+  const w = withRooms(p); const a = w.adu;
+  const resOf = (rid: string) => rep.results.find(r => r.rule.id === rid && !r.dismissed);
+  // Numbers the project holds.
+  if (p.site.address) add('addr', `${es ? 'Dirección' : 'Address'}: ${p.site.address}`);
+  const sleepWins = a.windows.filter(x => x.sleeping);
+  for (const x of sleepWins) { const cw = x.clearWidthMm, ch = x.clearHeightMm; const area = isNum(cw) && isNum(ch) ? (cw * ch) / SQMM_PER_SQFT : null;
+    add('egress', `${x.room}: ${isNum(cw) ? fmtIn(cw) : '?'} x ${isNum(ch) ? fmtIn(ch) : '?'} ${es ? 'libre' : 'clear'}${area != null ? ` (${area.toFixed(1)} ${es ? 'pies²' : 'sq ft'})` : ''}, ${es ? 'antepecho' : 'sill'} ${isNum(x.sillMm) ? fmtIn(x.sillMm) : '?'}`); }
+  if (!sleepWins.length) add('egress', es ? 'El proyecto no tiene ventanas de escape registradas.' : 'The project has no escape windows entered.');
+  const ceil = isNum(a.ceilingHeightMm) ? a.ceilingHeightMm : null; if (ceil != null) add('ceiling', `${es ? 'Techo' : 'Ceiling'}: ${fmtFtIn(ceil)}`);
+  for (const r of a.rooms) if (isNum(r.ceilingMm) && r.ceilingMm > 0) add('ceiling', `${r.name || (es ? 'Cuarto' : 'Room')}: ${fmtFtIn(r.ceilingMm)}`);
+  if (isNum(a.eaveDepthMm)) add('eave', `${es ? 'Alero' : 'Eave'}: ${fmtFtIn(a.eaveDepthMm)}`);
+  add('smoke', es ? `${a.bedrooms} recámara(s): una alarma en cada una, una afuera de las recámaras y una por piso.` : `${a.bedrooms} bedroom${a.bedrooms === 1 ? '' : 's'}: an alarm in each, one outside the bedrooms, one per story.`);
+  if (a.smokeHardwired === 'yes') add('smoke', es ? 'El proyecto dice: cableadas.' : 'The project says: hardwired.');
+  if (isNum(a.panelAmps)) add('elec', `${es ? 'Tablero' : 'Panel'}: ${a.panelAmps} A`);
+  if (a.slabVaporBarrier === 'yes') add('slab', es ? 'El proyecto dice: barrera de vapor o epóxico planeado.' : 'The project says: vapor retarder or epoxy planned.');
+  if (a.removesGarageDoorWall === 'yes') { add('frame', es ? 'El proyecto dice: se quita o cambia el muro de la puerta del garaje.' : 'The project says: the garage door wall is removed or changed.'); add('infill', es ? 'El proyecto dice: se rellena la abertura de la puerta del garaje.' : 'The project says: the garage door opening is filled in.'); }
+  else if (a.removesGarageDoorWall === 'no') { add('infill', es ? 'El proyecto dice: la puerta del garaje no se quita.' : 'The project says: the garage door stays.', true); }
+  // Sprinklers: required or not, from the project (sheet III-E.4, Gov. Code §66314(d)(12)).
+  const ps = p.site.flags.primarySprinklered;
+  if (ps === 'yes') add('sprk', es ? 'Requeridos: la casa principal tiene rociadores (hoja III-E.4).' : 'Required: the main house has sprinklers (sheet III-E.4).');
+  else if (ps === 'no') add('sprk', a.sprinklered === 'yes' ? (es ? 'No requeridos (la casa no tiene), pero el proyecto los planea.' : 'Not required (the main house has none), but the project plans them.') : (es ? 'No requeridos: la casa principal no tiene rociadores.' : 'Not required: the main house has no sprinklers.'), a.sprinklered !== 'yes');
+  else add('sprk', es ? 'No se sabe si la casa principal tiene rociadores.' : 'Not known whether the main house has sprinklers.');
+  if (a.allElectric === 'yes') { add('gas', es ? 'El proyecto dice: todo eléctrico, sin gas.' : 'The project says: all-electric, no gas.', true); add('gastest', es ? 'El proyecto dice: todo eléctrico, sin gas.' : 'The project says: all-electric, no gas.', true); }
+  // The app's own non-failing checks for the same sheet items (pass and info lines carry the measured numbers).
+  for (const x of INSP_ITEMS) for (const r of rep.results) { if (r.dismissed || r.status === 'FAIL' || r.status === 'NOT_CHECKED') continue;
+    if ((RULE_ITEMS[r.rule.id] ?? []).some(id => x.sheet.includes(id))) add(x.id, r.msg[lang]); }
+  // Walls 5 ft or more from every line: the 1-hour wall item likely does not apply.
+  const f1 = resOf('FIR-01'); if (f1?.status === 'PASS' && /No rated wall needed|No se necesita/.test(f1.msg.en + f1.msg.es)) { const o = out.get('firewall'); if (o) o.na = true; }
+  return out;
+}
+const fmtIn = (mm: number) => `${Math.round((mm / 25.4) * 4) / 4}"`;

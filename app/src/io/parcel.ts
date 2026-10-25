@@ -7,7 +7,11 @@ const MAX_LEN_MM = 5000 * 304.8;
 
 const LAHUB = 'https://maps.lacity.org/lahub/rest/services';
 const ZIMAS = 'https://zimas.lacity.org/arcgis/rest/services';
+/** r3market-03: two regional transit maps (the lot outline is sent, never the address). CORS checked with curl on 2026-10-25. */
+const HQTA = 'https://services.arcgis.com/RmCCgQtiZLDCtblq/ArcGIS/rest/services/High_Quality_Transit_Area_HalfMile_Buffer/FeatureServer/21';
+const SCAG_TPA = 'https://rdp.scag.ca.gov/hosting/rest/services/Hosted/TPA_DMB_Mar2026/FeatureServer/1';
 export const PARCEL_HOSTS = ['https://maps.lacity.org', 'https://zimas.lacity.org'];
+export const TRANSIT_HOSTS = ['https://services.arcgis.com', 'https://rdp.scag.ca.gov'];
 
 /** One entry per question we ask the city's maps. `layer` is an ArcGIS REST layer queried with the lot's point. */
 export const PARCEL_SOURCES = {
@@ -24,6 +28,10 @@ export const PARCEL_SOURCES = {
   coastalSingle: { name: 'Coastal Zone, single permit area (ZIMAS)', url: `${ZIMAS}/zma/coastal_zones/MapServer/1604` },
   coastalCommission: { name: 'Coastal Commission permit area (ZIMAS)', url: `${ZIMAS}/zma/coastal_zones/MapServer/1605` },
   palisades: { name: 'Palisades Fire perimeter, 2025 (GeoHub WildfireRecovery)', url: `${LAHUB}/WildfireRecovery/MapServer/0` },
+  // r3market-03 (AB 2097 / Gov. Code §66321(b)(4)(B)): straight-line half-mile areas. Outside both = not within a half-mile walk.
+  // Inside is NOT a yes: a walk is longer than a straight line, so the user still checks the walking distance.
+  hqta: { name: 'High Quality Transit Area, half-mile buffer (LA County Planning)', url: HQTA },
+  tpa: { name: 'Transit Priority Areas, existing and planned major transit stops (SCAG Connect SoCal 2024)', url: SCAG_TPA },
   buildings: { name: 'Building outlines, LARIAC 2023 (ZIMAS)', url: `${ZIMAS}/zma/bldgoutlines/MapServer/163` },
 } as const;
 export type SourceKey = keyof typeof PARCEL_SOURCES;
@@ -57,6 +65,8 @@ export interface ParcelFill {
   buildings?: Poly[];
   /** Inside the 2025 Palisades Fire perimeter (Eaton is in the county, outside LA City). */
   palisades?: Tri3;
+  /** r3market-03: 'no' when the lot is outside both half-mile transit maps; 'near' when it is inside one (walk not checked); 'unknown' when a map did not answer. */
+  transit?: 'no' | 'near' | 'unknown';
 }
 export type ParcelError = 'offline' | 'empty' | 'not-found' | 'zip-mismatch' | 'direction-mismatch' | 'suffix-mismatch' | 'city-mismatch' | 'network' | 'no-parcel';
 export type ParcelOutcome = { ok: true; fill: ParcelFill } | { ok: false; error: ParcelError; detail?: string };
@@ -321,9 +331,10 @@ export async function lookupParcel(address: string, opts: LookupOpts = {}): Prom
   // Polygon first; if that request fails, the one-point question still answers (never worse than before).
   const ask = async (k: SourceKey, geom = false): Promise<Feat[] | null> => { try { return await one(k, geom, true); } catch (e) { if (isAbort(e)) throw e;
     if (area && (e as Error)?.message !== 'timeout') { try { return await one(k, geom, false); } catch (e2) { if (isAbort(e2)) throw e2; } } failed.push(k); return null; } };
-  const [city, adjacent, zoning, zoning1a, hillside, vhfhsz, hpoz, cd, cs, cc, pal, blds] = await Promise.all([
+  const [city, adjacent, zoning, zoning1a, hillside, vhfhsz, hpoz, cd, cs, cc, pal, blds, hq, tpa] = await Promise.all([
     ask('city'), ask('adjacent'), ask('zoning'), ask('zoning1a'), ask('hillside'), ask('vhfhsz'), ask('hpoz'), ask('coastalDual'), ask('coastalSingle'), ask('coastalCommission'), ask('palisades'),
-    frame ? ask('buildings', true) : Promise.resolve(null)]);
+    frame ? ask('buildings', true) : Promise.resolve(null), onLot ? ask('hqta') : Promise.resolve(null), onLot ? ask('tpa') : Promise.resolve(null)]);
+  const transit = !onLot || hq == null || tpa == null ? 'unknown' : hq.length || tpa.length ? 'near' : 'no';
   // Overlays are only trusted at a point inside the lot (a street centerline can sit on a zone edge).
   const tri = (f: Feat[] | null): Tri3 => (f == null || !onLot ? 'unknown' : f.length ? 'yes' : 'no');
   const coastal: Tri3 = !onLot ? 'unknown' : [cd, cs, cc].some(f => f && f.length) ? 'yes' : [cd, cs, cc].every(f => f != null) ? 'no' : 'unknown';
@@ -355,6 +366,6 @@ export async function lookupParcel(address: string, opts: LookupOpts = {}): Prom
     apn: condo ? '' : fmtApn(attr.BPP ?? '').slice(0, 40), zone: zl.map(z => z.slice(0, 40)).join(" / ").slice(0, 64), jurisdiction, cityName: (inCity ? 'Los Angeles' : county ? 'Unincorporated LA County' : otherCity).slice(0, 60),
     flags: { hillside: tri(hillside), vhfhsz: tri(vhfhsz), coastal, hpoz: tri(hpoz) }, failed: fin, zimasPin: String(attr.PIND ?? '').slice(0, 40), multiPiece,
     northDeg: frame && lot ? frame.northDeg : null, condo, chapter1a, splitZone: zl.length > 1, noExactParcel, noParcelMatch,
-    buildings: bl.map(b2 => b2.poly), palisades: tri(pal),
+    buildings: bl.map(b2 => b2.poly), palisades: tri(pal), transit,
   } };
 }

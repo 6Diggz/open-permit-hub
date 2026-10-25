@@ -6,6 +6,7 @@ import { createServer } from 'node:http';
 import { readFileSync, existsSync, statSync, readdirSync, mkdirSync, mkdtempSync } from 'node:fs';
 import { join, extname, resolve } from 'node:path';
 import { tmpdir } from 'node:os';
+import { execFileSync } from 'node:child_process';
 
 const here = new URL('.', import.meta.url).pathname; const DIST = resolve(here, '../dist'); const FIX = resolve(here, '../src/test/fixtures/parcel');
 const SHOTS = process.env.SHOTS; if (SHOTS) mkdirSync(SHOTS, { recursive: true });
@@ -24,7 +25,7 @@ const ctx = (w, extra = {}) => browser.newContext({ viewport: { width: w, height
 /** Serve the city map hosts from fixtures. `mode` = 'ok' | 'fail'. Records every request so the opt-in can be checked. */
 async function cityMap(page, mode = 'ok') {
   const seen = [];
-  await page.route(/https:\/\/(maps|zimas)\.lacity\.org\/.*/, route => { const u = route.request().url(); seen.push(u);
+  await page.route(/https:\/\/((maps|zimas)\.lacity\.org|services\.arcgis\.com|rdp\.scag\.ca\.gov)\/.*/, route => { const u = route.request().url(); seen.push(u);
     if (mode === 'fail') return route.fulfill({ status: 503, headers: { 'access-control-allow-origin': '*' }, body: 'down' });
     const hit = byNorm.get(norm(u)); return route.fulfill({ status: hit ? hit.status : 404, headers: { 'access-control-allow-origin': '*', 'content-type': 'application/json' }, body: JSON.stringify(hit ? hit.body : { error: { code: 404 } }) }); });
   return seen;
@@ -35,7 +36,7 @@ const step = async (page, k) => { await page.evaluate(k => { location.hash = '#s
 const shot = async (page, name) => { if (SHOTS) await page.screenshot({ path: join(SHOTS, name), fullPage: false }); };
 const fullShot = async (page, name) => { if (SHOTS) await page.screenshot({ path: join(SHOTS, name), fullPage: true }); };
 
-for (const width of [390, 1440]) {
+for (const width of process.env.ONLY_STORAGE ? [] : [390, 1440]) {
   const W = `@${width}`;
   // FEATURE 1: parcel autofill
   { const c = await ctx(width); const page = await c.newPage(); const seen = await cityMap(page);
@@ -43,14 +44,14 @@ for (const width of [390, 1440]) {
     ok(await page.getByRole('button', { name: 'Look up' }).isDisabled(), `parcel: Look up is off until an address is typed ${W}`);
     await page.fill('#addr', '4305 Edenhurst Ave, Los Angeles, CA 90039'); await page.waitForTimeout(300);
     ok(seen.length === 0, `parcel: nothing is sent before tapping Look up ${W}`, String(seen.length));
-    ok(await page.getByText('Only the street address is sent').isVisible(), `parcel: the screen says what leaves the device ${W}`);
+    ok(await page.getByText('the street address is sent to the City of Los Angeles').isVisible(), `parcel: the screen says what leaves the device ${W}`);
     await page.getByRole('button', { name: 'Look up' }).click();
     ok(await page.getByText('4305 W EDENHURST AVE').first().waitFor({ timeout: 8000 }).then(() => true, () => false), `parcel: match shown ${W}`, await page.locator('[role=status]').allTextContents().then(x => x.join(' | ')));
     ok(await page.inputValue('#apn') === '5594-014-021' && await page.inputValue('#zone') === 'R1-1-RIO', `parcel: APN and zone filled ${W}`, await page.inputValue('#apn') + ' / ' + await page.inputValue('#zone'));
     ok((await page.inputValue('#lw')).startsWith("40' ") && (await page.inputValue('#ld')).startsWith("140' "), `parcel: lot size filled ${W}`, await page.inputValue('#lw') + ' / ' + await page.inputValue('#ld'));
     ok(await page.locator('#jur').inputValue() === 'la-city', `parcel: city from the real boundary ${W}`);
     ok(await page.locator('#apn-h').textContent() === 'From parcel map, verify on site', `parcel: filled value is tagged ${W}`);
-    ok(seen.every(u => /^https:\/\/(maps|zimas)\.lacity\.org\//.test(u)) && seen.every(u => !/owner|name=/i.test(u)), `parcel: only the city map hosts, only the address ${W}`);
+    ok(seen.every(u => /^https:\/\/((maps|zimas)\.lacity\.org|services\.arcgis\.com|rdp\.scag\.ca\.gov)\//.test(u)) && seen.every(u => !/owner|name=/i.test(u)) && seen.filter(u => !/lacity\.org/.test(u)).every(u => !/Edenhurst|Street=/i.test(decodeURIComponent(u))), `parcel: only the city map hosts get the address; the transit maps get only the lot outline ${W}`);
     await page.locator('.drawing').scrollIntoViewIfNeeded(); await shot(page, `parcel-filled-${width}.png`);
 await page.getByText('Filled from the parcel map').scrollIntoViewIfNeeded(); await shot(page, `parcel-status-${width}.png`);
     await page.fill('#apn', '5594-014-099'); ok(await page.locator('#apn-h').textContent() !== 'From parcel map, verify on site', `parcel: an edit overrides and removes the tag ${W}`);
@@ -137,7 +138,7 @@ async function planSetPDF() { const d = await PDFDocument.create(); const f = aw
 async function scanPDF() { const d = await PDFDocument.create(); d.addPage([612, 792]).drawRectangle({ x: 40, y: 40, width: 300, height: 300 }); return d.save(); }
 const setFile = async (page, sel, name, bytes, mimeType) => page.locator(sel).setInputFiles({ name, mimeType, buffer: Buffer.from(bytes) });
 const PHOTO = resolve(here, 'fixtures/site-photo.jpg');
-for (const width of [390, 1440]) {
+for (const width of process.env.ONLY_STORAGE ? [] : [390, 1440]) {
   const W = `@${width}`;
   { const c = await ctx(width); const page = await c.newPage(); const errs = []; page.on('pageerror', e => errs.push(String(e)));
     await page.goto(BASE); await page.getByRole('button', { name: 'Try the demo lot' }).click(); await step(page, 'review');
@@ -223,6 +224,33 @@ for (const width of [390, 1440]) {
     const [pk] = await Promise.all([page.waitForEvent('download'), page.getByRole('button', { name: 'Save the visit with photos (.permitpack)' }).click()]);
     const file = join(tmp, `visit-${width}.permitpack`); await pk.saveAs(file); const pj = JSON.parse(readFileSync(file, 'utf8'));
     ok(pj.inspection?.items?.egress?.s === 'fail' && Object.values(pj.inspectionPhotos ?? {}).length === 1, `field: .permitpack carries results and photo ${W}`);
+    // r5field-06: Remove photo, then Undo, brings the photo back (the image is not deleted at once).
+    await eg2.getByRole('button', { name: 'Remove photo' }).click(); ok(await eg2.locator('img.fm-thumb').count() === 0, `field: photo removed ${W}`);
+    await page.locator('h2').first().click(); await page.keyboard.press('Control+z');
+    ok(await eg2.locator('img.fm-thumb').waitFor({ timeout: 6000 }).then(() => true, () => false) && !(await eg2.getByText('This photo is not on this device').count()), `field: Undo after Remove photo brings the photo back ${W}`);
+    // r5field-09: permit number, stage, type, time zone.
+    await page.fill('#fm-permit', '25010-10000-01234'); await page.selectOption('#fm-stage', 'final'); await page.selectOption('#fm-kind', 'building');
+    ok(await page.getByText('Times are recorded in this time zone').isVisible(), `field: time zone shown ${W}`);
+    // r5field-11: the checklist reads the project.
+    const spr = page.locator('li.fm-item').filter({ hasText: 'Fire sprinklers' }); ok(/From the project:.*(Not required|Required|Not known)/.test(await spr.innerText()), `field: sprinklers required or not, from the project ${W}`, await spr.innerText());
+    const egt = await page.locator('li.fm-item').filter({ hasText: 'Bedroom escape window' }).innerText(); ok(/From the project:.*\d+" x \d+" clear.*sill \d+"/.test(egt), `field: escape window size from the project ${W}`, egt.slice(0, 300));
+    await page.waitForTimeout(400);
+    const [pdf2] = await Promise.all([page.waitForEvent('download', { timeout: 20000 }), page.getByRole('button', { name: 'Save the visit record (PDF)' }).click()]);
+    const pt = execFileSync('pdftotext', ['-layout', await pdf2.path(), '-'], { encoding: 'utf8' }); const np = (pt.match(/\f/g) || []).length;
+    ok(/Permit: 25010-10000-01234/.test(pt) && /Stage: Final/.test(pt) && /Type: Building/.test(pt) && new RegExp(`Page ${np} of ${np}`).test(pt), `field: PDF has permit, stage, type, Page X of N ${W}`, pt.slice(0, 200));
+    // r5field-08 + appsec-08: lock the visit file with a generated passphrase; it opens only with it.
+    await page.getByRole('button', { name: 'Save it locked with a passphrase' }).click(); const dlg = page.locator('dialog.ask');
+    await dlg.getByRole('button', { name: 'Make one for me' }).click(); await page.waitForFunction(() => document.querySelector('#ask-in')?.value.length > 0, null, { timeout: 8000 }).catch(() => {}); const gen = await dlg.locator('#ask-in').inputValue();
+    ok(/^[a-z-]+(-[a-z-]+){4,}$/.test(gen) && await dlg.locator('#ask-in').getAttribute('type') === 'text' && await dlg.locator('#ask-in2').inputValue() === gen, `appsec-08: generated passphrase filled and shown ${W}`, gen);
+    await shot(page, `field-lock-${width}.png`);
+    const [lk] = await Promise.all([page.waitForEvent('download', { timeout: 30000 }), dlg.getByRole('button', { name: 'Save locked file' }).click()]);
+    const lf = join(tmp, `visit-locked-${width}.permitpack`); await lk.saveAs(lf); const lj = readFileSync(lf, 'utf8');
+    ok(lk.suggestedFilename().endsWith('-locked.permitpack') && JSON.parse(lj).format === 'permitpack-encrypted' && !lj.includes('R. Inspector'), `field: locked visit file is encrypted ${W}`);
+    { const c3 = await ctx(width); const r3 = await c3.newPage(); await r3.goto(BASE); await r3.locator('input[type=file][accept^=".permitpack"]').first().setInputFiles(lf);
+      await r3.locator('dialog.ask #ask-in').fill(gen); await r3.locator('dialog.ask').getByRole('button', { name: 'Open' }).click();
+      await r3.locator('nav.rail').waitFor({ timeout: 30000 }).catch(async () => { await r3.screenshot({ path: join(tmp, 'r3.png') }); console.log('DEBUG', tmp, (await r3.locator('body').innerText()).slice(0, 600)); }); await step(r3, 'review'); await r3.getByRole('button', { name: 'Open field mode' }).click();
+      ok(await r3.locator('li.fm-item').filter({ hasText: 'Bedroom escape window' }).locator('img.fm-thumb').waitFor({ timeout: 10000 }).then(() => true, () => false) && await r3.inputValue('#fm-permit') === '25010-10000-01234', `field: locked visit opens with the passphrase, photo and permit included ${W}`);
+      await c3.close(); }
     // another device opens the pack: results and photo are there
     const c2 = await ctx(width); const r = await c2.newPage(); await r.goto(BASE); await r.locator('input[type=file][accept^=".permitpack"]').first().setInputFiles(file);
     await r.getByRole('heading', { level: 2 }).first().waitFor(); await step(r, 'review'); await r.getByRole('button', { name: 'Open field mode' }).click();
@@ -238,6 +266,78 @@ for (const width of [390, 1440]) {
     ok(await page.inputValue('#fm-who') === 'R. Inspector', `field: inspector name kept after clearing ${W}`);
     ok(errs.length === 0, `field: no page errors ${W}`, errs.join(' | '));
     await c.close(); }
+}
+
+// OUT2-10: projects move from localStorage to IndexedDB at start, losslessly, from saves of every earlier version.
+{ const SAVES = resolve(here, 'fixtures/saves'); const fx = Object.fromEntries(readdirSync(SAVES).map(f => [f.replace(/\.json$/, ''), JSON.parse(readFileSync(join(SAVES, f), 'utf8'))]));
+  // v0.1 single-project key, built from the round-1 project; and a messy device: two projects, one damaged, one with no list entry.
+  const r1 = Object.entries(fx['r1-oldbuild']).find(([k]) => k.startsWith('opa.p.'))[1]; fx['v0.1-single-key'] = { 'opa.project.v1': r1 };
+  const m = fx['main-6785e84']; const mid = Object.keys(m).find(k => k.startsWith('opa.p.')); const orphan = JSON.parse(m[mid]); orphan.id = '11111111-2222-4333-8444-555555555555'; orphan.name = 'Orphan project';
+  fx['messy'] = { ...m, ...fx['r1-oldbuild'], 'opa.index': JSON.stringify([...JSON.parse(m['opa.index']), ...JSON.parse(fx['r1-oldbuild']['opa.index']), { id: 'deadbeef-0000-4000-8000-000000000000', name: 'Damaged one', address: '', updatedAt: '2026-01-01T00:00:00Z', demo: false }]), 'opa.p.deadbeef-0000-4000-8000-000000000000': '{"format":"permitpack", broken', ['opa.p.' + orphan.id]: JSON.stringify(orphan), 'opa.lang': 'en' };
+  const idb = page => page.evaluate(() => new Promise(res => { const r = indexedDB.open('opa-store', 1); r.onupgradeneeded = () => r.result.createObjectStore('kv'); r.onsuccess = () => { const t = r.result.transaction('kv'); const s = t.objectStore('kv'); const k = s.getAllKeys(), v = s.getAll(); t.oncomplete = () => res(Object.fromEntries(k.result.map((x, i) => [x, v.result[i]]))); }; }));
+  for (const [name, dump] of Object.entries(fx)) {
+    const c = await ctx(1440); const page = await c.newPage(); const errs = []; page.on('pageerror', e => errs.push(e.message));
+    await page.goto(BASE + 'no-such-page'); await page.evaluate(d => { localStorage.clear(); for (const [k, v] of Object.entries(d)) localStorage.setItem(k, v); }, dump);
+    await page.goto(BASE); await page.waitForTimeout(1200);
+    const want = Object.keys(dump).filter(k => k.startsWith('opa.p.')).map(k => k.slice(6)).concat(dump['opa.project.v1'] ? [JSON.parse(dump['opa.project.v1']).id] : []);
+    const db = await idb(page); const ls = await page.evaluate(() => Object.keys(localStorage));
+    ok(want.every(id => typeof db['opa.p.' + id] === 'string'), `storage: ${name}: every project is in IndexedDB`, JSON.stringify(Object.keys(db)));
+    ok(Object.entries(dump).filter(([k]) => k.startsWith('opa.p.')).every(([k, v]) => { try { return (JSON.parse(db[k]).rev ?? 0) >= (JSON.parse(v).rev ?? 0); } catch { return db[k] === v; } }), `storage: ${name}: moved byte for byte or newer`);
+    ok(!ls.some(k => k.startsWith('opa.p.') || k === 'opa.index' || k === 'opa.project.v1'), `storage: ${name}: localStorage copies removed after the move`, ls.join());
+    ok(!dump['opa.lang'] || ls.includes('opa.lang'), `storage: ${name}: preferences stay in localStorage`);
+    const idx = JSON.parse(db['opa.index'] || '[]'); ok(want.every(id => idx.some(e => e.id === id)), `storage: ${name}: every project is listed`, JSON.stringify(idx.map(e => e.name)));
+    // The app opens the newest project; go to the list and open each one that is not damaged.
+    await page.evaluate(() => { location.hash = ''; }); await page.reload(); await page.waitForTimeout(800);
+    const all = page.getByRole('button', { name: /All projects/ }); if (await all.count()) { await all.first().click(); await page.waitForTimeout(400); }
+    const rows = await page.locator('section[aria-label="Your projects"] li').count();
+    ok(rows === want.length, `storage: ${name}: the project list shows all ${want.length}`, String(rows));
+    if (name === 'messy') { await page.getByRole('button', { name: /Orphan project/ }).click(); ok(await page.locator('nav.rail').waitFor({ timeout: 5000 }).then(() => true, () => false), `storage: messy: the project that had no list entry opens`); }
+    // Reload with localStorage now empty: still there (read from IndexedDB).
+    await page.reload(); await page.waitForTimeout(800); const db2 = await idb(page); ok(want.every(id => db2['opa.p.' + id]), `storage: ${name}: still there after reload`);
+    ok(errs.length === 0, `storage: ${name}: no page errors`, errs.join(' | '));
+    await c.close();
+  }
+  // A real old build writing to localStorage on the same origin, then this build (local runs only; the old build is not in the repo).
+  const OLD = '/home/claude/stress/e2e/oldbuild';
+  if (existsSync(OLD)) { const old = createServer((req, res) => { const u = new URL(req.url, 'http://x'); const root = u.searchParams.has('new') || !globalThis.__oldMode ? DIST : OLD; let f = join(root, decodeURIComponent(u.pathname.replace(/^\/open-permit-hub\//, '/')) || 'index.html'); if (existsSync(f) && statSync(f).isDirectory()) f = join(f, 'index.html'); if (!existsSync(f)) return res.writeHead(404).end(); res.writeHead(200, { 'content-type': MIME[extname(f)] ?? 'application/octet-stream' }).end(readFileSync(f)); });
+    await new Promise(r => old.listen(0, '127.0.0.1', r)); const OB = `http://127.0.0.1:${old.address().port}/open-permit-hub/`;
+    const c = await browser.newContext({ serviceWorkers: 'block', viewport: { width: 1440, height: 900 } }); const page = await c.newPage();
+    globalThis.__oldMode = true; await page.goto(OB); await page.getByRole('button', { name: /demo/i }).first().click(); await page.waitForTimeout(1500);
+    const before = await page.evaluate(() => Object.fromEntries(Object.keys(localStorage).map(k => [k, localStorage.getItem(k)])));
+    globalThis.__oldMode = false; await page.goto(OB + '#'); await page.reload(); await page.waitForTimeout(1500);
+    const db = await idb(page); const ids = Object.keys(before).filter(k => k.startsWith('opa.p.'));
+    ok(ids.length > 0 && ids.every(k => db[k] === before[k]), `storage: round-1 build -> this build moves the project byte for byte`, ids.join());
+    ok(await page.locator('nav.rail').waitFor({ timeout: 5000 }).then(() => true, () => false), `storage: round-1 project opens in this build`);
+    await c.close(); old.close(); }
+  // A save right before a reload or close is never lost (write-ahead journal in localStorage, replayed on start).
+  { const c = await ctx(1440); const page = await c.newPage(); await page.goto(BASE); await page.getByRole('button', { name: 'Start my project' }).click(); await page.waitForTimeout(500);
+    await page.fill('#addr', '9 Quick Close Rd'); await page.fill('#lw', "61'"); await page.locator('#lw').press('Tab'); await page.reload(); await page.locator('#addr').waitFor();
+    ok(await page.inputValue('#addr') === '9 Quick Close Rd' && (await page.inputValue('#lw')).startsWith("61'"), `storage: edit then immediate reload keeps the edit`, await page.inputValue('#addr'));
+    await page.fill('#addr', '10 Quick Close Rd'); await page.close({ runBeforeUnload: true }); const p2 = await c.newPage(); await p2.goto(BASE); await p2.locator('#addr').waitFor({ timeout: 8000 }).catch(() => {});
+    ok(await p2.inputValue('#addr').catch(() => '') === '10 Quick Close Rd', `storage: edit then closing the tab keeps the edit`);
+    ok(await p2.evaluate(() => new Promise(r => setTimeout(() => r(Object.keys(localStorage).filter(k => k.startsWith('opa.wal.')).length), 800))) === 0, `storage: journal is empty once IndexedDB has the writes`);
+    await c.close(); }
+  // Fallback: IndexedDB blocked -> localStorage, saves still work across a reload.
+  { const c = await ctx(1440); await c.addInitScript(() => { Object.defineProperty(window, 'indexedDB', { get() { throw new DOMException('blocked', 'SecurityError'); } }); }); const page = await c.newPage();
+    await page.goto(BASE); await page.getByRole('button', { name: 'Start my project' }).click(); await page.fill('#addr', '77 Fallback Ave'); await page.waitForTimeout(800);
+    ok(await page.evaluate(() => Object.keys(localStorage).some(k => k.startsWith('opa.p.'))), `storage: IndexedDB blocked: saved to localStorage instead`);
+    await page.reload(); await page.waitForTimeout(800); ok(await page.inputValue('#addr').catch(() => '') === '77 Fallback Ave', `storage: IndexedDB blocked: project kept after reload`);
+    ok(!(await page.getByText('Not saved').count()), `storage: IndexedDB blocked: no false "Not saved"`); await c.close(); }
+  // Two tabs on one project: a save in tab B is noticed in tab A (BroadcastChannel replaces the storage event).
+  { const c = await ctx(1440); const a = await c.newPage(); await a.goto(BASE); await a.getByRole('button', { name: 'Start my project' }).click(); await a.fill('#addr', '1 Tab St'); await a.waitForTimeout(800);
+    const bp = await c.newPage(); await bp.goto(BASE); await bp.waitForTimeout(800); await bp.fill('#addr', '2 Tab St'); await bp.waitForTimeout(800);
+    ok(await a.getByText('This project changed in another tab').first().waitFor({ timeout: 4000 }).then(() => true, () => false), `storage: another tab's save is noticed (IndexedDB)`, await bp.inputValue('#addr').catch(() => 'no addr in tab B') + ' | ' + (await a.locator('.banner').allTextContents()).join(' / ')); await c.close(); }
+  // Persistent storage: the answer is shown on the project list.
+  { const c = await ctx(390); const page = await c.newPage(); await page.goto(BASE); await page.getByRole('button', { name: 'Start my project' }).click(); await page.waitForTimeout(600); await page.evaluate(() => { location.hash = ''; }); await page.reload(); await page.waitForTimeout(600);
+    const all = page.getByRole('button', { name: /All projects/ }); if (await all.count()) { await all.first().click(); await page.waitForTimeout(400); }
+    const s = page.locator('[data-persist]'); ok(await s.waitFor({ timeout: 4000 }).then(() => true, () => false) && /^Storage: /.test(await s.textContent()), `storage: persistent-storage answer shown`, await s.textContent().catch(() => 'none'));
+    await s.scrollIntoViewIfNeeded().catch(() => {}); await shot(page, 'storage-persist-390.png'); await c.close(); }
+  // iOS Safari only: Add to Home Screen hint, dismissible and remembered.
+  { const IOS = 'Mozilla/5.0 (iPhone; CPU iPhone OS 18_0 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/18.0 Mobile/15E148 Safari/604.1';
+    for (const [ua, want] of [[IOS, true], [IOS.replace('Version/18.0', 'CriOS/130.0.0.0'), false]]) { const c = await ctx(390, { userAgent: ua, hasTouch: true }); const page = await c.newPage(); await page.goto(BASE); await page.getByRole('button', { name: 'Start my project' }).click(); await page.waitForTimeout(500);
+      const tip = page.getByText('Tip: in Safari tap Share'); ok((await tip.count() > 0) === want, `storage: Home Screen hint ${want ? 'shown on iOS Safari' : 'hidden on Chrome for iOS'}`);
+      if (want) { await shot(page, 'storage-ios-hint-390.png'); await page.getByRole('button', { name: 'Hide this tip' }).click(); ok(await tip.count() === 0, 'storage: hint dismissed'); await page.reload(); await page.waitForTimeout(600); ok(await tip.count() === 0, 'storage: hint stays dismissed'); }
+      await c.close(); } }
 }
 await browser.close(); server.close();
 console.log(`${total - failed}/${total} passed` + (failed ? `, ${failed} FAILED` : '')); process.exit(failed ? 1 : 0);

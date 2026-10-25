@@ -1,6 +1,7 @@
 import type { Project } from './model';
 import { uid } from './model';
 import { contentKey, migrate, serialize } from './permitpack';
+import { kv as currentKV } from './kv';
 
 /** Many projects on one device (drafter workflow). Keys: opa.index (list), opa.p.<id> (data). Every access is try/catch. */
 export interface Entry { id: string; name: string; address: string; updatedAt: string; demo: boolean }
@@ -63,5 +64,6 @@ export function makeStore(kv: () => KV | null) {
   return { list, save, open, raw, remove, duplicate, has, lastId };
 }
 
-const browser = makeStore(() => (typeof localStorage === 'undefined' ? null : localStorage));
+// OUT2-10: IndexedDB once initKV() has run (main.tsx awaits it before the first render), else localStorage.
+const browser = makeStore(currentKV);
 export const { list, save, open, raw, remove, duplicate, has, lastId } = browser;

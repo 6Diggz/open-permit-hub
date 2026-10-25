@@ -168,11 +168,13 @@ export function passphraseProblem(pass: string): string | null {
   if (COMMON.has(pass.toLowerCase()) || /^(.)\1+$/.test(pass) || /^\d+$/.test(pass) && pass.length < 12) return 'That passphrase is too easy to guess. Use 3 or 4 unrelated words.';
   return null;
 }
-export async function encryptPack(p: Project, pass: string): Promise<string> {
+export const encryptPack = (p: Project, pass: string) => encryptText(serialize(p), pass);
+/** r5field-08: locks any pack text (the visit pack carries its photos next to the project). Opened by openPack like any locked pack. */
+export async function encryptText(text: string, pass: string): Promise<string> {
   const problem = passphraseProblem(pass); if (problem) throw new Error(problem);
   const salt = crypto.getRandomValues(new Uint8Array(16)), iv = crypto.getRandomValues(new Uint8Array(12));
   const h = { format: 'permitpack-encrypted', v: ENC_VERSION, kdf: KDF, salt: b64(salt), iv: b64(iv) };
-  const ct = new Uint8Array(await crypto.subtle.encrypt({ name: 'AES-GCM', iv, additionalData: aad(h) }, await key(pass, salt), enc.encode(serialize(p))));
+  const ct = new Uint8Array(await crypto.subtle.encrypt({ name: 'AES-GCM', iv, additionalData: aad(h) }, await key(pass, salt), enc.encode(text)));
   return JSON.stringify({ ...h, ct: b64(ct) });
 }
 

@@ -19,9 +19,13 @@ export const expect = (cond, msg) => { if (!cond) throw new Fail(msg); };
 /** Length string in feet-inches. */
 export const ft = (f, i = 0) => `${f}' ${i}"`;
 
+/** OUT2-10: projects live in IndexedDB 'opa-store'/'kv'. window.__opaIdb() -> { get(k), set(k, v) } for tests. */
+export const IDB_HELPER = () => { window.__opaIdb = () => new Promise((res, rej) => { const r = indexedDB.open('opa-store', 1); r.onupgradeneeded = () => r.result.createObjectStore('kv');
+  r.onerror = () => rej(r.error); r.onsuccess = () => { const d = r.result; const t = d.transaction('kv', 'readonly'); const s = t.objectStore('kv'); const m = new Map(); const kq = s.getAllKeys(), vq = s.getAll();
+    t.oncomplete = () => { kq.result.forEach((k, i) => m.set(k, vq.result[i])); res({ get: k => m.get(k) ?? null, keys: () => [...m.keys()], set: (k, v) => new Promise((ok, no) => { m.set(k, v); const w = d.transaction('kv', 'readwrite'); w.objectStore('kv').put(v, k); w.oncomplete = ok; w.onerror = no; }) }); }; }; }); };
 export async function newPage(t, viewport = DESK, ctxOpts = {}) {
   const ctx = await t.browser.newContext({ viewport, acceptDownloads: true, ...ctxOpts });
-  t.contexts.push(ctx);
+  t.contexts.push(ctx); await ctx.addInitScript(IDB_HELPER);
   const pg = await ctx.newPage();
   pg.on('pageerror', e => t.log.push('pageerror: ' + e.message));
   t.pages.push(pg);
@@ -56,7 +60,7 @@ export async function results(pg) {
 }
 export const byId = (rs, id) => rs.filter(r => r.id === id);
 export async function storedProject(pg) {
-  return pg.evaluate(() => { const idx = JSON.parse(localStorage['opa.index'] || '[]'); const id = idx[0]?.id; return id ? { id, p: JSON.parse(localStorage['opa.p.' + id]) } : null; });
+  return pg.evaluate(async () => { const S = await window.__opaIdb(); const idx = JSON.parse(S.get('opa.index') || '[]'); const id = idx[0]?.id; return id ? { id, p: JSON.parse(S.get('opa.p.' + id)) } : null; });
 }
 
 export async function download(t, pg, name, timeout = 30000) {

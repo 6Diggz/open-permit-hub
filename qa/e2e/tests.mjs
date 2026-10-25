@@ -102,7 +102,7 @@ export const TESTS = [
 } },
 { id: 'qa-05b-mobile-not-saved', area: 'r1 sev4', findings: ['qa-05'], title: 'At 390px with storage blocked, the "Not saved" warning is visible', fn: async t => {
   const { ctx, pg } = await newPage(t, PHONE);
-  await ctx.addInitScript(() => { const th = () => { throw new DOMException('blocked', 'SecurityError'); }; Object.defineProperty(window, 'localStorage', { get: th }); });
+  await ctx.addInitScript(() => { const th = () => { throw new DOMException('blocked', 'SecurityError'); }; Object.defineProperty(window, 'localStorage', { get: th }); Object.defineProperty(window, 'indexedDB', { get: th }); });
   await gotoApp(pg); await startNew(pg); await pg.fill('#addr', 'x'); await pg.waitForTimeout(400);
   const ns = pg.getByText(/Not saved|No se guard/); let anyVis = false; for (let i = 0; i < await ns.count(); i++) if (await ns.nth(i).isVisible()) anyVis = true;
   expect(anyVis, 'no visible "Not saved" warning on a phone');
@@ -195,10 +195,10 @@ export const TESTS = [
 } },
 { id: 'cor-03-irregular-lot', area: 'r1 sev4', findings: ['COR-03'], title: 'Lot vertex 1 ft behind the ADU rear wall: FIR-01 not a pass', fn: async t => {
   const { pg } = await newPage(t, DESK); await gotoApp(pg); await startNew(pg); await fillProject(pg, { gy: ft(10) }); await pg.waitForTimeout(500);
-  const ok = await pg.evaluate(() => { const idx = JSON.parse(localStorage['opa.index']); const k = 'opa.p.' + idx[0].id; const p = JSON.parse(localStorage[k]);
+  const ok = await pg.evaluate(async () => { const S = await window.__opaIdb(); const idx = JSON.parse(S.get('opa.index')); const k = 'opa.p.' + idx[0].id; const p = JSON.parse(S.get(k));
     const lot = p.site.lot; const fp = p.adu.footprint; const maxY = Math.max(...lot.map(q => q.y)); const aMaxY = Math.max(...fp.map(q => q.y)); const cx = (Math.min(...fp.map(q => q.x)) + Math.max(...fp.map(q => q.x))) / 2;
     const i = lot.findIndex((q, j) => q.y === maxY && lot[(j + 1) % lot.length].y === maxY); if (i < 0) return false;
-    lot.splice(i + 1, 0, { x: cx, y: aMaxY + 305 }); localStorage[k] = JSON.stringify(p); return true; });
+    lot.splice(i + 1, 0, { x: cx, y: aMaxY + 305 }); await S.set(k, JSON.stringify(p)); return true; });
   expect(ok, 'setup: could not edit the stored lot polygon');
   await pg.reload(); await pg.locator('nav.rail').waitFor(); await pg.waitForTimeout(800);
   const f = byId(await results(pg), 'FIR-01'); t.note = f.map(r => r.status + ' ' + r.text.split('\n')[1]).join();

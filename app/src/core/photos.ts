@@ -24,6 +24,18 @@ export async function putPhoto(id: string, b: Blob): Promise<boolean> { mem.set(
 export async function getPhoto(id: string): Promise<Blob | null> { const m = mem.get(id); if (m) return m; const b = await tx<Blob>('readonly', s => s.get(id) as IDBRequest<Blob>); if (b instanceof Blob) { mem.set(id, b); return b; } return null; }
 export async function delPhoto(id: string): Promise<void> { mem.delete(id); await tx('readwrite', s => s.delete(id)); }
 
+/** r5field-06: photo ids stored on this device that no saved project uses (pure, tested). */
+export const orphanPhotos = (stored: string[], used: Set<string>) => stored.filter(id => !used.has(id));
+/**
+ * r5field-06: Remove photo, Retake and Clear the visit no longer delete the image at once (Undo can bring the id back).
+ * Images no saved project uses are removed here, once at start, before any undo history exists in this tab.
+ */
+export async function gcPhotos(used: Set<string>): Promise<number> {
+  const keys = await tx<IDBValidKey[]>('readonly', s => s.getAllKeys()); if (!keys) return 0;
+  const gone = orphanPhotos(keys.filter((k): k is string => typeof k === 'string'), used);
+  for (const id of gone) await tx('readwrite', s => s.delete(id));
+  return gone.length;
+}
 const fromDataUrl = (d: string) => { const bin = atob(d.slice(d.indexOf(',') + 1)); const u = new Uint8Array(bin.length); for (let i = 0; i < bin.length; i++) u[i] = bin.charCodeAt(i); return new Blob([u], { type: 'image/jpeg' }); };
 export async function toDataUrl(b: Blob): Promise<string> { const u = new Uint8Array(await b.arrayBuffer()); let s = ''; for (let i = 0; i < u.length; i += 0x8000) s += String.fromCharCode(...u.subarray(i, i + 0x8000)); return 'data:image/jpeg;base64,' + btoa(s); }
 /** Photos that arrived inside an opened .permitpack: kept in memory at once, written to storage in the background. */

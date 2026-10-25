@@ -5,6 +5,7 @@ import '@fontsource/public-sans/600.css';
 import '@fontsource/public-sans/800.css';
 import './ui/styles.css';
 import App from './ui/App';
+import { initKV } from './core/kv';
 import { Component, type ReactNode } from 'react';
 import { errorReport } from './core/errorreport';
 import { updateText } from './rules/pack';
@@ -36,7 +37,9 @@ function UpdatePrompt() {
   return <div className="toast" role="status">{updateText(next, es)} <button className="btn quiet" style={{ color: 'inherit' }} onClick={() => { swapRequested = true; if (reg.waiting) reg.waiting.postMessage('SKIP_WAITING'); else location.reload(); }}>{es ? 'Recargar' : 'Reload'}</button></div>;
 }
 
-createRoot(document.getElementById('root')!).render(<StrictMode><Boundary><App /><UpdatePrompt /></Boundary></StrictMode>);
+// OUT2-10: open IndexedDB (and move any localStorage projects into it) before the app reads its first project.
+// App reads the store only while rendering. initKV never throws; it falls back to localStorage.
+void initKV().then(() => createRoot(document.getElementById('root')!).render(<StrictMode><Boundary><App /><UpdatePrompt /></Boundary></StrictMode>));
 
 // A lazy chunk from an old deploy is gone: reload once to get the new build instead of showing an error.
 window.addEventListener('vite:preloadError', () => { try { if (sessionStorage.getItem('opa.reloaded')) return; sessionStorage.setItem('opa.reloaded', '1'); } catch { /* blocked */ } location.reload(); });

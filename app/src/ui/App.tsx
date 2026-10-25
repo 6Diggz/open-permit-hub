@@ -37,6 +37,8 @@ import { fromGLTF, fromRoomPlanJSON, tapeCheck, SCAN_LIMITS } from '../io/scan';
 
 import * as store from '../core/store';
 import type { SaveResult } from '../core/store';
+import { passOpts } from './passgen';
+import { isIosSafari, persistResult, STORE_CHANGE, STORE_ERROR, type Persist } from '../core/kv';
 let loadError = ''; let loadErrorId: string | null = null;
 const load = (): Project | null => { const id = store.lastId(); try { return id ? store.open(id) : null; } catch (e) { loadError = (e as Error).message; loadErrorId = id; return null; } };
 const persist = (p: Project) => store.save(p);
@@ -90,13 +92,21 @@ export default function App() {
   }, [p]); // eslint-disable-line react-hooks/exhaustive-deps
   useEffect(() => { const on = () => { if (document.visibilityState === 'hidden') flushSave(); }; window.addEventListener('pagehide', flushSave); document.addEventListener('visibilitychange', on);
     return () => { flushSave(); window.removeEventListener('pagehide', flushSave); document.removeEventListener('visibilitychange', on); }; }, []); // eslint-disable-line react-hooks/exhaustive-deps
-  useEffect(() => { navigator.storage?.persist?.().catch(() => {}); }, []);
-  // r4reach-13: Safari on iPhone can clear a site's saved projects after 7 days unvisited; Home Screen apps are exempt. Say so once.
-  const [homeTip, setHomeTip] = useState(() => { try { const ios = /iPhone|iPad|iPod/.test(navigator.userAgent) && !(navigator as Navigator & { standalone?: boolean }).standalone; return ios && !localStorage.getItem('opa.homeTip'); } catch { return false; } });
+  useEffect(() => { void persistResult(); }, []);
+  // r5field-06: once per start, remove visit photos that no saved project uses (deletes are deferred so Undo works).
+  useEffect(() => { const used = new Set<string>(); for (const e of store.list()) { try { for (const r of Object.values(store.open(e.id).inspection?.items ?? {})) if (r.photo) used.add(r.photo); } catch { return; /* a damaged project could hold photos: keep everything */ } }
+    void import('../core/photos').then(m => m.gcPhotos(used)); }, []);
+  // OUT2-10: a background IndexedDB write failed (disk full, private mode): say "Not saved" like a blocked localStorage write.
+  useEffect(() => { const on = () => setSaveState('blocked'); window.addEventListener(STORE_ERROR, on); return () => window.removeEventListener(STORE_ERROR, on); }, []);
+  // r4reach-13 / OUT2-10: Safari on iPhone can clear a site's saved projects after 7 days unvisited; Home Screen apps are exempt. iOS Safari only, once.
+  const [homeTip, setHomeTip] = useState(() => { try { return isIosSafari(navigator.userAgent, navigator.maxTouchPoints ?? 0, !!(navigator as Navigator & { standalone?: boolean }).standalone || matchMedia?.('(display-mode: standalone)').matches) && !localStorage.getItem('opa.homeTip'); } catch { return false; } });
   const hideTip = () => { setHomeTip(false); try { localStorage.setItem('opa.homeTip', '1'); } catch { /* storage blocked */ } };
   useEffect(() => { document.documentElement.lang = ui; document.documentElement.dir = langDir(ui); const sk = document.querySelector('a[href="#main"]'); if (sk) sk.textContent = L('Skip to content'); });
   // Another tab saved this project: say so now, before this tab's next save is refused.
-  useEffect(() => { const id = p?.id; if (!id) return; const on = (e: StorageEvent) => { if (e.key === store.keyOf(id) && e.newValue) setSaveState('conflict'); }; window.addEventListener('storage', on); return () => window.removeEventListener('storage', on); }, [p?.id]);
+  useEffect(() => { const id = p?.id; if (!id) return; const on = (e: StorageEvent) => { if (e.key === store.keyOf(id) && e.newValue) setSaveState('conflict'); };
+    // OUT2-10: with IndexedDB, other tabs announce saves on a BroadcastChannel (kv.ts) instead of the "storage" event.
+    const onIdb = (e: Event) => { if ((e as CustomEvent).detail === store.keyOf(id) && store.has(id)) setSaveState('conflict'); };
+    window.addEventListener('storage', on); window.addEventListener(STORE_CHANGE, onIdb); return () => { window.removeEventListener('storage', on); window.removeEventListener(STORE_CHANGE, onIdb); }; }, [p?.id]);
   // Browser Back / Forward move between steps; the step lives in the URL so reload keeps it.
   useEffect(() => { const on = () => { if (location.hash === '#clean') { setTool('clean'); return; } if (location.hash === '#field') { setTool('field'); return; } setTool('adu'); setStepRaw(stepFromHash()); moved.current = true; }; window.addEventListener('popstate', on); return () => window.removeEventListener('popstate', on); }, []);
   useEffect(() => { if (p && tool === 'adu' && !/step=/.test(location.hash)) history.replaceState(null, '', `#step=${STEP_KEYS[step]}`); }, [p, tool, step]);
@@ -158,8 +168,8 @@ export default function App() {
         </div>
         {/* r5whole-06: on a phone the check card is far below the form; the plain answer is shown at the top too. */}
         <BetaNote ui={ui} />
-        {homeTip && <div className="banner" role="status">{L("Tip: in Safari tap Share, then Add to Home Screen. Projects in a Home Screen app are kept; Safari can clear them after 7 days without a visit. Still save a backup.")} <button className="btn quiet" onClick={hideTip}>{L("OK")}</button></div>}
-        {verdict && <p className={'banner mobile-only' + (verdict.plain.verdict === 'likely-no' ? ' warn' : '')} style={{ margin: '8px 16px 0' }}>{verdict.plain[lang === 'es' ? 'es' : 'en']}{' '}
+        {homeTip && <div className="banner" role="status">{L("Tip: in Safari tap Share, then Add to Home Screen. Projects in a Home Screen app are kept; Safari can clear them after 7 days without a visit. Still save a backup.")} <button className="btn quiet" onClick={hideTip} aria-label={L("Hide this tip")}>{L("OK")}</button></div>}
+        {verdict && <p role="status" className={'banner mobile-only' + (verdict.plain.verdict === 'likely-no' ? ' warn' : '')} style={{ margin: '8px 16px 0' }}>{verdict.plain[lang === 'es' ? 'es' : 'en']}{' '}
           {/* r6ux-06: a path from the top answer to the details */}
           <button type="button" className="btn quiet" onClick={() => { const c = document.querySelector<HTMLElement>('aside section.card'); c?.scrollIntoView({ block: 'start' }); c?.focus(); }}>{L(verdict.plain.verdict === 'likely-no' ? 'See what to fix' : 'See the details')}</button></p>}
         {saveState === 'blocked' && <div className="banner warn" role="alert">{L("Not saved: storage is blocked. Export a backup.")}</div>}
@@ -368,7 +378,7 @@ function LotStep({ p, update, replace }: { p: Project; update: U; lang: Lang; re
       <Q id="q-coast" label={L("Coastal Zone?")} help={tag('coastal')} value={f.coastal} onChange={flag('coastal')} />
       <Q id="q-meth" label={L("Methane zone?")} value={f.methane} onChange={v => update(d => { d.site.flags.methane = v; })} />
       <Q id="q-burn" label={L("In a 2025 burn area (Palisades or Eaton)?")} value={f.fireRebuild} onChange={v => update(d => { d.site.flags.fireRebuild = v; })} />
-      <Q id="q-tr" label={L("Within a half-mile walk of a major transit stop or a frequent bus corridor?")} help={L("Walking distance, not a straight line. A high-quality transit corridor counts too.")} value={f.transitHalfMile} onChange={v => update(d => { d.site.flags.transitHalfMile = v; })} />
+      <Q id="q-tr" label={L("Within a half-mile walk of a major transit stop or a frequent bus corridor?")} help={L("Walking distance, not a straight line. A high-quality transit corridor counts too.")} value={f.transitHalfMile} onChange={v => update(d => { d.site.flags.transitHalfMile = v; unmark(d, 'transit'); })} />
       <Q id="q-slope" label={L("Lot slopes more than 10%?")} value={f.slopeOver10} onChange={v => update(d => { d.site.flags.slopeOver10 = v; })} />
       <Q id="q-spk" label={L("Does the main house have fire sprinklers?")} value={f.primarySprinklered} onChange={v => update(d => { d.site.flags.primarySprinklered = v; })} />
       <Q id="q-rent" label={L("Is any unit on the lot rented now?")} value={f.anyUnitRented} onChange={v => update(d => { d.site.flags.anyUnitRented = v; })} />
@@ -542,7 +552,7 @@ function ExportStep({ p, update, report, lang }: { p: Project; update: U; report
     <p className="lead">{L("Your project lives only on this device. On iPhone, save a backup to Files every week.")}</p>
     <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap' }}>
       <button className="btn" onClick={async () => { const r = await shareOrDownload(`${slug(p)}.permitpack`, serialize(p), 'application/json'); if (r !== 'cancelled') setNote(r === 'shared' ? L('Shared.') : L('Saved to your downloads.')); }}>{L("Save backup")}</button>
-      <button className="btn" onClick={async () => { const pass = await ask({ title: L('Lock a copy to share'), body: L('Pick a passphrase of 8 or more characters, like 3 or 4 unrelated words. Send it separately from the file, for example by text message. Nobody can recover it if it is lost, not even this app.'), input: 'password', minLength: 8, repeat: L('Type it again'), validate: v => { const m = passphraseProblem(v); return m ? L(m) : null; }, confirm: L('Save locked copy'), cancel: L('Cancel'), labels: { field: L('Passphrase'), repeat: L('Type it again'), mismatch: L('The two passphrases do not match.'), short: L('Use a passphrase of 8 or more characters.'), show: L('Show') } }) as string | null; if (!pass) return; try { const r = await shareOrDownload(`${slug(p)}-locked.permitpack`, await encryptPack(p, pass), 'application/json'); if (r !== 'cancelled') setNote(r === 'shared' ? L('Shared.') : L('Saved to your downloads.')); } catch (e) { setNote(L((e as Error).message)); } }}>{L("Save locked copy to share")}</button>
+      <button className="btn" onClick={async () => { const pass = await ask({ title: L('Lock a copy to share'), body: L('Pick a passphrase of 8 or more characters, like 3 or 4 unrelated words. Send it separately from the file, for example by text message. Nobody can recover it if it is lost, not even this app.'), input: 'password', minLength: 8, repeat: L('Type it again'), validate: v => { const m = passphraseProblem(v); return m ? L(m) : null; }, confirm: L('Save locked copy'), cancel: L('Cancel'), ...passOpts(), labels: { field: L('Passphrase'), repeat: L('Type it again'), mismatch: L('The two passphrases do not match.'), short: L('Use a passphrase of 8 or more characters.'), show: L('Show') } }) as string | null; if (!pass) return; try { const r = await shareOrDownload(`${slug(p)}-locked.permitpack`, await encryptPack(p, pass), 'application/json'); if (r !== 'cancelled') setNote(r === 'shared' ? L('Shared.') : L('Saved to your downloads.')); } catch (e) { setNote(L((e as Error).message)); } }}>{L("Save locked copy to share")}</button>
     </div>
     <p className="help" style={{ color: 'var(--pencil)', fontSize: '.82rem' }}>{L("This tool is free. If anyone charges you for \"guaranteed permits\" made with it, that's a scam.")}</p>
   </>;
@@ -620,6 +630,7 @@ export { SAFETY_MODULES, toFt };
 function Projects({ lang, onPick, onNew }: { lang: Lang; onPick: (id: string) => void; onNew: () => void }) {
   const [items, setItems] = useState(store.list); const es = lang === 'es';
   const [renaming, setRenaming] = useState<string | null>(null); const [name, setName] = useState(''); const [backupNote, setBackupNote] = useState('');
+  const [kept, setKept] = useState<Persist | null>(null); useEffect(() => { let live = true; void persistResult().then(r => { if (live) setKept(r); }); return () => { live = false; }; }, []);
   if (!items.length) return null;
   return <section aria-label={es ? 'Sus proyectos' : 'Your projects'} style={{ marginTop: 28 }}>
     <div style={{ display: 'flex', gap: 8, alignItems: 'center', flexWrap: 'wrap', margin: '0 0 8px' }}><h2 style={{ fontSize: '1.05rem', margin: 0, flex: 1 }}>{es ? 'Sus proyectos en este dispositivo' : 'Your projects on this device'}</h2>
@@ -630,6 +641,10 @@ function Projects({ lang, onPick, onNew }: { lang: Lang; onPick: (id: string) =>
         setBackupNote(bad.length ? (es ? `${bad.length} proyectos no se pudieron leer y no están en este respaldo: ${bad.join(', ')}. Ábralos uno por uno para descargar su copia guardada.` : `${bad.length} projects could not be read and are not in this backup: ${bad.join(', ')}. Open each one to download its saved copy.`) : ''); }}>{es ? 'Respaldar todos los proyectos' : 'Back up all projects'}</button></div>
     {backupNote && <p className="help" role="alert" style={{ color: 'var(--fix)' }}>{backupNote}</p>}
     <p className="help" style={{ margin: '0 0 8px' }}>{es ? 'Los proyectos viven solo en este dispositivo. Guarde un respaldo de todos a menudo; ábralo con "Abrir un archivo" para restaurarlos.' : 'Projects live only on this device. Back them all up often; open the file with "Open a saved pack" to restore them.'}</p>
+    {/* OUT2-10: what the browser said when asked to keep this site's data. */}
+    {kept && <p className="help" role="status" data-persist={kept} style={{ margin: '0 0 8px' }}>{kept === 'granted' ? (es ? 'Almacenamiento: este navegador aceptó guardar estos proyectos y no borrarlos para liberar espacio.' : 'Storage: this browser agreed to keep these projects and not clear them to free up space.')
+      : kept === 'denied' ? (es ? 'Almacenamiento: este navegador puede borrar estos proyectos si el dispositivo se queda sin espacio (en iPhone, también tras 7 días sin visitar). Guarde un respaldo.' : 'Storage: this browser may clear these projects if the device runs low on space (on iPhone, also after 7 days without a visit). Save a backup.')
+      : (es ? 'Almacenamiento: este navegador no dice si guardará estos proyectos. Guarde un respaldo.' : 'Storage: this browser does not say whether it will keep these projects. Save a backup.')}</p>}
     <ul className="results" style={{ padding: 0 }}>{items.map(e => <li key={e.id} className="res" style={{ display: 'flex', gap: 8, alignItems: 'center', flexWrap: 'wrap' }}>
       {renaming === e.id ? <form style={{ display: 'flex', gap: 6, flex: 1 }} onSubmit={ev => { ev.preventDefault(); try { const x = store.open(e.id); x.name = name.trim() || x.name; store.save(x); } catch { /* gone */ } setRenaming(null); setItems(store.list()); }}>
         <label className="sr" htmlFor={'rn-' + e.id}>{es ? 'Nombre' : 'Name'}</label><input id={'rn-' + e.id} autoFocus value={name} onChange={ev => setName(ev.target.value)} style={{ flex: 1, padding: 6 }} /><button className="btn">{es ? 'Guardar' : 'Save'}</button></form>

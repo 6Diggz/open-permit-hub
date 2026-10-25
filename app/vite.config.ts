@@ -9,7 +9,7 @@ import { dirname } from 'node:path'
 import { PACK, PACK_ID } from './src/rules/pack.ts'
 
 /** Content-Security-Policy for the built site (GitHub Pages can't send headers). 'wasm-unsafe-eval' is for the CAD WASM. */
-const CSP = "default-src 'self'; script-src 'self' 'wasm-unsafe-eval'; style-src 'self' 'unsafe-inline'; img-src 'self' data: blob:; font-src 'self'; connect-src 'self' blob: data: https://maps.lacity.org https://zimas.lacity.org; worker-src 'self'; manifest-src 'self'; object-src 'none'; base-uri 'self'; form-action 'none'";
+const CSP = "default-src 'self'; script-src 'self' 'wasm-unsafe-eval'; style-src 'self' 'unsafe-inline'; img-src 'self' data: blob:; font-src 'self'; connect-src 'self' blob: data: https://maps.lacity.org https://zimas.lacity.org https://services.arcgis.com https://rdp.scag.ca.gov; worker-src 'self'; manifest-src 'self'; object-src 'none'; base-uri 'self'; form-action 'none'";
 
 function walk(dir: string): string[] { return readdirSync(dir).flatMap(f => { const p = join(dir, f); return statSync(p).isDirectory() ? walk(p) : [p]; }); }
 

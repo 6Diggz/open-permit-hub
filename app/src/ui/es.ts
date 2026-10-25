@@ -130,7 +130,7 @@ export const ES = {
 "Download the response letter (text)": "Descargar la carta de respuesta (texto)",
 "The draft site plan PDF adds a markup sheet with every note and answer.": "El PDF del plano del sitio en borrador agrega una hoja de marcas con cada nota y respuesta.",
 "Fill in from the city parcel map (optional)": "Llenar con el mapa de parcelas de la ciudad (opcional)",
-"Only the street address is sent, to the City of Los Angeles map services (maps.lacity.org and zimas.lacity.org), and only when you tap \"Look up\". Nothing else leaves this device.": "Solo se envía la dirección, a los servicios de mapas de la Ciudad de Los Ángeles (maps.lacity.org y zimas.lacity.org), y solo cuando toca \"Buscar\". Nada más sale de este dispositivo.",
+"Only when you tap \"Look up\": the street address is sent to the City of Los Angeles map services (maps.lacity.org and zimas.lacity.org), and the lot's map outline (no address) to the LA County and SCAG transit maps (services.arcgis.com and rdp.scag.ca.gov). Nothing else leaves this device.": "Solo cuando toca \"Buscar\": la dirección se envía a los servicios de mapas de la Ciudad de Los Ángeles (maps.lacity.org y zimas.lacity.org), y el contorno del lote en el mapa (sin dirección) a los mapas de transporte del Condado de LA y de SCAG (services.arcgis.com y rdp.scag.ca.gov). Nada más sale de este dispositivo.",
 "Looking up...": "Buscando...",
 "Look up": "Buscar",
 "Type the address above first.": "Primero escriba la dirección arriba.",

@@ -3,6 +3,12 @@ All notable changes. Format: Keep a Changelog. Versions: the app follows semver;
 
 ## [Unreleased] - rounds 2 to 5
 ### App
+- Storage: projects move from localStorage to IndexedDB on first start (verified copy, then the old copy is removed; falls back to localStorage when IndexedDB is blocked). Each save is also journaled to localStorage until IndexedDB has it, so a reload or close right after an edit loses nothing. The project list shows whether the browser agreed to keep the data. The "Add to Home Screen" tip shows only on iPhone/iPad Safari.
+- Field mode: permit number, inspection stage and type, time zone on times, "Page X of N"; each item shows what the project already says (sizes, sprinklers required or not); the visit file can be locked with a passphrase; Undo after removing a photo brings it back.
+- Passphrase dialogs offer "Make one for me": five words from the EFF word list, made on the device.
+- Parcel lookup fills the half-mile transit question with "no" when the lot is outside both the LA County High Quality Transit Area and SCAG Transit Priority Area maps; inside one, it asks the user to check the walk.
+- Rule pages: plain explanation, worked pass and fail examples computed by the rules, FAQ structured data.
+- Accessibility: visible skip link and date-field focus, 24 px "Sources" toggles, live role on the phone answer line; keyboard, reflow, text-spacing and target-size checks in CI (`app/e2e/a11y.mjs`).
 - Plan-set PDF pre-check: reads the text of an existing plan set on the device and maps it to the LADBS correction-sheet items. It only claims what text can prove: "Not found in the text", "Conflicts with code" (a number read fails the rule) or "Says not provided" (an absence phrase such as N/A, TBD, by others, future, no aplica). Anything else is "Found on page N. Confirm it is shown as provided." at medium confidence with the quote. It never says an item is provided or approved.
 - Inspector field mode (`#field`): site-visit checklist by trade and stage, one photo per item, visit PDF and site-visit `.permitpack`. A Pass over a check the app fails needs a reason and is printed as an override.
 - Parcel lookup, drawn rooms, sheet readiness score, plain answer ("Likely yes / Not as entered / Not sure"), review notes and correction responses, Spanish calendar file.

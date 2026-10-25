@@ -4,7 +4,7 @@ import { ft } from '../core/units';
 import type { ParcelFill } from './parcel';
 
 /** Field keys tagged "from parcel map, verify on site" until the user edits them. */
-export type MapField = 'lot' | 'apn' | 'zone' | 'jurisdiction' | 'hillside' | 'vhfhsz' | 'coastal' | 'hpoz' | 'house' | 'garage' | 'burn';
+export type MapField = 'lot' | 'apn' | 'zone' | 'jurisdiction' | 'hillside' | 'vhfhsz' | 'coastal' | 'hpoz' | 'house' | 'garage' | 'burn' | 'transit';
 
 /** The user changed a field: it is theirs now, not the map's. */
 export function unmark(d: Project, k: MapField) { if (d.site.parcel) d.site.parcel.fromMap = d.site.parcel.fromMap.filter(x => x !== k); }
@@ -40,6 +40,8 @@ export function applyParcel(p: Project, f: ParcelFill): { next: Project; filled:
   if (house && !p.confirmed.house) { d.site.primary = house; filled.push('house'); }
   if (garage && !p.confirmed.adu) { d.adu.footprint = garage; filled.push('garage'); }
   if (f.palisades === 'yes' || (f.palisades === 'no' && f.jurisdiction === 'la-city')) { d.site.flags.fireRebuild = f.palisades; filled.push('burn'); }
+  // r3market-03: only "no" is filled (outside every straight-line half-mile area). Inside one, the walk still has to be checked.
+  if (f.transit === 'no' && p.site.flags.transitHalfMile === 'unknown') { d.site.flags.transitHalfMile = 'no'; filled.push('transit'); }
   if (f.apn) { d.site.apn = f.apn; filled.push('apn'); }
   if (f.zone) { d.site.zone = f.zone; filled.push('zone'); }
   if (f.jurisdiction !== 'unknown') { d.site.jurisdiction = f.jurisdiction; filled.push('jurisdiction'); }
