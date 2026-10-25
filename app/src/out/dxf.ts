@@ -6,13 +6,32 @@ import { PACK_ID } from '../rules/pack';
 import { cleanfix } from './wasm';
 import { roomAbs, roomArea, roomSize, wallPoint } from '../core/rooms';
 import { fmtSqFt } from '../core/units';
+import { cloudPts } from '../core/cad';
 
 const IN = (mm: number) => +(mm / MM_PER_IN).toFixed(4);
 const pt = (q: { x: number; y: number }) => [IN(q.x), IN(q.y)];
 /** Street name from the address line ("1234 W 52nd St, Los Angeles" -> "W 52nd St"). */
 export const streetName = (address: string) => (address.split(',')[0] ?? '').replace(/^\s*\d+[A-Za-z]?\s+/, '').trim();
 
-export interface SitePlanSpec { outlines: { layer: string; pts: number[][] }[]; dims: { layer: string; a: number[]; b: number[]; offset: number; text?: string }[]; texts: { layer: string; x: number; y: number; h: number; text: string }[] }
+export interface SitePlanSpec { outlines: { layer: string; pts: number[][]; closed?: boolean }[]; dims: { layer: string; a: number[]; b: number[]; offset: number; text?: string; rot?: number; da?: number[]; db?: number[] }[]; texts: { layer: string; x: number; y: number; h: number; text: string; rot?: number }[];
+  /** Circles and arcs (angles in radians, counter-clockwise). */ circles?: { layer: string; c: number[]; r: number; a0?: number; a1?: number }[]; /** Drafter's own layers: name, color index. */ layers?: [string, number][] }
+
+/** The drafter's own entities (Pro workspace) in the CAD file: lines, polylines, circles, arcs, text, leaders, clouds, dimensions. */
+export function addCad(p: Project, s: SitePlanSpec) {
+  const cad = p.cad; if (!cad?.ents.length && !cad?.layers.length) return;
+  s.layers = (cad?.layers ?? []).map(l => [l.name, l.color]); s.circles = [];
+  for (const e of cad?.ents ?? []) {
+    if (e.t === 'line' || e.t === 'pline') s.outlines.push({ layer: e.layer, pts: e.pts.map(pt), closed: e.t === 'pline' && !!e.closed });
+    else if (e.t === 'cloud') s.outlines.push({ layer: e.layer, pts: cloudPts(e.pts, 304.8).map(pt), closed: true });
+    else if (e.t === 'circle' || e.t === 'arc') s.circles.push({ layer: e.layer, c: pt(e.pts[0]), r: IN(e.r ?? 0), ...(e.t === 'arc' ? { a0: e.a0 ?? 0, a1: e.a1 ?? 0 } : {}) });
+    else if (e.t === 'text') (e.text ?? '').split('\n').forEach((line, i) => s.texts.push({ layer: e.layer, x: IN(e.pts[0].x), y: IN(e.pts[0].y - (e.h ?? 150) * 1.45 * i), h: IN(e.h ?? 150), text: line, rot: e.rot ?? 0 }));
+    else if (e.t === 'leader') { s.outlines.push({ layer: e.layer, pts: e.pts.map(pt), closed: false }); const q = e.pts[e.pts.length - 1]; s.texts.push({ layer: e.layer, x: IN(q.x) + IN(e.h ?? 150) * 1.3, y: IN(q.y) - IN(e.h ?? 150) / 2, h: IN(e.h ?? 150), text: e.text ?? '' }); }
+    else if (e.t === 'dim') { const [a, b] = e.pts; const L = Math.hypot(b.x - a.x, b.y - a.y) || 1;
+      if (e.rot != null) { const u = { x: Math.cos(e.rot), y: Math.sin(e.rot) }, n = { x: -u.y, y: u.x }; const off = e.off ?? 0; const A = { x: a.x + n.x * off, y: a.y + n.y * off }; const t = (b.x - a.x) * u.x + (b.y - a.y) * u.y; const B = { x: A.x + u.x * t, y: A.y + u.y * t };
+        s.dims.push({ layer: e.layer, a: pt(a), b: pt(b), offset: IN(off), rot: e.rot, da: pt(A), db: pt(B), ...(e.text ? { text: e.text } : {}) }); }
+      else s.dims.push({ layer: e.layer, a: pt(a), b: pt(b), offset: IN(e.off ?? 0), ...(e.text ? { text: e.text } : {}) }); void L; }
+  }
+}
 
 /** Everything the CAD file shows, in inches (the file's declared unit). One builder for the DXF 2018 and the R12 fallback. */
 export function sitePlanSpec(p: Project): SitePlanSpec {
@@ -64,7 +83,7 @@ export function sitePlanSpec(p: Project): SitePlanSpec {
 
 /** DXF 2018 with $INSUNITS = inches, closed LWPOLYLINEs and real DIMENSION entities (built by the WASM CAD writer). */
 export async function toDXF(p: Project): Promise<Uint8Array> {
-  const spec = sitePlanSpec(p);
+  const spec = sitePlanSpec(p); addCad(p, spec);
   try { const m = await cleanfix(); return m.site_plan_dxf(JSON.stringify(spec)); }
   catch { return new TextEncoder().encode(toDXFR12(p)); }
 }
@@ -74,17 +93,20 @@ export const dxfText = (s: string) => s.replace(/[\r\n\t]/g, ' ').replace(/[^\x2
 
 /** AutoCAD R12 ASCII DXF fallback (laser/CNC tools, or when the WASM writer can't load). Units noted in text. */
 export function toDXFR12(p: Project): string {
-  const spec = sitePlanSpec(p);
+  const spec = sitePlanSpec(p); addCad(p, spec);
   const o: string[] = []; const w = (c: number, v: string | number) => o.push(String(c), String(v));
-  const layers: [string, number][] = [['C-PROP', 7], ['A-EXST-BLDG', 8], ['A-ADU-WALL', 1], ['C-PROP-SETB', 3], ['A-ANNO-DIMS', 5], ['G-ANNO-TEXT', 7], ['A-AREA', 4], ['A-AREA-IDEN', 4], ['A-DOOR', 2], ['A-GLAZ', 5], ['G-ANNO-REDL', 1]];
+  const base: [string, number][] = [['C-PROP', 7], ['A-EXST-BLDG', 8], ['A-ADU-WALL', 1], ['C-PROP-SETB', 3], ['A-ANNO-DIMS', 5], ['G-ANNO-TEXT', 7], ['A-AREA', 4], ['A-AREA-IDEN', 4], ['A-DOOR', 2], ['A-GLAZ', 5], ['G-ANNO-REDL', 1]];
+  const used = new Set([...spec.outlines.map(x => x.layer), ...spec.texts.map(x => x.layer), ...spec.dims.map(x => x.layer), ...(spec.circles ?? []).map(x => x.layer)]);
+  const layers: [string, number][] = [...base, ...(spec.layers ?? []).filter(([n]) => !base.some(b => b[0] === n)), ...[...used].filter(n => !base.some(b => b[0] === n) && !(spec.layers ?? []).some(l => l[0] === n)).map(n => [n, 7] as [string, number])];
   w(0, 'SECTION'); w(2, 'HEADER'); w(9, '$ACADVER'); w(1, 'AC1009'); w(9, '$INSBASE'); w(10, 0); w(20, 0); w(30, 0); w(0, 'ENDSEC');
   w(0, 'SECTION'); w(2, 'TABLES'); w(0, 'TABLE'); w(2, 'LAYER'); w(70, layers.length);
   layers.forEach(([n, c]) => { w(0, 'LAYER'); w(2, n); w(70, 0); w(62, c); w(6, 'CONTINUOUS'); });
   w(0, 'ENDTAB'); w(0, 'ENDSEC'); w(0, 'SECTION'); w(2, 'ENTITIES');
-  for (const ol of spec.outlines) { w(0, 'POLYLINE'); w(8, ol.layer); w(66, 1); w(70, 1); for (const q of ol.pts) { w(0, 'VERTEX'); w(8, ol.layer); w(10, q[0]); w(20, q[1]); w(30, 0); } w(0, 'SEQEND'); w(8, ol.layer); }
-  const text = (x: number, y: number, h: number, s: string, layer: string) => { w(0, 'TEXT'); w(8, layer); w(10, x.toFixed(4)); w(20, y.toFixed(4)); w(30, 0); w(40, h.toFixed(2)); w(1, dxfText(s)); };
+  for (const c of spec.circles ?? []) { if (c.a0 == null) { w(0, 'CIRCLE'); w(8, c.layer); w(10, c.c[0]); w(20, c.c[1]); w(30, 0); w(40, c.r); } else { w(0, 'ARC'); w(8, c.layer); w(10, c.c[0]); w(20, c.c[1]); w(30, 0); w(40, c.r); w(50, (c.a0 * 180 / Math.PI).toFixed(6)); w(51, ((c.a1 ?? 0) * 180 / Math.PI).toFixed(6)); } }
+  for (const ol of spec.outlines) { w(0, 'POLYLINE'); w(8, ol.layer); w(66, 1); w(70, ol.closed === false ? 0 : 1); for (const q of ol.pts) { w(0, 'VERTEX'); w(8, ol.layer); w(10, q[0]); w(20, q[1]); w(30, 0); } w(0, 'SEQEND'); w(8, ol.layer); }
+  const text = (x: number, y: number, h: number, s: string, layer: string, rot = 0) => { w(0, 'TEXT'); w(8, layer); w(10, x.toFixed(4)); w(20, y.toFixed(4)); w(30, 0); w(40, h.toFixed(2)); w(1, dxfText(s)); if (rot) w(50, (rot * 180 / Math.PI).toFixed(4)); };
   for (const d of spec.dims) { const L = Math.hypot(d.b[0] - d.a[0], d.b[1] - d.a[1]) * MM_PER_IN; text((d.a[0] + d.b[0]) / 2, (d.a[1] + d.b[1]) / 2 + d.offset / 3, 8, (d.text ?? '<>').replace('<>', fmtFtIn(L)), d.layer); }
-  for (const t of spec.texts) text(t.x, t.y, t.h, t.text, t.layer);
+  for (const t of spec.texts) text(t.x, t.y, t.h, t.text, t.layer, t.rot);
   w(0, 'ENDSEC'); w(0, 'EOF');
   return o.join('\r\n');
 }

@@ -1,4 +1,5 @@
 import type { Inspection } from './inspection';
+import type { Cad } from './cad';
 import { ft, inch } from './units';
 import { rect, type Poly } from './geom';
 import { PACK_ID } from '../rules/pack';
@@ -129,6 +130,8 @@ export interface Project {
   dismissed: { ruleId: string; reason: string; at: string; ruleVersion: string }[];
   /** Sizes the user actually entered (defaults are placeholders, UX P0-3). */
   confirmed: { lot: boolean; house: boolean; adu: boolean };
+  /** Drafting entities and layers added in the Pro workspace (lines, text, dimensions...). Absent until used. */
+  cad?: Cad;
   /** Save counter, used to detect a second tab writing the same project. */
   rev?: number;
   /** What was repaired when old or damaged data was opened (shown once to the user). */

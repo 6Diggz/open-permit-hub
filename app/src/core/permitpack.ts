@@ -1,4 +1,5 @@
 import { FORMAT, FORMAT_VERSION, type Project, blankProject, blankCounty, uid, UUID_RE } from './model';
+import { sanitizeCad } from './cad';
 import { isNum, MAX_LEN_MM } from './units';
 import type { Poly } from './geom';
 import { MAX_ROOMS, MAX_OPENINGS, MAX_ROOM_PTS } from './rooms';
@@ -140,6 +141,7 @@ export function migrate(raw: any): Project {
   const ins = sanitizeInspection(p.inspection); if (ins) out.inspection = ins; else delete out.inspection;
   const photos = sanitizePhotos((p as any).inspectionPhotos, ins); delete (out as any).inspectionPhotos;
   if (Object.keys(photos).length) stagePhotos(photos);
+  const cad = sanitizeCad((p as any).cad); if (cad) out.cad = cad; else delete out.cad;
   out.rev = Number.isInteger(p.rev) && p.rev >= 0 ? p.rev : 0;
   out.repairNotes = notes.length ? notes : undefined;
   return out;

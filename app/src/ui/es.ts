@@ -1,5 +1,7 @@
 import { ES_FEAT } from './es-feat';
+import { ES_PRO } from './es-pro';
 export const ES = {
+...ES_PRO,
 "yes": "sí",
 "no": "no",
 "outside LA": "fuera de LA",

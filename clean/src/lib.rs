@@ -1,5 +1,5 @@
 //! Clean and Fix (Layer 2 MVP). Never touches the original: reads bytes, returns a report and a clean copy.
-use acadrust::entities::{Dimension, DimensionAligned, EntityType, Line, LwPolyline, Text};
+use acadrust::entities::{Arc, Circle, Dimension, DimensionAligned, DimensionLinear, EntityType, Line, LwPolyline, Text};
 use acadrust::tables::{BlockRecord, Layer};
 use acadrust::types::{DxfVersion, Vector2, Vector3};
 use acadrust::{CadDocument, DwgReader, DxfReader, DxfWriter};
@@ -393,10 +393,16 @@ pub fn site_plan(spec: &str) -> Result<Vec<u8>, String> {
     for (n, c) in [("C-PROP", 7), ("A-EXST-BLDG", 8), ("A-ADU-WALL", 1), ("C-PROP-SETB", 3), ("A-ANNO-DIMS", 5), ("G-ANNO-TEXT", 7), ("A-AREA", 4), ("A-AREA-IDEN", 4), ("A-DOOR", 2), ("A-GLAZ", 5), ("G-ANNO-REDL", 1)] {
         let mut l = Layer::new(n); l.color = acadrust::types::Color::from_index(c); let _ = doc.layers.add(l);
     }
+    // Drafter's own layers (name, color index); names already present are kept as they are.
+    for l in v["layers"].as_array().into_iter().flatten().take(200) {
+        let (Some(n), c) = (l[0].as_str(), l[1].as_i64().unwrap_or(7)) else { continue };
+        if n.is_empty() || n.len() > 40 { continue; }
+        let mut ly = Layer::new(n); ly.color = acadrust::types::Color::from_index(c.clamp(1, 255) as i16 as _); let _ = doc.layers.add(ly);
+    }
     let f = |x: &Value| x.as_f64().filter(|v| v.is_finite()).ok_or_else(|| "site plan has a number that is not finite".to_string());
     for o in v["outlines"].as_array().into_iter().flatten() {
         let pts: Result<Vec<Vector2>, String> = o["pts"].as_array().into_iter().flatten().map(|p| Ok(Vector2::new(f(&p[0])?, f(&p[1])?))).collect();
-        let mut pl = LwPolyline::from_points(pts?); pl.is_closed = true;
+        let mut pl = LwPolyline::from_points(pts?); pl.is_closed = o["closed"].as_bool().unwrap_or(true);
         let mut e = EntityType::LwPolyline(pl); e.common_mut().layer = o["layer"].as_str().unwrap_or("0").to_string();
         doc.add_entity(e).map_err(|e| e.to_string())?;
     }
@@ -406,14 +412,20 @@ pub fn site_plan(spec: &str) -> Result<Vec<u8>, String> {
         if a.distance(&b) < 1e-6 { continue; }
         let off = d["offset"].as_f64().filter(|v| v.is_finite()).unwrap_or(24.0);
         let layer = d["layer"].as_str().unwrap_or("A-ANNO-DIMS").to_string();
-        let mut dim = DimensionAligned::new(a, b); dim.set_offset(off);
-        if let Some(t) = d["text"].as_str() { dim.base.set_text_override(Some(t.to_string())); }
+        // Rotated (linear) dimensions carry the dimension-line ends; aligned ones are offset from a->b.
+        let rot = d["rot"].as_f64().filter(|v| v.is_finite());
+        let (dir, da, db) = match (rot, d["da"].as_array(), d["db"].as_array()) {
+            (Some(r), Some(p), Some(q)) => { let da = Vector3::new(f(&p[0])?, f(&p[1])?, 0.0); let db = Vector3::new(f(&q[0])?, f(&q[1])?, 0.0); (Vector3::new(r.cos(), r.sin(), 0.0), da, db) }
+            _ => { let dir = (b - a).normalize(); let nrm = Vector3::new(-dir.y, dir.x, 0.0); (dir, a + nrm * off, b + nrm * off) }
+        };
+        let nrm = Vector3::new(-dir.y, dir.x, 0.0);
+        let measured = da.distance(&db); let sgn = if (da - a).dot(&nrm) < 0.0 { -1.0 } else { 1.0 };
+        let mut base_dim: Dimension = if let Some(r) = rot { let mut dl = DimensionLinear::rotated(a, b, r); dl.definition_point = db; dl.base.actual_measurement = measured; Dimension::Linear(dl) } else { let mut da2 = DimensionAligned::new(a, b); da2.set_offset(off); Dimension::Aligned(da2) };
+        if let Some(t) = d["text"].as_str() { base_dim.base_mut().set_text_override(Some(t.to_string())); }
         // Render the dimension's geometry into its own anonymous *D block, as AutoCAD does.
         // Viewers that do not regenerate dimensions (ezdxf, LibreCAD, Bluebeam, TrueView) draw only this block.
-        let dir = (b - a).normalize(); let nrm = Vector3::new(-dir.y, dir.x, 0.0);
-        let (da, db) = (a + nrm * off, b + nrm * off); let sgn = if off < 0.0 { -1.0 } else { 1.0 };
         let mid = (da + db) * 0.5 + nrm * (sgn * 6.0);
-        let label = d["text"].as_str().unwrap_or("<>").replace("<>", &ft_in(a.distance(&b)));
+        let label = d["text"].as_str().unwrap_or("<>").replace("<>", &ft_in(measured));
         let name = format!("*D{}", dim_n); dim_n += 1;
         let mut blk = BlockRecord::new(&name); blk.handle = doc.allocate_handle();
         blk.block_entity_handle = doc.allocate_handle(); blk.block_end_handle = doc.allocate_handle(); blk.flags.anonymous = true;
@@ -428,12 +440,22 @@ pub fn site_plan(spec: &str) -> Result<Vec<u8>, String> {
         tx.vertical_alignment = acadrust::entities::TextVerticalAlignment::Middle; tx.alignment_point = Some(mid);
         parts.push(EntityType::Text(tx));
         for mut pe in parts { pe.common_mut().layer = layer.clone(); pe.common_mut().owner_handle = bh; doc.add_entity(pe).map_err(|e| e.to_string())?; }
-        dim.base.block_name = name; dim.base.text_middle_point = mid;
-        let mut e = EntityType::Dimension(Box::new(Dimension::Aligned(dim))); e.common_mut().layer = layer;
+        { let b = base_dim.base_mut(); b.block_name = name; b.text_middle_point = mid; }
+        let mut e = EntityType::Dimension(Box::new(base_dim)); e.common_mut().layer = layer;
+        doc.add_entity(e).map_err(|e| e.to_string())?;
+    }
+    for c in v["circles"].as_array().into_iter().flatten() {
+        let ctr = Vector3::new(f(&c["c"][0])?, f(&c["c"][1])?, 0.0); let r = f(&c["r"])?; if !(r > 0.0) { continue; }
+        let mut e = match (c["a0"].as_f64().filter(|v| v.is_finite()), c["a1"].as_f64().filter(|v| v.is_finite())) {
+            (Some(a0), Some(a1)) => EntityType::Arc(Arc::from_center_radius_angles(ctr, r, a0, a1)),
+            _ => EntityType::Circle(Circle::from_center_radius(ctr, r)),
+        };
+        e.common_mut().layer = c["layer"].as_str().unwrap_or("0").to_string();
         doc.add_entity(e).map_err(|e| e.to_string())?;
     }
     for t in v["texts"].as_array().into_iter().flatten() {
-        let tx = Text::with_value(t["text"].as_str().unwrap_or(""), Vector3::new(f(&t["x"])?, f(&t["y"])?, 0.0)).with_height(t["h"].as_f64().unwrap_or(9.0));
+        let mut tx = Text::with_value(t["text"].as_str().unwrap_or(""), Vector3::new(f(&t["x"])?, f(&t["y"])?, 0.0)).with_height(t["h"].as_f64().unwrap_or(9.0));
+        if let Some(r) = t["rot"].as_f64().filter(|v| v.is_finite()) { tx.rotation = r; }
         let mut e = EntityType::Text(tx); e.common_mut().layer = t["layer"].as_str().unwrap_or("G-ANNO-TEXT").to_string();
         doc.add_entity(e).map_err(|e| e.to_string())?;
     }

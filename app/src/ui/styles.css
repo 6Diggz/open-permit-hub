@@ -170,3 +170,4 @@ label.btn[aria-disabled="true"] { opacity: .45; cursor: progress; }
 [dir="rtl"] input[type="number"], [dir="rtl"] input[inputmode="decimal"], [dir="rtl"] input[type="date"] { direction: ltr; text-align: right; }
 /* English rule text, sheet items and citations inside an RTL page keep their own direction (no "on the garage side." flipped). */
 [dir="rtl"] :is(p, label, li, summary, h2, h3, td, th, .help, .title, .sub, .verdict) { unicode-bidi: plaintext; }
+.pw-loading { position: fixed; inset: 0; display: grid; place-items: center; color: var(--pencil); background: var(--desk); }

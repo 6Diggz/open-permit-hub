@@ -20,6 +20,9 @@ import { RoomPlan } from './RoomPlan';
 import { ReviewStep } from './Review';
 // r6ux-07: field mode (inspection, photos) loads only when opened, not on the landing page.
 const FieldMode = lazy(() => import('./FieldMode').then(m => ({ default: m.FieldMode })));
+// The Pro (CAD) workspace loads only when chosen, so the Guided flow and landing page stay small.
+const Workspace = lazy(() => import('./pro/Workspace').then(m => ({ default: m.Workspace })));
+import { savedMode, saveMode, type WsMode } from './pro/mode';
 import { fromMap, unmark, type MapField } from '../io/parcel-apply';
 import { ask, AskHost } from './Ask';
 import { autoFit } from '../rules/fit';
@@ -75,6 +78,8 @@ export default function App() {
   const [notice, setNotice] = useState<string[]>(() => (p ? openNotes(p) : []));
   const formRef = useRef<HTMLDivElement>(null); const moved = useRef(false);
   const [roomSel, setRoomSel] = useState<string | null>(null); const [pinSel, setPinSel] = useState<string | null>(null); const [placing, setPlacing] = useState<string | false>(false);
+  const [ws, setWsRaw] = useState<WsMode>(savedMode); const setWs = (m: WsMode) => { saveMode(m); setWsRaw(m); };
+  const [pinReq, setPinReq] = useState(0);
   if (p && !hist.current) hist.current = new History(p);
   setUiLang(ui);
 
@@ -140,6 +145,29 @@ export default function App() {
   const fresh = packFreshness(new Date(), p.applicationDate);
   const saveText = saveState === 'ok' ? tr(lang, 'saved') : saveState === 'blocked' ? L("Not saved: storage is blocked. Export a backup.") : L("Not saved: this project changed in another tab.");
 
+  const banners = <>
+    <BetaNote ui={ui} />
+    {saveState === 'blocked' && <div className="banner warn" role="alert">{L("Not saved: storage is blocked. Export a backup.")}</div>}
+    {saveState === 'conflict' && <div className="banner warn" role="alert">{L("This project changed in another tab. Pick which copy to keep.")}{' '}
+      <button className="btn quiet" onClick={() => { try { show(store.open(p.id), step); setSaveState('ok'); } catch { /* gone */ } }}>{L("Load the newer copy")}</button>{' '}
+      <button className="btn quiet" onClick={() => setSaveState(store.save(p, { force: true }))}>{L("Keep my version")}</button></div>}
+    {notice.length > 0 && <div className="banner" role="status">{notice.map(n => <div key={n}>{n}</div>)}<button className="btn quiet" onClick={() => setNotice([])}>{L("OK")}</button></div>}
+    {fresh.stale && <div className="banner warn" role="status">{lang === 'es' ? fresh.reasonEs : fresh.reason}</div>}
+    {p.site.flags.fireRebuild === 'yes' && <div className="banner warn">{L("This lot is in a 2025 burn area. Use the official rebuild path. Automatic passes are off.")}</div>}
+  </>;
+  if (ws === 'pro') {
+    const stepPanel = (s: string) => s === 'lot' ? <LotStep p={p} update={update} lang={lang} replace={next => commit({ ...next, rulePack: PACK_ID })} />
+      : s === 'garage' ? <GarageStep p={p} update={update} /> : s === 'rooms' ? <RoomsStep p={p} update={update} sel={roomSel} setSel={setRoomSel} />
+      : s === 'checks' ? <ChecksStep p={p} update={update} report={report} lang={lang} /> : s === 'export' ? <ExportStep p={p} update={update} report={report} lang={lang} />
+      : <ReviewStep p={p} update={update} sel={pinSel} setSel={setPinSel} placing={false} setPlacing={v => { if (v) setPinReq(n => n + 1); }} download={(n, d, t) => download(n, d, t)} onField={() => openTool('field')} />;
+    return <><AskHost /><Suspense fallback={<div className="pw-loading" role="status">{L('Loading the Pro workspace…')}</div>}>
+      <Workspace p={p} verdict={verdict!} lang={lang} ui={ui} setLang={l => { setLang(l); update(d => { d.people.language = contentLang(l); }); }} saveText={saveText} saveOk={saveState === 'ok'}
+        update={update} preview={x => setP(x)} commit={(start, next) => { hist.current!.present = start; commit(next); }}
+        undo={undo} redo={redo} canUndo={!!hist.current?.canUndo} canRedo={!!hist.current?.canRedo}
+        toGuided={s => { setWs('guided'); if (s) setStep(STEP_KEYS.indexOf(s)); }} close={close} openField={() => openTool('field')} openClean={() => openTool('clean')}
+        panel={stepPanel} banners={banners} download={download} pinRequest={pinReq} /></Suspense></>;
+  }
+
   return (
     <div className="app"><AskHost />
       <nav className="rail" aria-label={L("Steps")}>
@@ -160,6 +188,7 @@ export default function App() {
         <div className="toolbar">
           <h1 style={{ font: 'inherit', fontWeight: 700, margin: 0 }}>{p.name}</h1>{isDemo(p) && <span className="res tag" style={{ background: 'var(--off)', color: '#fff', padding: '2px 6px' }}>{L("Demo")}</span>}
           <span className="grow" />
+          <button className="btn quiet" onClick={() => setWs('pro')} title={L("CAD-style workspace for drafters")}>{L("Pro workspace")}</button>
           <button className="btn quiet mobile-only" onClick={close}>{L("All projects")}</button>
           <button className="btn quiet" onClick={undo} disabled={!hist.current?.canUndo}>{tr(lang, 'undo')}</button>
           <button className="btn quiet" onClick={redo} disabled={!hist.current?.canRedo}>{tr(lang, 'redo')}</button>
@@ -240,17 +269,17 @@ function Welcome({ lang, ui, setLang, onStart, onOpen, onClean, onPick, field }:
   const openFile = async (f: File) => {
     setErr('');
     try {
-      if (f.size > MAX_BUNDLE_BYTES) throw new Error(es ? 'Este archivo es demasiado grande para ser un paquete.' : 'This file is too large to be a permit pack.');
+      if (f.size > MAX_BUNDLE_BYTES) throw new Error(L("This file is too large to be a permit pack."));
       const text = await f.text(); const bundle = readBundle(text);
       if (bundle) {
         // A project already on this device: an identical copy is skipped; for changed ones, ask once what to do.
         const same = (x: Project) => { try { return contentKey(store.open(x.id)) === contentKey(x); } catch { return false; } };
         const dupes = bundle.projects.filter(x => store.has(x.id)); const changed = dupes.filter(x => !same(x));
         let how: string | null = 'replace';
-        if (changed.length) { how = await ask({ title: es ? 'Ya tiene algunos de estos proyectos' : 'You already have some of these projects', body: es ? `${changed.length} proyectos de la copia de seguridad ya están en este dispositivo con cambios distintos.` : `${changed.length} projects in the backup are already on this device with different changes.`, confirm: es ? 'Guardar los dos' : 'Keep both', alt: { label: es ? 'Reemplazar los míos' : 'Replace mine', value: 'replace' }, cancel: es ? 'Omitirlos' : 'Skip them' }) as string | null; if (how !== 'replace') how = how ? 'both' : 'skip'; }
+        if (changed.length) { how = await ask({ title: L("You already have some of these projects"), body: es ? `${changed.length} proyectos de la copia de seguridad ya están en este dispositivo con cambios distintos.` : `${changed.length} projects in the backup are already on this device with different changes.`, confirm: L("Keep both"), alt: { label: L("Replace mine"), value: 'replace' }, cancel: L("Skip them") }) as string | null; if (how !== 'replace') how = how ? 'both' : 'skip'; }
         let n = 0, upd = 0, kept = 0, full = 0;
         for (const x of bundle.projects) {
-          if (store.has(x.id)) { if (same(x)) { kept++; continue; } if (how === 'skip') { kept++; continue; } if (how === 'both') { x.id = uid(); x.name = `${x.name} ${es ? '(copia abierta)' : '(opened copy)'}`; } }
+          if (store.has(x.id)) { if (same(x)) { kept++; continue; } if (how === 'skip') { kept++; continue; } if (how === 'both') { x.id = uid(); x.name = `${x.name} ${L("(opened copy)")}`; } }
           const wasThere = store.has(x.id); const r = store.save(x, { force: true, keepTime: true });
           if (r === 'ok') { if (wasThere) upd++; else n++; } else full++;
         }
@@ -258,12 +287,12 @@ function Welcome({ lang, ui, setLang, onStart, onOpen, onClean, onPick, field }:
           ? [`Se restauraron ${n} proyectos.`, upd ? `${upd} se actualizaron.` : '', kept ? `${kept} ya estaban en este dispositivo.` : '', full ? `${full} no se pudieron restaurar: el almacenamiento de este dispositivo está lleno. Borre o descargue proyectos viejos e intente de nuevo.` : '', bundle.skipped ? `${bundle.skipped} estaban dañados.` : '']
           : [`Restored ${n} projects.`, upd ? `${upd} were updated.` : '', kept ? `${kept} were already on this device.` : '', full ? `${full} could not be restored: this device's storage is full. Delete or download old projects and try again.` : '', bundle.skipped ? `${bundle.skipped} were damaged.` : ''];
         setErr(parts.filter(Boolean).join(' ')); setTick(t => t + 1); return; }
-      const x = await readPackFile(text, async () => ((await ask({ title: es ? 'Este paquete está bloqueado' : 'This pack is locked', body: es ? 'Ingrese la frase de acceso que le dieron con el archivo.' : 'Enter the passphrase you were given with the file.', input: 'password', minLength: 1, confirm: es ? 'Abrir' : 'Open', cancel: es ? 'Cancelar' : 'Cancel', labels: { field: es ? 'Frase de acceso' : 'Passphrase', show: es ? 'Mostrar' : 'Show' } })) as string | null));
+      const x = await readPackFile(text, async () => ((await ask({ title: L("This pack is locked"), body: L("Enter the passphrase you were given with the file."), input: 'password', minLength: 1, confirm: L("Open"), cancel: L("Cancel"), labels: { field: L("Passphrase"), show: L("Show") } })) as string | null));
       if (!x) return;
       if (store.has(x.id)) {
-        const c = await ask({ title: es ? 'Ya tiene este proyecto' : 'You already have this project', body: es ? `"${x.name}" ya está en este dispositivo. Abrir el archivo como copia aparte guarda las dos versiones.` : `"${x.name}" is already on this device. Opening the file as a separate copy keeps both versions.`, confirm: es ? 'Guardar los dos' : 'Keep both', alt: { label: es ? 'Reemplazar el mío' : 'Replace mine', value: 'replace' }, cancel: es ? 'Cancelar' : 'Cancel' });
+        const c = await ask({ title: L("You already have this project"), body: es ? `"${x.name}" ya está en este dispositivo. Abrir el archivo como copia aparte guarda las dos versiones.` : `"${x.name}" is already on this device. Opening the file as a separate copy keeps both versions.`, confirm: L("Keep both"), alt: { label: L("Replace mine"), value: 'replace' }, cancel: L("Cancel") });
         if (!c) return;
-        if (c !== 'replace') { x.id = uid(); x.name = `${x.name} ${es ? '(copia abierta)' : '(opened copy)'}`; }
+        if (c !== 'replace') { x.id = uid(); x.name = `${x.name} ${L("(opened copy)")}`; }
       }
       onOpen(x);
     } catch (e) { setErr((e as Error).message); }
@@ -273,22 +302,22 @@ function Welcome({ lang, ui, setLang, onStart, onOpen, onClean, onPick, field }:
     <main className="welcome-grid" id="main"><div className="welcome">
       <div style={{ marginBottom: 28 }}><LangPicker ui={ui} onPick={setLang} id="lang-w" /></div>
       <BetaNote ui={ui} />
-      {field && <div className="banner" role="status">{es ? 'Visita a la obra (modo de inspector): elija un proyecto abajo, o abra un archivo .permitpack de la visita, para empezar.' : 'Site visit (inspector field mode): pick a project below, or open a site-visit .permitpack, to start the visit.'}</div>}
-      <h1>{es ? 'Su garaje, revisado contra las reglas de LA.' : 'Your garage, checked against LA\'s rules.'}</h1>
+      {field && <div className="banner" role="status">{L("Site visit (inspector field mode): pick a project below, or open a site-visit .permitpack, to start the visit.")}</div>}
+      <h1>{L("Your garage, checked against LA's rules.")}</h1>
       <p>{tr(lang, 'tagline')}</p>
-      <p>{es ? 'Gratis. Funciona en su dispositivo. No necesita cuenta. No es una aprobación de la ciudad.' : 'Free. Runs on your device. No account. Not a city approval.'}</p>
+      <p>{L("Free. Runs on your device. No account. Not a city approval.")}</p>
       <div className="row">
         <button className="btn primary" onClick={() => onStart(false)}>{tr(lang, 'start')}</button>
         <button className="btn" onClick={() => onStart(true)}>{tr(lang, 'demo')}</button>
-        <label className="btn quiet">{es ? 'Abrir un archivo' : 'Open a saved pack'}
+        <label className="btn quiet">{L("Open a saved pack")}
           <input type="file" accept=".permitpack,.json,application/json,application/octet-stream" className="sr" onChange={async e => { const f = e.target.files?.[0]; e.target.value = ''; if (f) await openFile(f); }} />
         </label>
       </div>
       {(err || loadError) && <p role="alert" style={{ color: 'var(--fix)' }}>{err || (es ? `No pudimos abrir su proyecto guardado (${loadError}).` : `We couldn't open your saved project (${loadError}).`)}
-        {!err && raw && <> <button className="btn quiet" onClick={() => saveFile('damaged-project.permitpack', raw, 'application/json')}>{es ? 'Descargar la copia guardada' : 'Download the saved copy'}</button></>}</p>}
+        {!err && raw && <> <button className="btn quiet" onClick={() => saveFile('damaged-project.permitpack', raw, 'application/json')}>{L("Download the saved copy")}</button></>}</p>}
       <Projects key={tick} lang={lang} onPick={onPick} onNew={() => onStart(false)} />
-      <p style={{ marginTop: 28 }}><button className="btn quiet" onClick={onClean}>{es ? 'Para dibujantes: limpiar un archivo DWG o DXF' : 'For drafters: clean and fix a DWG or DXF file'}</button></p>
-      <p className="help" style={{ fontSize: '.82rem' }}>{es ? 'Código abierto (Apache-2.0).' : 'Open source (Apache-2.0).'} <a href="./THIRD_PARTY_NOTICES.txt">{es ? 'Avisos de terceros' : 'Third-party notices'}</a> · <a href="https://github.com/6Diggz/open-permit-hub" target="_blank" rel="noreferrer">{es ? 'Código fuente' : 'Source code'}</a> · {es ? 'Reglas' : 'Rules'} {PACK_ID}, {es ? 'revisadas el' : 'checked'} {PACK.verifiedOn}</p>
+      <p style={{ marginTop: 28 }}><button className="btn quiet" onClick={onClean}>{L("For drafters: clean and fix a DWG or DXF file")}</button></p>
+      <p className="help" style={{ fontSize: '.82rem' }}>{L("Open source (Apache-2.0).")} <a href="./THIRD_PARTY_NOTICES.txt">{L("Third-party notices")}</a> · <a href="https://github.com/6Diggz/open-permit-hub" target="_blank" rel="noreferrer">{L("Source code")}</a> · {L("Rules")} {PACK_ID}, {L("checked")} {PACK.verifiedOn}</p>
     </div>
     <div className="sample" aria-label={L("Example result from the demo lot")}><InspectionCard example report={sample} lang={lang} /><ResultList results={sample.results.filter(r => r.status === 'FAIL').slice(0, 1)} lang={lang} compact /></div>
     </main>
@@ -598,30 +627,30 @@ function SheetItems({ p, update, report, lang }: { p: Project; update: U; report
 function InspectionCard({ report, lang, score, appDate = null, example, plain, likelyYes }: { report: Report; lang: Lang; score?: string; appDate?: string | null; example?: boolean; plain?: string; likelyYes?: boolean }) {
   const es = lang === 'es';
   // r4cold-02: a "Likely yes" plain answer must not sit under a "Some answers are missing" headline.
-  const v = likelyYes && report.overall === 'INCOMPLETE' ? (es ? `Probablemente sí · quedan ${report.counts.UNKNOWN} preguntas` : `Likely yes · ${report.counts.UNKNOWN} questions left`) : { READY_FOR_PREPARER: es ? 'Listo para su preparador' : 'Ready for your preparer', FIX_ISSUES: es ? 'Hay cosas que corregir' : 'Some things need fixing', INCOMPLETE: es ? 'Falta información' : 'Some answers are missing', NOT_SUPPORTED: es ? 'Dirección no soportada' : 'Address not supported yet' }[report.overall];
+  const v = likelyYes && report.overall === 'INCOMPLETE' ? (es ? `Probablemente sí · quedan ${report.counts.UNKNOWN} preguntas` : `Likely yes · ${report.counts.UNKNOWN} questions left`) : { READY_FOR_PREPARER: L("Ready for your preparer"), FIX_ISSUES: L("Some things need fixing"), INCOMPLETE: L("Some answers are missing"), NOT_SUPPORTED: L("Address not supported yet") }[report.overall];
   const c = report.counts; const fr = rulesLine(appDate, report.pack, es);
   return <section className="card" aria-live="polite" tabIndex={-1}>
-    {example ? <h2 className="card-h">{es ? 'Resultado de ejemplo (lote de demostración, no es su proyecto)' : 'Example result (demo lot, not your project)'}</h2> : <h3>{es ? 'Tarjeta de revisión' : 'Check card'}</h3>}
+    {example ? <h2 className="card-h">{L("Example result (demo lot, not your project)")}</h2> : <h3>{L("Check card")}</h3>}
     <div className="verdict">{v}</div>
     {plain && <p className="sub" data-testid="plain-answer"><strong>{plain}</strong></p>}
-    <div className="sub">{es ? 'Revisión por software, no de la ciudad' : 'Software check, not a city review'} · {example ? (es ? `reglas de LA al ${PACK.verifiedOn}` : `LA rules as of ${PACK.verifiedOn}`) /* r4cold-07 */ : fr.text}</div>
-    {score && <div className="sub">{es ? 'Puntos de la hoja: ' : 'Sheet items: '}{score}</div>}
-    <div className="sub" style={{ marginBottom: 4 }}>{es ? 'Revisiones de reglas (una revisión de reglas puede cubrir varios puntos de la hoja)' : 'Rule checks (one rule check can cover several sheet items)'}</div>
-    <div className="punch"><div><b>{c.FAIL}</b>{es ? 'Corregir' : 'Fix'}</div><div><b>{c.UNKNOWN}</b>{es ? 'Falta info' : 'Need info'}</div><div><b>{c.PASS}</b>{es ? 'Cumple' : 'Pass'}</div><div><b>{c.NOT_CHECKED}</b>{es ? 'Apagado' : 'Off'}</div></div>
+    <div className="sub">{L("Software check, not a city review")} · {example ? (es ? `reglas de LA al ${PACK.verifiedOn}` : `LA rules as of ${PACK.verifiedOn}`) /* r4cold-07 */ : fr.text}</div>
+    {score && <div className="sub">{L("Sheet items: ")}{score}</div>}
+    <div className="sub" style={{ marginBottom: 4 }}>{L("Rule checks (one rule check can cover several sheet items)")}</div>
+    <div className="punch"><div><b>{c.FAIL}</b>{L("Fix")}</div><div><b>{c.UNKNOWN}</b>{L("Need info")}</div><div><b>{c.PASS}</b>{L("Pass")}</div><div><b>{c.NOT_CHECKED}</b>{L("Off")}</div></div>
   </section>;
 }
 function ResultList({ results, lang, compact }: { results: Result[]; lang: Lang; compact?: boolean }) {
   const es = lang === 'es';
   const order = ['FAIL', 'UNKNOWN', 'NOT_CHECKED', 'INFO', 'PASS'];
-  const label = { FAIL: es ? 'Corregir' : 'Fix', UNKNOWN: es ? 'Falta info' : 'Need info', PASS: es ? 'Cumple' : 'Pass', NOT_CHECKED: es ? 'No revisado' : 'Not checked', INFO: es ? 'Nota' : 'Note' };
+  const label = { FAIL: L("Fix"), UNKNOWN: L("Need info"), PASS: L("Pass"), NOT_CHECKED: L("Not checked"), INFO: L("Note") };
   return <ul className="results">{[...results].sort((a, b) => order.indexOf(a.status) - order.indexOf(b.status)).map(r =>
     <li key={r.rule.id} className={`res ${r.status}`}>
       <div className="head"><span className="tag">{label[r.status]}</span><span className="title">{r.rule.title[lang]}</span></div>
-      <p>{r.msg[lang]}</p>{r.next && <p className="next"><strong>{es ? 'Siguiente: ' : 'Next: '}</strong>{r.next[lang]}</p>}
-      {r.dismissed && <p className="pending">{es ? 'Descartado' : 'Dismissed'}: {r.dismissed}</p>}
-      {(() => { const cite = <p className="cite">{r.rule.id} · {r.rule.cites.map(c => citeText(c, es)).join('; ')}{RULE_ITEMS[r.rule.id]?.length ? ` · ${es ? 'hoja LADBS' : 'LADBS sheet'} ${RULE_ITEMS[r.rule.id].join(', ')}` : COUNTY_RULE_ITEMS[r.rule.id]?.length ? ` · ${es ? 'lista del condado' : 'County checklist'} ${COUNTY_RULE_ITEMS[r.rule.id].join(', ')}` : ''}{r.rule.cites.some(c => !c.verified) && <span className="pending"> · {es ? 'cita en verificación' : 'citation being verified'}</span>}</p>;
+      <p>{r.msg[lang]}</p>{r.next && <p className="next"><strong>{L("Next: ")}</strong>{r.next[lang]}</p>}
+      {r.dismissed && <p className="pending">{L("Dismissed")}: {r.dismissed}</p>}
+      {(() => { const cite = <p className="cite">{r.rule.id} · {r.rule.cites.map(c => citeText(c, es)).join('; ')}{RULE_ITEMS[r.rule.id]?.length ? ` · ${L("LADBS sheet")} ${RULE_ITEMS[r.rule.id].join(', ')}` : COUNTY_RULE_ITEMS[r.rule.id]?.length ? ` · ${L("County checklist")} ${COUNTY_RULE_ITEMS[r.rule.id].join(', ')}` : ''}{r.rule.cites.some(c => !c.verified) && <span className="pending"> · {L("citation being verified")}</span>}</p>;
         // r4cold-07: the landing example keeps its sources one tap away instead of a citation wall.
-        return compact ? <details><summary className="cite">{es ? 'Fuentes' : 'Sources'}</summary>{cite}</details> : cite; })()}
+        return compact ? <details><summary className="cite">{L("Sources")}</summary>{cite}</details> : cite; })()}
     </li>)}</ul>;
 }
 
@@ -632,26 +661,26 @@ function Projects({ lang, onPick, onNew }: { lang: Lang; onPick: (id: string) =>
   const [renaming, setRenaming] = useState<string | null>(null); const [name, setName] = useState(''); const [backupNote, setBackupNote] = useState('');
   const [kept, setKept] = useState<Persist | null>(null); useEffect(() => { let live = true; void persistResult().then(r => { if (live) setKept(r); }); return () => { live = false; }; }, []);
   if (!items.length) return null;
-  return <section aria-label={es ? 'Sus proyectos' : 'Your projects'} style={{ marginTop: 28 }}>
-    <div style={{ display: 'flex', gap: 8, alignItems: 'center', flexWrap: 'wrap', margin: '0 0 8px' }}><h2 style={{ fontSize: '1.05rem', margin: 0, flex: 1 }}>{es ? 'Sus proyectos en este dispositivo' : 'Your projects on this device'}</h2>
-      <button className="btn" onClick={onNew}>{es ? '+ Proyecto nuevo' : '+ New project'}</button>
+  return <section aria-label={L("Your projects")} style={{ marginTop: 28 }}>
+    <div style={{ display: 'flex', gap: 8, alignItems: 'center', flexWrap: 'wrap', margin: '0 0 8px' }}><h2 style={{ fontSize: '1.05rem', margin: 0, flex: 1 }}>{L("Your projects on this device")}</h2>
+      <button className="btn" onClick={onNew}>{L("+ New project")}</button>
       <button className="btn quiet" onClick={() => { const bad: string[] = []; const ps = items.flatMap(e => { try { return [store.open(e.id)]; } catch { bad.push(e.name || e.address || e.id); return []; } });
         // Local date in the file name (an evening backup in LA is still today's).
         download(`all-projects-${new Date(Date.now() - new Date().getTimezoneOffset() * 60000).toISOString().slice(0, 10)}.permitpack`, serializeAll(ps), 'application/json');
-        setBackupNote(bad.length ? (es ? `${bad.length} proyectos no se pudieron leer y no están en este respaldo: ${bad.join(', ')}. Ábralos uno por uno para descargar su copia guardada.` : `${bad.length} projects could not be read and are not in this backup: ${bad.join(', ')}. Open each one to download its saved copy.`) : ''); }}>{es ? 'Respaldar todos los proyectos' : 'Back up all projects'}</button></div>
+        setBackupNote(bad.length ? (es ? `${bad.length} proyectos no se pudieron leer y no están en este respaldo: ${bad.join(', ')}. Ábralos uno por uno para descargar su copia guardada.` : `${bad.length} projects could not be read and are not in this backup: ${bad.join(', ')}. Open each one to download its saved copy.`) : ''); }}>{L("Back up all projects")}</button></div>
     {backupNote && <p className="help" role="alert" style={{ color: 'var(--fix)' }}>{backupNote}</p>}
-    <p className="help" style={{ margin: '0 0 8px' }}>{es ? 'Los proyectos viven solo en este dispositivo. Guarde un respaldo de todos a menudo; ábralo con "Abrir un archivo" para restaurarlos.' : 'Projects live only on this device. Back them all up often; open the file with "Open a saved pack" to restore them.'}</p>
+    <p className="help" style={{ margin: '0 0 8px' }}>{L("Projects live only on this device. Back them all up often; open the file with \"Open a saved pack\" to restore them.")}</p>
     {/* OUT2-10: what the browser said when asked to keep this site's data. */}
     {kept && <p className="help" role="status" data-persist={kept} style={{ margin: '0 0 8px' }}>{kept === 'granted' ? (es ? 'Almacenamiento: este navegador aceptó guardar estos proyectos y no borrarlos para liberar espacio.' : 'Storage: this browser agreed to keep these projects and not clear them to free up space.')
       : kept === 'denied' ? (es ? 'Almacenamiento: este navegador puede borrar estos proyectos si el dispositivo se queda sin espacio (en iPhone, también tras 7 días sin visitar). Guarde un respaldo.' : 'Storage: this browser may clear these projects if the device runs low on space (on iPhone, also after 7 days without a visit). Save a backup.')
       : (es ? 'Almacenamiento: este navegador no dice si guardará estos proyectos. Guarde un respaldo.' : 'Storage: this browser does not say whether it will keep these projects. Save a backup.')}</p>}
     <ul className="results" style={{ padding: 0 }}>{items.map(e => <li key={e.id} className="res" style={{ display: 'flex', gap: 8, alignItems: 'center', flexWrap: 'wrap' }}>
       {renaming === e.id ? <form style={{ display: 'flex', gap: 6, flex: 1 }} onSubmit={ev => { ev.preventDefault(); try { const x = store.open(e.id); x.name = name.trim() || x.name; store.save(x); } catch { /* gone */ } setRenaming(null); setItems(store.list()); }}>
-        <label className="sr" htmlFor={'rn-' + e.id}>{es ? 'Nombre' : 'Name'}</label><input id={'rn-' + e.id} autoFocus value={name} onChange={ev => setName(ev.target.value)} style={{ flex: 1, padding: 6 }} /><button className="btn">{es ? 'Guardar' : 'Save'}</button></form>
-        : <button className="btn quiet" style={{ flex: 1, textAlign: 'left', border: 0 }} onClick={() => onPick(e.id)}><strong>{(e.name === 'My garage conversion' || e.name === 'Mi conversión de garaje') && e.address.trim() ? e.address.split(',')[0] : e.name}</strong>{e.demo ? (es ? ' (ejemplo)' : ' (demo)') : ''}<br /><span style={{ fontSize: '.82rem', color: 'var(--pencil)' }}>{e.address || (es ? 'Sin dirección' : 'No address yet')} · {new Date(e.updatedAt).toLocaleDateString()}</span></button>}
-      <button className="btn quiet" onClick={() => { setRenaming(e.id); setName(e.name); }}>{es ? 'Renombrar' : 'Rename'}</button>
-      <button className="btn quiet" onClick={() => { try { store.duplicate(e.id); } catch { /* damaged */ } setItems(store.list()); }}>{es ? 'Duplicar' : 'Duplicate'}</button>
-      <button className="btn quiet" onClick={async () => { if (await ask({ title: es ? '¿Borrar este proyecto?' : 'Delete this project?', body: es ? `"${e.name}" se borra de este dispositivo. Guarde una copia antes si la necesita.` : `"${e.name}" is removed from this device. Save a backup first if you need it.`, confirm: es ? 'Borrar' : 'Delete', cancel: es ? 'Cancelar' : 'Cancel', danger: true })) { /* r5field-07: the visit photos go with the project */ let ids: string[] = []; try { ids = Object.values(store.open(e.id).inspection?.items ?? {}).map(r => r.photo).filter((x): x is string => !!x); } catch { /* damaged project: nothing to clean */ } store.remove(e.id); setItems(store.list()); if (ids.length) void import('../core/photos').then(m => ids.forEach(id => void m.delPhoto(id))); } }}>{es ? 'Borrar' : 'Delete'}</button>
+        <label className="sr" htmlFor={'rn-' + e.id}>{L("Name")}</label><input id={'rn-' + e.id} autoFocus value={name} onChange={ev => setName(ev.target.value)} style={{ flex: 1, padding: 6 }} /><button className="btn">{L("Save")}</button></form>
+        : <button className="btn quiet" style={{ flex: 1, textAlign: 'left', border: 0 }} onClick={() => onPick(e.id)}><strong>{(e.name === 'My garage conversion' || e.name === 'Mi conversión de garaje') && e.address.trim() ? e.address.split(',')[0] : e.name}</strong>{e.demo ? (L(" (demo)")) : ''}<br /><span style={{ fontSize: '.82rem', color: 'var(--pencil)' }}>{e.address || (L("No address yet"))} · {new Date(e.updatedAt).toLocaleDateString()}</span></button>}
+      <button className="btn quiet" onClick={() => { setRenaming(e.id); setName(e.name); }}>{L("Rename")}</button>
+      <button className="btn quiet" onClick={() => { try { store.duplicate(e.id); } catch { /* damaged */ } setItems(store.list()); }}>{L("Duplicate")}</button>
+      <button className="btn quiet" onClick={async () => { if (await ask({ title: L("Delete this project?"), body: es ? `"${e.name}" se borra de este dispositivo. Guarde una copia antes si la necesita.` : `"${e.name}" is removed from this device. Save a backup first if you need it.`, confirm: L("Delete"), cancel: L("Cancel"), danger: true })) { /* r5field-07: the visit photos go with the project */ let ids: string[] = []; try { ids = Object.values(store.open(e.id).inspection?.items ?? {}).map(r => r.photo).filter((x): x is string => !!x); } catch { /* damaged project: nothing to clean */ } store.remove(e.id); setItems(store.list()); if (ids.length) void import('../core/photos').then(m => ids.forEach(id => void m.delPhoto(id))); } }}>{L("Delete")}</button>
     </li>)}</ul>
   </section>;
 }
