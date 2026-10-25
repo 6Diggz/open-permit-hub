@@ -133,7 +133,7 @@ if (dx) {
   const has = (c: number, v: string) => pairs.some(([a, b]) => a === c && b === v);
   ok(okPairs, 'DXF is well-formed group code / value pairs'); ok(has(2, 'HEADER') && has(2, 'ENTITIES') && has(0, 'EOF'), 'DXF has HEADER, ENTITIES and EOF');
   const polys = pairs.filter(([a, b]) => a === 0 && (b === 'LWPOLYLINE' || b === 'POLYLINE')).length; ok(polys >= 6, `DXF has ${polys} outlines (lot, house, ADU, rooms)`);
-  const layers = new Set(pairs.filter(([a]) => a === 8).map(([, b]) => b)); ok(['C-PROP', 'A-EXST-BLDG', 'A-ADU-WALL'].every(l => layers.has(l)), 'DXF uses the plan layers');
+  const layers = new Set(pairs.filter(([a]) => a === 8).map(([, b]) => b)); ok(['C-PROP', 'A-BLDG-EXST', 'A-WALL-EXST'].every(l => layers.has(l)), 'DXF uses the plan layers');
   const ins = pairs.findIndex(([a, b]) => a === 9 && b === '$INSUNITS'); ok(ins < 0 || pairs[ins + 1][1] === '1', `DXF units are inches (${ins < 0 ? 'R12 notes units in text' : '$INSUNITS 1'})`);
 } else ok(false, 'dxf export');
 const zip = await ex('handoff_zip');

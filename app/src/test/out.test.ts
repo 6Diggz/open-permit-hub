@@ -69,7 +69,7 @@ describe('round 1 outputs', () => {
   it('parity-10 site plan labels the street and the building separation', async () => {
     const q = { ...p, site: { ...p.site, address: '1234 W 52nd St, Los Angeles' } }; const t = pdfText(await sheetsPDF(q, 'draft'));
     expect(t).toContain('STREET: W 52ND ST'); expect(t).toContain('BUILDING SEPARATION');
-    const spec = sitePlanSpec(q); expect(spec.texts.some(x => x.text === 'STREET: W 52ND ST')).toBe(true); expect(spec.dims.some(x => x.text?.includes('BUILDING SEPARATION'))).toBe(true); expect(spec.dims.some(x => x.layer === 'C-PROP-SETB')).toBe(true);
+    const spec = sitePlanSpec(q); expect(spec.texts.some(x => x.text === 'STREET: W 52ND ST')).toBe(true); expect(spec.dims.some(x => x.text?.includes('BUILDING SEPARATION'))).toBe(true); expect(spec.dims.some(x => x.layer === 'C-PROP-SBCK')).toBe(true);
   });
   it('OUT-06 sheets name the preparer and say the software is not the preparer', async () => { const q = { ...p, people: { ...p.people, preparerName: 'Ana Ruiz', preparerRole: 'drafter' as const } }; const t = pdfText(await sheetsPDF(q, 'handoff')); expect(t).toContain('Ana Ruiz (drafter)'); expect(t).toMatch(/software is not the preparer/); });
   it('qa-16 characters the PDF font cannot print are listed, and the PDF still builds', async () => { const q = { ...p, people: { ...p.people, ownerName: '王 שלום 😀' } }; const t = pdfText(await sheetsPDF(q, 'draft')).replace(/\n/g, ' '); expect(t).toContain('U+05E9'); expect(t).not.toContain('U+738B') /* OUT2-17: Chinese prints now */; expect(t).toContain("can't print in this PDF yet"); });

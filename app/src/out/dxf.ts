@@ -37,7 +37,7 @@ export function addCad(p: Project, s: SitePlanSpec) {
 export function sitePlanSpec(p: Project): SitePlanSpec {
   if (p.site.lot.length < 3) throw new Error('The lot has no shape yet. Enter the lot size first.');
   const lot = p.site.lot, fp = p.adu.footprint; const s: SitePlanSpec = { outlines: [], dims: [], texts: [] };
-  s.outlines.push({ layer: 'C-PROP', pts: lot.map(pt) }, { layer: 'A-EXST-BLDG', pts: p.site.primary.map(pt) }, { layer: 'A-ADU-WALL', pts: fp.map(pt) });
+  s.outlines.push({ layer: 'C-PROP', pts: lot.map(pt) }, { layer: 'A-BLDG-EXST', pts: p.site.primary.map(pt) }, { layer: p.adu.mode === 'conversion' ? 'A-WALL-EXST' : 'A-WALL', pts: fp.map(pt) });
   // Lot line lengths
   lot.forEach((a, i) => { const b = lot[(i + 1) % lot.length]; s.dims.push({ layer: 'A-ANNO-DIMS', a: pt(a), b: pt(b), offset: -36 }); });
   // Setbacks: ADU to each side/rear line, as a dimension from the closest ADU corner square to the line
@@ -46,7 +46,7 @@ export function sitePlanSpec(p: Project): SitePlanSpec {
     const dx = b.x - a.x, dy = b.y - a.y, L = Math.hypot(dx, dy); if (!L) return; const nx = -dy / L, ny = dx / L;
     const c = fp.reduce((m, q) => (Math.abs((q.x - a.x) * nx + (q.y - a.y) * ny) < Math.abs((m.x - a.x) * nx + (m.y - a.y) * ny) ? q : m), fp[0]);
     const proj = { x: c.x - nx * ((c.x - a.x) * nx + (c.y - a.y) * ny), y: c.y - ny * ((c.x - a.x) * nx + (c.y - a.y) * ny) };
-    s.dims.push({ layer: 'C-PROP-SETB', a: pt(c), b: pt(proj), offset: 18, text: `<> SETBACK` });
+    s.dims.push({ layer: 'C-PROP-SBCK', a: pt(c), b: pt(proj), offset: 18, text: `<> SETBACK` });
   });
   // Building separation ADU to house
   const g = gap(fp, p.site.primary);
@@ -68,16 +68,16 @@ export function sitePlanSpec(p: Project): SitePlanSpec {
   // North arrow (closed arrow outline + "N"), turned to true north: degrees clockwise from the drawing's +Y.
   { const lb = bbox(lot); const cx = IN(lb.maxX) + 72, cy = IN(lb.maxY) - 48, r = 30, an = ((p.site.northDeg ?? 0) * Math.PI) / 180;
     const ux = Math.sin(an), uy = Math.cos(an), hx = -uy, hy = ux; const P = (f: number, g: number) => [+(cx + ux * f + hx * g).toFixed(4), +(cy + uy * f + hy * g).toFixed(4)];
-    s.outlines.push({ layer: 'G-ANNO-TEXT', pts: [P(r, 0), P(-r, 10), P(-r * 0.55, 0), P(-r, -10)] });
-    const t = P(r + 14, 0); s.texts.push({ layer: 'G-ANNO-TEXT', x: t[0] - 4, y: t[1] - 4, h: 10, text: 'N' });
-    if (p.site.northDeg == null) s.texts.push({ layer: 'G-ANNO-TEXT', x: cx - 40, y: cy - r - 20, h: 6, text: 'NORTH NOT SET - CHECK BEFORE SUBMITTAL' }); }
+    s.outlines.push({ layer: 'A-ANNO-TEXT', pts: [P(r, 0), P(-r, 10), P(-r * 0.55, 0), P(-r, -10)] });
+    const t = P(r + 14, 0); s.texts.push({ layer: 'A-ANNO-TEXT', x: t[0] - 4, y: t[1] - 4, h: 10, text: 'N' });
+    if (p.site.northDeg == null) s.texts.push({ layer: 'A-ANNO-TEXT', x: cx - 40, y: cy - r - 20, h: 6, text: 'NORTH NOT SET - CHECK BEFORE SUBMITTAL' }); }
   const se = p.site.streetEdge, a = lot[se], b = lot[(se + 1) % lot.length];
   const street = streetName(p.site.address);
-  s.texts.push({ layer: 'G-ANNO-TEXT', x: IN((a.x + b.x) / 2) - 60, y: IN((a.y + b.y) / 2) - 90, h: 14, text: street ? `STREET: ${street.toUpperCase()}` : 'STREET' });
-  const lab = (pl: Poly, t: string) => { const bb = bbox(pl); s.texts.push({ layer: 'G-ANNO-TEXT', x: IN((bb.minX + bb.maxX) / 2) - t.length * 3, y: IN((bb.minY + bb.maxY) / 2), h: 10, text: t }); };
+  s.texts.push({ layer: 'A-ANNO-TEXT', x: IN((a.x + b.x) / 2) - 60, y: IN((a.y + b.y) / 2) - 90, h: 14, text: street ? `STREET: ${street.toUpperCase()}` : 'STREET' });
+  const lab = (pl: Poly, t: string) => { const bb = bbox(pl); s.texts.push({ layer: 'A-ANNO-TEXT', x: IN((bb.minX + bb.maxX) / 2) - t.length * 3, y: IN((bb.minY + bb.maxY) / 2), h: 10, text: t }); };
   lab(p.site.primary, 'EXISTING HOUSE'); lab(fp, p.adu.mode === 'conversion' ? 'GARAGE CONVERSION (ADU)' : 'ADU');
-  s.texts.push({ layer: 'G-ANNO-TEXT', x: IN(lot[0].x), y: IN(lot[0].y) - 150, h: 10, text: `${p.site.address || 'Address'}  APN ${p.site.apn || '-'}${p.site.zone ? '  ZONE ' + p.site.zone : ''}  UNITS: INCHES  ${PACK_ID}  DRAFT - verify all dimensions` });
-  s.texts.push({ layer: 'G-ANNO-TEXT', x: IN(lot[0].x), y: IN(lot[0].y) - 172, h: 8, text: `Prepared by ${p.people.preparerName || '-'} (${p.people.preparerRole})${p.people.preparerLicense ? ' Lic. ' + p.people.preparerLicense : ''}. Made with Open Permit Hub software; the software is not the preparer.` });
+  s.texts.push({ layer: 'A-ANNO-TEXT', x: IN(lot[0].x), y: IN(lot[0].y) - 150, h: 10, text: `${p.site.address || 'Address'}  APN ${p.site.apn || '-'}${p.site.zone ? '  ZONE ' + p.site.zone : ''}  UNITS: INCHES  ${PACK_ID}  DRAFT - verify all dimensions` });
+  s.texts.push({ layer: 'A-ANNO-TEXT', x: IN(lot[0].x), y: IN(lot[0].y) - 172, h: 8, text: `Prepared by ${p.people.preparerName || '-'} (${p.people.preparerRole})${p.people.preparerLicense ? ' Lic. ' + p.people.preparerLicense : ''}. Made with Open Permit Hub software; the software is not the preparer.` });
   return s;
 }
 
@@ -95,7 +95,7 @@ export const dxfText = (s: string) => s.replace(/[\r\n\t]/g, ' ').replace(/[^\x2
 export function toDXFR12(p: Project): string {
   const spec = sitePlanSpec(p); addCad(p, spec);
   const o: string[] = []; const w = (c: number, v: string | number) => o.push(String(c), String(v));
-  const base: [string, number][] = [['C-PROP', 7], ['A-EXST-BLDG', 8], ['A-ADU-WALL', 1], ['C-PROP-SETB', 3], ['A-ANNO-DIMS', 5], ['G-ANNO-TEXT', 7], ['A-AREA', 4], ['A-AREA-IDEN', 4], ['A-DOOR', 2], ['A-GLAZ', 5], ['G-ANNO-REDL', 1]];
+  const base: [string, number][] = [['C-PROP', 7], ['A-BLDG-EXST', 8], ['A-WALL', 1], ['A-WALL-EXST', 8], ['C-PROP-SBCK', 3], ['A-ANNO-DIMS', 5], ['A-ANNO-TEXT', 7], ['A-AREA', 4], ['A-AREA-IDEN', 4], ['A-DOOR', 2], ['A-GLAZ', 5], ['G-ANNO-REDL', 1]];
   const used = new Set([...spec.outlines.map(x => x.layer), ...spec.texts.map(x => x.layer), ...spec.dims.map(x => x.layer), ...(spec.circles ?? []).map(x => x.layer)]);
   const layers: [string, number][] = [...base, ...(spec.layers ?? []).filter(([n]) => !base.some(b => b[0] === n)), ...[...used].filter(n => !base.some(b => b[0] === n) && !(spec.layers ?? []).some(l => l[0] === n)).map(n => [n, 7] as [string, number])];
   w(0, 'SECTION'); w(2, 'HEADER'); w(9, '$ACADVER'); w(1, 'AC1009'); w(9, '$INSBASE'); w(10, 0); w(20, 0); w(30, 0); w(0, 'ENDSEC');
