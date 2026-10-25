@@ -90,17 +90,17 @@ for (const width of [390, 1440]) {
     await page.fill('#ask-in2', 'copper lamp river');
     const [d2] = await Promise.all([page.waitForEvent('download'), page.getByRole('button', { name: 'Save locked copy', exact: true }).click()]); const locked = join(tmp, `locked-${width}.permitpack`); await d2.saveAs(locked);
     await visibleButton(page, 'All projects').click();
-    await page.locator('input[type=file][accept=".permitpack,.json"]').setInputFiles(plain);
+    await page.locator('input[type=file][accept^=".permitpack"]').setInputFiles(plain);
     await page.getByRole('button', { name: 'Keep both' }).click();
     ok(await page.getByRole('heading', { level: 2, name: 'Checks' }).isVisible({ timeout: 5000 }).catch(() => false), `qa-01 a plain backup restores ${W}`);
     ok((await page.locator('h1').first().textContent()).includes('(opened copy)'), `appsec-06 opening a pack with the same id keeps both ${W}`);
     await visibleButton(page, 'All projects').click();
-    await page.locator('input[type=file][accept=".permitpack,.json"]').setInputFiles(locked);
+    await page.locator('input[type=file][accept^=".permitpack"]').setInputFiles(locked);
     await page.fill('#ask-in', 'copper lamp river'); await page.getByRole('button', { name: 'Open', exact: true }).click();
     await page.getByRole('button', { name: 'Keep both' }).click();
     ok(await page.getByRole('heading', { level: 2, name: 'Checks' }).isVisible({ timeout: 15000 }).catch(() => false), `qa-01 a locked pack restores with its passphrase ${W}`);
     writeFileSync(join(tmp, 'garbage.permitpack'), '{{{garbage');
-    await visibleButton(page, 'All projects').click(); await page.locator('input[type=file][accept=".permitpack,.json"]').setInputFiles(join(tmp, 'garbage.permitpack'));
+    await visibleButton(page, 'All projects').click(); await page.locator('input[type=file][accept^=".permitpack"]').setInputFiles(join(tmp, 'garbage.permitpack'));
     ok(await seen(page.getByText('This file is damaged or is not a permit pack.')), `qa-33 damaged file shows a plain message ${W}`);
     await c.close(); }
 
@@ -142,14 +142,14 @@ for (const width of [390, 1440]) {
 
   // Clean and Fix (qa-09, qa-10, OUT-18)
   { const c = await ctx(width); const page = await c.newPage(); await page.goto(BASE + '#clean');
-    await page.locator('input[type=file][accept=".dwg,.dxf"]').setInputFiles(FIXTURE); await page.getByText('mixed_r2018.dxf').waitFor({ timeout: 30000 });
+    await page.locator('input[type=file][accept^=".dwg,.dxf"]').setInputFiles(FIXTURE); await page.getByText('mixed_r2018.dxf').waitFor({ timeout: 30000 });
     await page.selectOption('#tgt', 'cnc'); await page.getByRole('button', { name: 'Check what will be lost' }).click();
     const lostTable = page.getByRole('region', { name: 'What will be lost' }); await lostTable.waitFor({ timeout: 30000 });
     ok(await lostTable.getByRole('cell', { name: 'MText' }).isVisible(), `qa-10 OUT-18 loss report lists MText for R12 ${W}`);
     const save = page.getByRole('button', { name: 'Save clean copy' }); ok(await save.isDisabled(), `qa-10 saving with losses needs a tick ${W}`);
     await page.getByLabel('I understand these will not be in the copy.').check(); ok(await save.isEnabled(), `qa-10 tick enables save ${W}`);
     const pad = '999\n' + 'x'.repeat(3000) + '\n'; writeFileSync(join(tmp, 'cut.dxf'), `${pad}  0\nSECTION\n  2\nENTITIES\n  0\nENDSEC\n  0\nEOF\n`);
-    await page.locator('input[type=file][accept=".dwg,.dxf"]').setInputFiles(join(tmp, 'cut.dxf')); await page.getByText('cut.dxf').waitFor({ timeout: 30000 }).catch(() => {});
+    await page.locator('input[type=file][accept^=".dwg,.dxf"]').setInputFiles(join(tmp, 'cut.dxf')); await page.getByText('cut.dxf').waitFor({ timeout: 30000 }).catch(() => {});
     const blocked = await page.getByText(/cut off or damaged|nothing to clean/).first().isVisible().catch(() => false);
     const errShown = await page.getByRole('alert').first().isVisible().catch(() => false);
     ok(blocked || errShown, `qa-09 an empty or cut-off drawing is flagged ${W}`);
@@ -169,7 +169,7 @@ if (!SMOKE && server) {
   ok(!!pdf, 'qa-07 offline: check report PDF exports');
   const [dxf] = await Promise.all([page.waitForEvent('download', { timeout: 20000 }), page.getByRole('button', { name: 'Site plan for CAD (DXF)' }).click()]).catch(() => [null]);
   ok(!!dxf, 'qa-07 offline: DXF exports');
-  await page.goto(BASE + '#clean'); await page.locator('input[type=file][accept=".dwg,.dxf"]').setInputFiles(FIXTURE);
+  await page.goto(BASE + '#clean'); await page.locator('input[type=file][accept^=".dwg,.dxf"]').setInputFiles(FIXTURE);
   ok(await seen(page.getByText('mixed_r2018.dxf'), 30000), 'qa-07 offline: Clean and Fix opens a file');
   // Plan-set pre-check offline, under the site's real Content-Security-Policy: pdf.js and its worker come from the precache.
   { const { PDFDocument, StandardFonts } = await import('pdf-lib'); const d = await PDFDocument.create(); const f = await d.embedFont(StandardFonts.Helvetica);

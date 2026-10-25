@@ -24,14 +24,16 @@ export function foldLine(line: string): string {
 export function deadlinesICS(p: Project, filedOn: string, seq = 0, issuedOn?: string): string {
   if (!isDate(filedOn)) throw new Error('Enter the filing date as a real date.');
   const fmt = (iso: string) => iso.replace(/-/g, '');
+  // r4reach-02: reminders follow the project language.
+  const es = p.people.language === 'es'; const x = (en: string, sp: string) => (es ? sp : en);
   const ev = (key: string, when: string, title: string, note: string) => [
     'BEGIN:VEVENT', `UID:${uidPart(p.id)}-${key}@open-permit-hub`, `SEQUENCE:${Math.max(0, Math.floor(seq))}`, `DTSTAMP:${new Date().toISOString().replace(/[-:]/g, '').slice(0, 15)}Z`,
     `DTSTART;VALUE=DATE:${fmt(when)}`, `SUMMARY:${icsText(title)}`, `DESCRIPTION:${icsText(note)}`,
-    'BEGIN:VALARM', 'TRIGGER:-P30D', 'ACTION:DISPLAY', `DESCRIPTION:${icsText(title + ' in 30 days')}`, 'END:VALARM', 'END:VEVENT'];
-  const events = [...ev('plancheck', addMonths(filedOn, 18), 'Plan check expires (LAMC 98.0603)', 'Get the permit issued or request an extension on or before this date.')];
+    'BEGIN:VALARM', 'TRIGGER:-P30D', 'ACTION:DISPLAY', `DESCRIPTION:${icsText(title + x(' in 30 days', ' en 30 días'))}`, 'END:VALARM', 'END:VEVENT'];
+  const events = [...ev('plancheck', addMonths(filedOn, 18), x('Plan check expires (LAMC 98.0603)', 'Vence la revisión de planos (LAMC 98.0603)'), x('Get the permit issued or request an extension on or before this date.', 'Obtenga el permiso o pida una extensión a más tardar en esta fecha.'))];
   if (issuedOn && !isDate(issuedOn)) throw new Error('Enter the permit issue date as a real date.');
   if (issuedOn) events.push(
-    ...ev('permitstart', addMonths(issuedOn, 12), 'Start work or the permit expires (LAMC 98.0602)', 'Work must start within 12 months of issue and must not stop for 12 months.'),
-    ...ev('permitlife', addMonths(issuedOn, 24), 'Permit 2-year limit (LAMC 98.0602)', 'The permit is valid for 2 years unless extended. Ask LADBS about an extension before this date.'));
+    ...ev('permitstart', addMonths(issuedOn, 12), x('Start work or the permit expires (LAMC 98.0602)', 'Empiece la obra o el permiso vence (LAMC 98.0602)'), x('Work must start within 12 months of issue and must not stop for 12 months.', 'La obra debe empezar dentro de 12 meses de la emisión y no debe parar por 12 meses.')),
+    ...ev('permitlife', addMonths(issuedOn, 24), x('Permit 2-year limit (LAMC 98.0602)', 'Límite de 2 años del permiso (LAMC 98.0602)'), x('The permit is valid for 2 years unless extended. Ask LADBS about an extension before this date.', 'El permiso vale por 2 años si no se extiende. Pregunte a LADBS por una extensión antes de esta fecha.')));
   return ['BEGIN:VCALENDAR', 'VERSION:2.0', 'PRODID:-//Open Permit Hub//EN', 'CALSCALE:GREGORIAN', ...events, 'END:VCALENDAR'].map(foldLine).join('\r\n') + '\r\n';
 }

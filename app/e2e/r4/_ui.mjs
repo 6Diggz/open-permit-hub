@@ -1,4 +1,4 @@
-import { createRequire } from 'module'; const require = createRequire('/home/claude/stress/e2e/lib.mjs');
+import { createRequire } from 'module'; const require = createRequire(new URL('../../package.json', import.meta.url));
 export const { chromium } = require('playwright');
 export const BASE = (process.env.BASE || 'http://127.0.0.1:4817/').replace(/\/?$/, '/');
 export async function rooms(n = 2, w = 390) { const b = await chromium.launch(); const c = await b.newContext({ viewport: { width: w, height: 844 }, hasTouch: w < 600 }); const page = await c.newPage(); page.setDefaultTimeout(8000);

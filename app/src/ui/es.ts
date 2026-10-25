@@ -164,6 +164,7 @@ export const ES = {
 "One attached ADU and one detached ADU can both be on a single-family lot.": "Un ADU unido y un ADU separado pueden estar juntos en un lote unifamiliar.",
 "Will the house wall facing the ADU be 1-hour rated?": "¿El muro de la casa que da al ADU tendrá resistencia de 1 hora?",
 "Needed when the house and the ADU are less than 5 ft apart.": "Se necesita cuando la casa y el ADU están a menos de 5 pies.",
+"Plan sheets are 24x36 inches. Print them at Actual size (100%) on 24x36 paper at a print shop. Printed smaller, the scale is wrong: measure the scale bar with a ruler to check.": "Las hojas de planos miden 24x36 pulgadas. Imprímalas a Tamaño real (100%) en papel de 24x36 en una imprenta. Si se imprimen más chicas, la escala queda mal: mida la barra de escala con una regla para revisar.",
 "The street was found but not this exact parcel. Enter the lot by hand below.": "Se encontró la calle pero no esta parcela exacta. Ingrese el lote a mano abajo.",
 "Sleeping": "Dormir",
 "Living": "Sala",

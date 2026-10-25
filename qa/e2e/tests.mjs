@@ -141,7 +141,7 @@ export const TESTS = [
   for (const n of [/Check report/, /Draft site plan/, /Site plan for CAD/]) { try { await download(t, pg, n, 12000); } catch { bad.push(String(n) + ': ' + (await pg.locator('[role=status]').allInnerTexts()).join(' ').slice(0, 90)); } }
   await pg.getByRole('button', { name: /All projects/ }).filter({ visible: true }).first().click().catch(() => {});
   await pg.getByRole('button', { name: /clean and fix/i }).first().click();
-  await pg.setInputFiles('input[accept=".dwg,.dxf"]', path.join(FIX, 'sample.dxf')); await pg.waitForTimeout(8000);
+  await pg.setInputFiles('input[accept^=".dwg,.dxf"]', path.join(FIX, 'sample.dxf')); await pg.waitForTimeout(8000);
   if (!(await pg.locator('section[aria-label="File report"]').count())) bad.push('Clean and Fix: ' + (await pg.locator('[role=alert]').allInnerTexts()).join(' ').slice(0, 90));
   expect(!bad.length, 'offline failures: ' + bad.join(' | '));
 } },
@@ -154,14 +154,14 @@ export const TESTS = [
 } },
 { id: 'qa-09-truncated-dwg', area: 'r1 sev4', findings: ['qa-09'], title: 'Clean and Fix warns on a truncated DWG instead of "cleaning" it to empty', fn: async t => {
   const { pg } = await newPage(t, DESK); await gotoApp(pg); await pg.getByRole('button', { name: /clean and fix/i }).first().click();
-  await pg.setInputFiles('input[accept=".dwg,.dxf"]', path.join(FIX, 'trunc_dwg2000.dwg')); await pg.waitForTimeout(6000);
+  await pg.setInputFiles('input[accept^=".dwg,.dxf"]', path.join(FIX, 'trunc_dwg2000.dwg')); await pg.waitForTimeout(6000);
   const txt = await pg.locator('main').innerText(); const alerts = (await pg.locator('[role=alert]').allInnerTexts()).join(' ');
   const saveOk = await pg.getByRole('button', { name: 'Save clean copy' }).isEnabled().catch(() => false);
   expect(/truncat|incomplete|cut off|damaged|corrupt|cortado|dañado/i.test(alerts + txt) || (alerts.trim() && !saveOk), 'truncated DWG opens as a normal file with no warning: ' + (txt.match(/AC10\d\d[^\n]*/) || [''])[0]);
 } },
 { id: 'qa-10-loss-report', area: 'r1 sev4', findings: ['qa-10', 'OUT-18'], title: 'Clean and Fix says what R12/CNC output will lose before saving', fn: async t => {
   const { pg } = await newPage(t, DESK); await gotoApp(pg); await pg.getByRole('button', { name: /clean and fix/i }).first().click();
-  await pg.setInputFiles('input[accept=".dwg,.dxf"]', path.join(FIX, 'example_2000.dwg')); await pg.locator('section[aria-label="File report"]').waitFor({ timeout: 60000 });
+  await pg.setInputFiles('input[accept^=".dwg,.dxf"]', path.join(FIX, 'example_2000.dwg')); await pg.locator('section[aria-label="File report"]').waitFor({ timeout: 60000 });
   await pg.selectOption('#tgt', 'cnc');
   const chk = pg.getByRole('button', { name: /what will be lost/i }); if (await chk.count()) { await chk.click(); await pg.waitForTimeout(5000); }
   const txt = await pg.locator('main').innerText();
@@ -258,7 +258,7 @@ export const TESTS = [
   await run('welcome'); await demo(pg);
   for (let i = 0; i < 5; i++) { await step(pg, i); await run('step' + (i + 1)); }
   await pg.goto(BASE + '#clean'); await pg.reload(); await pg.waitForTimeout(800);
-  if (await pg.locator('input[accept=".dwg,.dxf"]').count()) { await pg.setInputFiles('input[accept=".dwg,.dxf"]', path.join(FIX, 'sample.dxf')); await pg.waitForTimeout(4000); await run('clean'); }
+  if (await pg.locator('input[accept^=".dwg,.dxf"]').count()) { await pg.setInputFiles('input[accept^=".dwg,.dxf"]', path.join(FIX, 'sample.dxf')); await pg.waitForTimeout(4000); await run('clean'); }
   const sev = { critical: 0, serious: 0, moderate: 0, minor: 0 }; for (const v of Object.values(agg)) sev[v.impact] = (sev[v.impact] || 0) + v.nodes;
   t.summary = { bySeverity: sev, rules: agg }; t.note = Object.entries(sev).map(([k, n]) => `${k} ${n}`).join(', ');
   expect(!sev.critical && !sev.serious, 'axe critical/serious violations: ' + Object.entries(agg).filter(([, v]) => ['critical', 'serious'].includes(v.impact)).map(([k, v]) => `${k}(${v.nodes})`).join(' '));

@@ -36,7 +36,7 @@ let loadError = ''; let loadErrorId: string | null = null;
 const load = (): Project | null => { const id = store.lastId(); try { return id ? store.open(id) : null; } catch (e) { loadError = (e as Error).message; loadErrorId = id; return null; } };
 const persist = (p: Project) => store.save(p);
 function download(name: string, data: BlobPart, type: string) {
-  const url = URL.createObjectURL(new Blob([data], { type })); const a = document.createElement('a'); a.href = url; a.download = name; a.click(); setTimeout(() => URL.revokeObjectURL(url), 2000);
+  const url = URL.createObjectURL(new Blob([data], { type })); const a = document.createElement('a'); a.href = url; a.download = name; a.click(); setTimeout(() => URL.revokeObjectURL(url), 60000) /* r4reach-06: iOS reads the blob only after the user taps Download */;
 }
 /** On phones, hand the file to the phone's own share sheet (Messages, Mail, WhatsApp); elsewhere, download it. */
 async function shareOrDownload(name: string, data: string, type: string): Promise<'shared' | 'saved' | 'cancelled'> {
@@ -237,7 +237,7 @@ function Welcome({ lang, setLang, onStart, onOpen, onClean, onPick }: { onPick: 
         <button className="btn primary" onClick={() => onStart(false)}>{tr(lang, 'start')}</button>
         <button className="btn" onClick={() => onStart(true)}>{tr(lang, 'demo')}</button>
         <label className="btn quiet">{es ? 'Abrir un archivo' : 'Open a saved pack'}
-          <input type="file" accept=".permitpack,.json" className="sr" onChange={async e => { const f = e.target.files?.[0]; e.target.value = ''; if (f) await openFile(f); }} />
+          <input type="file" accept=".permitpack,.json,application/json,application/octet-stream" className="sr" onChange={async e => { const f = e.target.files?.[0]; e.target.value = ''; if (f) await openFile(f); }} />
         </label>
       </div>
       {(err || loadError) && <p role="alert" style={{ color: 'var(--fix)' }}>{err || (es ? `No pudimos abrir su proyecto guardado (${loadError}).` : `We couldn't open your saved project (${loadError}).`)}
@@ -387,7 +387,7 @@ function GarageStep({ p, update }: { p: Project; update: U }) {
     <h2>{L("Import a scan (optional)")}</h2>
     <p className="lead">{L("Scan the inside with Polycam (GLTF) or an app that exports Apple RoomPlan JSON. You can always type sizes instead.")}</p>
     <div className="grid2">
-      <div className="field"><label htmlFor="scan">{L("Scan file")}</label><input id="scan" type="file" accept=".gltf,.glb,.json" onChange={async e => {
+      <div className="field"><label htmlFor="scan">{L("Scan file")}</label><input id="scan" type="file" accept=".gltf,.glb,.json,application/octet-stream" onChange={async e => {
         const file = e.target.files?.[0]; if (!file) return; setScanMsg(L('Reading scan...'));
         try {
           if (file.size > SCAN_LIMITS.bytes) throw new Error(L('This scan file is too large.'));
@@ -468,6 +468,7 @@ function ExportStep({ p, update, report, lang }: { p: Project; update: U; report
       <button className="btn" disabled={!!busy} onClick={() => run('dxf', async () => { const { toDXF } = await import('../out/dxf'); download(`${slug(p)}-site-plan.dxf`, await toDXF(p) as BlobPart, 'application/dxf'); })}>{L("Site plan for CAD (DXF)")}</button>
       <button className="btn" onClick={() => { download(`${slug(p)}-materials.csv`, '﻿' + takeoffCSV(t, es), 'text/csv'); setNote(L('Saved to your downloads.')); }}>{L("Materials list (CSV)")}</button>
     </div>
+    <p className="help">{L("Plan sheets are 24x36 inches. Print them at Actual size (100%) on 24x36 paper at a print shop. Printed smaller, the scale is wrong: measure the scale bar with a ruler to check.")}</p>
     {note && !busy && <p role="status">{note}</p>}
     {busy && <p role="status">{L('Making')} {busy}...</p>}
     <h2>{L("Materials estimate")}</h2>

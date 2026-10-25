@@ -37,7 +37,7 @@ export function CleanFix({ onBack }: { onBack: () => void }) {
   const save = async () => {
     if (!file) return; setBusy(true); setErr('');
     try { const m = await cleanfix(); const out = m.clean(file.bytes, target, units); if (!out.length) throw new Error('The clean copy came out empty, so it was not saved.'); const ext = target === 'dwg' ? 'dwg' : 'dxf';
-      const url = URL.createObjectURL(new Blob([out as BlobPart])); const a = document.createElement('a'); a.href = url; a.download = file.name.replace(/\.(dwg|dxf)$/i, '') + `-clean-${target}.${ext}`; a.click(); setTimeout(() => URL.revokeObjectURL(url), 2000); }
+      const url = URL.createObjectURL(new Blob([out as BlobPart])); const a = document.createElement('a'); a.href = url; a.download = file.name.replace(/\.(dwg|dxf)$/i, '') + `-clean-${target}.${ext}`; a.click(); setTimeout(() => URL.revokeObjectURL(url), 60000) /* r4reach-06: iOS reads the blob only after the user taps Download */; }
     catch (e) { setErr(plainWasmError(e)); } setBusy(false);
   };
   const lostRows = loss?.ok ? loss.rows.filter(r => r.status !== 'kept' && r.group === 'object') : [];
@@ -50,7 +50,7 @@ export function CleanFix({ onBack }: { onBack: () => void }) {
     <h1>Clean and fix a CAD file.</h1>
     <p>Open any DWG or DXF. See what will break when you send it, then save a clean copy. Your original is never changed, and the file never leaves this device.</p>
     <label className="btn primary" style={{ display: 'inline-block', marginTop: 12 }}>Open a DWG or DXF
-      <input className="sr" type="file" accept=".dwg,.dxf" onChange={e => { const f = e.target.files?.[0]; e.target.value = ''; if (f) open(f); }} /></label>
+      <input className="sr" type="file" accept=".dwg,.dxf,application/octet-stream" onChange={e => { const f = e.target.files?.[0]; e.target.value = ''; if (f) open(f); }} /></label>
     {busy && <p role="status">Working...</p>}
     {err && <p role="alert" style={{ color: 'var(--fix)' }}>{err}</p>}
     {rep && file && <section aria-label="File report" style={{ marginTop: 24 }}>

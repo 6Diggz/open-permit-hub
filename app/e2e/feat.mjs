@@ -119,7 +119,7 @@ await page.getByText('Filled from the parcel map').scrollIntoViewIfNeeded(); awa
     await page.locator('.drawing').scrollIntoViewIfNeeded(); await shot(page, `review-pins-${width}.png`); await fullShot(page, `review-full-${width}.png`);
     // pins travel in the .permitpack: a reviewer with no account opens it
     await step(page, 'export'); const [bk] = await Promise.all([page.waitForEvent('download'), page.getByRole('button', { name: 'Save backup' }).click()]); const file = join(tmp, `rev-${width}.permitpack`); await bk.saveAs(file);
-    const c2 = await ctx(width); const r = await c2.newPage(); await r.goto(BASE); await r.locator('input[type=file][accept=".permitpack,.json"]').first().setInputFiles(file);
+    const c2 = await ctx(width); const r = await c2.newPage(); await r.goto(BASE); await r.locator('input[type=file][accept^=".permitpack"]').first().setInputFiles(file);
     await r.getByRole('heading', { level: 2 }).first().waitFor(); await step(r, 'review');
     ok(await r.locator('table.take tbody tr').count() === 3, `review: pins open on another device from the .permitpack ${W}`, `${await r.locator('table.take tbody tr').count()} rows; h2=${await r.getByRole('heading', { level: 2 }).first().textContent()}`);
     const [pdf] = await Promise.all([page.waitForEvent('download'), (await step(page, 'export'), page.getByRole('button', { name: 'Draft site plan (PDF, 24x36)' }).click())]); ok(!!(await pdf.path()), `review: PDF with markup sheet downloads ${W}`);
