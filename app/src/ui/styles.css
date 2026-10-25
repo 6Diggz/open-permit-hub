@@ -90,6 +90,11 @@ table.take { border-collapse: collapse; width: 100%; font-size: .9rem; } table.t
 .tri { flex-wrap: wrap; height: auto; }
 .tri button { min-height: 40px; }
 .form, .main { min-width: 0; max-width: 100%; }
+/* A phone-width form never grows past the screen: one shrinkable column, and choice groups wrap. */
+.form { grid-template-columns: minmax(0, 1fr); }
+.tri { flex-wrap: wrap; max-width: 100%; }
+.tri button { min-width: 0; overflow-wrap: anywhere; }
+.form input, .form select, .form textarea { max-width: 100%; min-width: 0; }
 @media (max-width: 600px) { .tri { width: 100%; } .tri button { flex: 1 1 auto; } }
 dialog.ask { border: 1.5px solid var(--ink); border-radius: var(--r-md); padding: 22px; max-width: min(440px, calc(100vw - 32px)); background: var(--sheet); color: var(--ink); }
 dialog.ask::backdrop { background: rgba(20, 22, 26, .45); }

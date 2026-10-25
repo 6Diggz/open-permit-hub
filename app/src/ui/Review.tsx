@@ -23,6 +23,8 @@ export function ReviewStep({ p, update, sel, setSel, placing, setPlacing, downlo
   const setPin = (id: string, fn: (x: Pin) => void, key?: string) => update(d => { const x = d.markup.pins.find(y => y.id === id); if (x) fn(x); }, key);
   /** One update per click: two updates in one handler would each start from the same old project and the second would drop the first. */
   const full = pins.length >= MAX_PINS;
+  // "Tap the plan" only makes sense with the plan on screen (on a phone it sits far above this step).
+  const showPlan = () => requestAnimationFrame(() => document.querySelector('.drawing')?.scrollIntoView({ block: 'nearest' }));
   const addPin = (comment = '', ref?: string, also?: (d: Project, pinId: string) => void) => { if (full) return; const id = uid(); update(d => { const spot = defaultPinSpot(d); d.markup.pins.push({ id, n: nextPinNumber(d.markup.pins), ...spot, comment, status: 'open', author: author.trim(), at: today(), ...(ref ? { ref } : {}) }); also?.(d, id); }); setSel(id); return id; };
   const head = (k: SortKey, label: string) => <th aria-sort={sort.k === k ? (sort.d === 1 ? 'ascending' : 'descending') : 'none'} scope="col">
     <button type="button" className="btn quiet" style={{ border: 0, padding: '2px 4px' }} onClick={() => setSort(s => ({ k, d: s.k === k ? (s.d === 1 ? -1 : 1) : 1 }))}>{label}{sort.k === k ? (sort.d === 1 ? ' ▲' : ' ▼') : ''}</button></th>;
@@ -33,7 +35,7 @@ export function ReviewStep({ p, update, sel, setSel, placing, setPlacing, downlo
       <div className="field"><label htmlFor="rv-au">{L('Your name (shown on your notes)')}</label><input id="rv-au" value={author} maxLength={80} autoComplete="name" onChange={e => { setAuthor(e.target.value); saveAuthor(e.target.value); }} /></div>
       <div className="field"><label id="rv-add">{L('Add a note')}</label>
         <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap' }} role="group" aria-labelledby="rv-add">
-          <button type="button" className="btn primary" disabled={full} aria-pressed={placing === 'new'} onClick={() => setPlacing(placing === 'new' ? false : 'new')}>{placing === 'new' ? L('Tap the plan to place it') : L('Place a pin on the plan')}</button>
+          <button type="button" className="btn primary" disabled={full} aria-pressed={placing === 'new'} onClick={() => { const on = placing !== 'new'; setPlacing(on ? 'new' : false); if (on) showPlan(); }}>{placing === 'new' ? L('Tap the plan to place it') : L('Place a pin on the plan')}</button>
           <button type="button" className="btn" disabled={full} onClick={() => { setPlacing(false); addPin(); }}>{L('Add a note at the ADU')}</button>
         </div>
         <span className="help" role="status">{full ? `${MAX_PINS} ${L('notes')}: ${L('the most one project can hold. Resolve and delete old notes to add more.')}` : placing ? L('Tap or click the spot on the plan. Press Escape to stop.') : `${pins.length} ${L('notes')}: ${open} ${L('open')}, ${pins.length - open} ${L('resolved')}.`}</span></div>
@@ -54,7 +56,7 @@ export function ReviewStep({ p, update, sel, setSel, placing, setPlacing, downlo
         <button type="button" aria-pressed={pin.status === 'open'} onClick={() => setPin(pin.id, x => { x.status = 'open'; })}>{L('Open')}</button>
         <button type="button" aria-pressed={pin.status === 'resolved'} onClick={() => setPin(pin.id, x => { x.status = 'resolved'; })}>{L('Resolved')}</button></div></div>
       <div className="field"><span className="help">{L('By')} {pin.author || '-'} · {pin.at}</span>
-        <button type="button" className="btn" aria-pressed={placing === pin.id} onClick={() => setPlacing(placing === pin.id ? false : pin.id)}>{placing === pin.id ? L('Tap the plan to place it') : L('Move this note')}</button>
+        <button type="button" className="btn" aria-pressed={placing === pin.id} onClick={() => { const on = placing !== pin.id; setPlacing(on ? pin.id : false); if (on) showPlan(); }}>{placing === pin.id ? L('Tap the plan to place it') : L('Move this note')}</button>
         <button type="button" className="btn quiet" onClick={() => { const id = pin.id; update(d => { d.markup.pins = d.markup.pins.filter(x => x.id !== id); d.markup.responses.forEach(r => { if (r.pinId === id) delete r.pinId; }); }); setSel(null); }}>{L('Delete note')}</button></div>
     </fieldset>}
 

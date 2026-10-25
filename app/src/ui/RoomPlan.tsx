@@ -1,4 +1,4 @@
-import { useRef, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import type { Project, Room } from '../core/model';
 import { bbox, type Poly, type Pt } from '../core/geom';
 import { fmtFtIn, fmtSqFt, ft, inch } from '../core/units';
@@ -22,7 +22,12 @@ export function RoomPlan({ p, selected, onSelect, onChange, onRemove }: { p: Pro
   const pts = (pl: Poly) => pl.map(q => `${q.x},${Y(q.y)}`).join(' ');
   const s = Math.max(vb.w, vb.h) / 520;
   const toModel = (e: React.PointerEvent): Pt => { const m = svg.current!.getScreenCTM()!.inverse(); const pt = new DOMPoint(e.clientX, e.clientY).matrixTransform(m); return { x: pt.x, y: Y(pt.y) }; };
-  const rooms = p.adu.rooms; const over = new Set(overlappingRooms(rooms).flat().map(r => r.id));
+  const rooms = p.adu.rooms;
+  // After Delete, keyboard focus moves to the next room (or the plan itself), never to the page body.
+  const refocus = useRef<number | null>(null);
+  useEffect(() => { const i = refocus.current; if (i == null) return; refocus.current = null;
+    const list = svg.current?.querySelectorAll<SVGElement>('polygon[role="button"]'); const el = list?.length ? list[Math.min(i, list.length - 1)] : svg.current; el?.focus(); }, [rooms.length]);
+  const over = new Set(overlappingRooms(rooms).flat().map(r => r.id));
   const describe = (r: Room) => { const z = roomSize(r); return `${r.name || L('Room')}, ${roomUseLabel(r.use)}, ${fmtFtIn(z.w)} x ${fmtFtIn(z.d)}, ${fmtSqFt(roomArea(r))}${z.taped ? `, ${L('tape-measured')}` : ''}`; };
   const tryPoly = (r: Room, poly: Poly, key: string) => { if (roomFits(poly, foot)) { setBlocked(false); onChange(r.id, poly, key); return true; } setBlocked(true); return false; };
 
@@ -33,7 +38,7 @@ export function RoomPlan({ p, selected, onSelect, onChange, onRemove }: { p: Pro
     return base.map((v, k) => (k === i ? q : v));
   };
   const key = (r: Room) => (e: React.KeyboardEvent) => {
-    if (e.key === 'Delete' || e.key === 'Backspace') { e.preventDefault(); onRemove(r.id); return; }
+    if (e.key === 'Delete' || e.key === 'Backspace') { e.preventDefault(); refocus.current = rooms.indexOf(r); onRemove(r.id); return; }
     if (e.key === 'Escape') { onSelect(null); return; }
     const st = e.shiftKey ? ft(1) : inch(1); const m: Record<string, [number, number]> = { ArrowLeft: [-st, 0], ArrowRight: [st, 0], ArrowUp: [0, st], ArrowDown: [0, -st] };
     const v = m[e.key]; if (!v) return; e.preventDefault(); onSelect(r.id);
@@ -47,7 +52,7 @@ export function RoomPlan({ p, selected, onSelect, onChange, onRemove }: { p: Pro
     if (tryPoly(r, next, 'room-key-' + r.id)) setLive(describe({ ...r, poly: next })); else setLive(L('It would go outside the garage outline.'));
   };
   return (<>
-    <svg ref={svg} style={{ userSelect: 'none' }} viewBox={`${vb.x} ${vb.y} ${vb.w} ${vb.h}`} role="group" aria-label={L('Floor plan. Each room is a button: arrow keys move it 1 inch, Shift moves 1 foot, Alt with arrows resizes, Delete removes it.')}
+    <svg ref={svg} tabIndex={-1} style={{ userSelect: 'none' }} viewBox={`${vb.x} ${vb.y} ${vb.w} ${vb.h}`} role="group" aria-label={L('Floor plan. Each room is a button: arrow keys move it 1 inch, Shift moves 1 foot, Alt with arrows resizes, Delete removes it.')}
       onPointerDown={e => { if (e.target === svg.current) onSelect(null); }}>
       <g color="var(--ink)">
         <polygon points={pts(foot)} fill="none" stroke="var(--ink)" strokeWidth={s * 5} />

@@ -64,7 +64,16 @@ export default function App() {
   if (p && !hist.current) hist.current = new History(p);
   setUiLang(lang);
 
-  useEffect(() => { if (p) setSaveState(persist(p)); }, [p]);
+  // Saves are batched: a drag fires dozens of edits a second, but storage is written once it settles (300 ms),
+  // and right away when the tab is hidden or closed, or another project is opened.
+  const pending = useRef<Project | null>(null); const saveTimer = useRef<number | undefined>(undefined);
+  const flushSave = () => { window.clearTimeout(saveTimer.current); const x = pending.current; pending.current = null; if (x) setSaveState(persist(x)); };
+  useEffect(() => {
+    if (pending.current && pending.current.id !== p?.id) flushSave();
+    if (!p) return; pending.current = p; window.clearTimeout(saveTimer.current); saveTimer.current = window.setTimeout(flushSave, 300);
+  }, [p]); // eslint-disable-line react-hooks/exhaustive-deps
+  useEffect(() => { const on = () => { if (document.visibilityState === 'hidden') flushSave(); }; window.addEventListener('pagehide', flushSave); document.addEventListener('visibilitychange', on);
+    return () => { flushSave(); window.removeEventListener('pagehide', flushSave); document.removeEventListener('visibilitychange', on); }; }, []); // eslint-disable-line react-hooks/exhaustive-deps
   useEffect(() => { navigator.storage?.persist?.().catch(() => {}); }, []);
   useEffect(() => { document.documentElement.lang = lang; const sk = document.querySelector('a[href="#main"]'); if (sk) sk.textContent = lang === 'es' ? 'Saltar al contenido' : 'Skip to content'; }, [lang]);
   // Another tab saved this project: say so now, before this tab's next save is refused.
@@ -86,7 +95,7 @@ export default function App() {
     const k = (e: KeyboardEvent) => { if (e.key === 'Escape' && placing) { setPlacing(false); return; } if (inField(e.target)) return; if ((e.metaKey || e.ctrlKey) && e.key.toLowerCase() === 'z') { e.preventDefault(); if (e.shiftKey) redo(); else undo(); } };
     window.addEventListener('keydown', k); return () => window.removeEventListener('keydown', k);
   });
-  const show = (x: Project, s = 0) => { setNotice(openNotes(x)); const y = { ...x, repairNotes: undefined }; hist.current = new History(y); setP(y); setStep(s); };
+  const show = (x: Project, s = 0) => { flushSave(); setNotice(openNotes(x)); const y = { ...x, repairNotes: undefined }; hist.current = new History(y); setP(y); setStep(s); };
 
   if (tool === 'clean') return <><CleanFix onBack={() => openTool('adu')} /><AskHost /></>;
   if (!p || !report) return <><AskHost /><Welcome onPick={id => { try { show(store.open(id)); } catch (e) { loadError = (e as Error).message; loadErrorId = id; setP(null); } }} onClean={() => openTool('clean')} lang={lang} setLang={setLang}
@@ -94,7 +103,7 @@ export default function App() {
 
   const steps: string[] = tr(lang, 'steps');
   const stepDot = (i: number) => { const mod = [['core', 'zoning', 'hazards'], ['zoning', 'fire', 'structural', 'fees'], ['egress'], [], [], []][i]; const rs = report.results.filter(r => mod.includes(r.rule.module)); return rs.some(r => r.status === 'FAIL') ? 'var(--fix)' : rs.some(r => r.status === 'UNKNOWN') ? 'var(--info-need)' : rs.some(r => r.status === 'NOT_CHECKED') ? 'var(--off)' : rs.some(r => r.status === 'PASS') ? 'var(--pass)' : 'transparent'; };
-  const close = () => { setP(null); hist.current = null; history.pushState(null, '', '#projects'); };
+  const close = () => { flushSave(); setP(null); hist.current = null; history.pushState(null, '', '#projects'); };
   const fresh = packFreshness(new Date(), p.applicationDate);
   const saveText = saveState === 'ok' ? tr(lang, 'saved') : saveState === 'blocked' ? L("Not saved: storage is blocked. Export a backup.") : L("Not saved: this project changed in another tab.");
 
@@ -185,8 +194,22 @@ function Welcome({ lang, setLang, onStart, onOpen, onClean, onPick }: { onPick: 
     try {
       if (f.size > MAX_BUNDLE_BYTES) throw new Error(es ? 'Este archivo es demasiado grande para ser un paquete.' : 'This file is too large to be a permit pack.');
       const text = await f.text(); const bundle = readBundle(text);
-      if (bundle) { let n = 0; for (const x of bundle.projects) { if (store.has(x.id)) { x.id = uid(); x.name = `${x.name} ${es ? '(copia abierta)' : '(opened copy)'}`; } if (store.save(x, { force: true }) === 'ok') n++; }
-        setErr(es ? `Se restauraron ${n} proyectos.${bundle.skipped ? ` ${bundle.skipped} estaban dañados.` : ''}` : `Restored ${n} projects.${bundle.skipped ? ` ${bundle.skipped} were damaged.` : ''}`); setTick(t => t + 1); return; }
+      if (bundle) {
+        // A project already on this device: an identical copy is skipped; for changed ones, ask once what to do.
+        const same = (x: Project) => { try { const m = store.open(x.id); return m.updatedAt === x.updatedAt && serialize({ ...m, rev: 0 }) === serialize({ ...x, rev: 0 }); } catch { return false; } };
+        const dupes = bundle.projects.filter(x => store.has(x.id)); const changed = dupes.filter(x => !same(x));
+        let how: string | null = 'replace';
+        if (changed.length) { how = await ask({ title: es ? 'Ya tiene algunos de estos proyectos' : 'You already have some of these projects', body: es ? `${changed.length} proyectos de la copia de seguridad ya están en este dispositivo con cambios distintos.` : `${changed.length} projects in the backup are already on this device with different changes.`, confirm: es ? 'Guardar los dos' : 'Keep both', alt: { label: es ? 'Reemplazar los míos' : 'Replace mine', value: 'replace' }, cancel: es ? 'Omitirlos' : 'Skip them' }) as string | null; if (how !== 'replace') how = how ? 'both' : 'skip'; }
+        let n = 0, upd = 0, kept = 0, full = 0;
+        for (const x of bundle.projects) {
+          if (store.has(x.id)) { if (same(x)) { kept++; continue; } if (how === 'skip') { kept++; continue; } if (how === 'both') { x.id = uid(); x.name = `${x.name} ${es ? '(copia abierta)' : '(opened copy)'}`; } }
+          const wasThere = store.has(x.id); const r = store.save(x, { force: true });
+          if (r === 'ok') { if (wasThere) upd++; else n++; } else full++;
+        }
+        const parts = es
+          ? [`Se restauraron ${n} proyectos.`, upd ? `${upd} se actualizaron.` : '', kept ? `${kept} ya estaban en este dispositivo.` : '', full ? `${full} no se pudieron restaurar: el almacenamiento de este dispositivo está lleno. Borre o descargue proyectos viejos e intente de nuevo.` : '', bundle.skipped ? `${bundle.skipped} estaban dañados.` : '']
+          : [`Restored ${n} projects.`, upd ? `${upd} were updated.` : '', kept ? `${kept} were already on this device.` : '', full ? `${full} could not be restored: this device's storage is full. Delete or download old projects and try again.` : '', bundle.skipped ? `${bundle.skipped} were damaged.` : ''];
+        setErr(parts.filter(Boolean).join(' ')); setTick(t => t + 1); return; }
       const x = await readPackFile(text, async () => ((await ask({ title: es ? 'Este paquete está bloqueado' : 'This pack is locked', body: es ? 'Ingrese la frase de acceso que le dieron con el archivo.' : 'Enter the passphrase you were given with the file.', input: 'password', minLength: 1, confirm: es ? 'Abrir' : 'Open', cancel: es ? 'Cancelar' : 'Cancel', labels: { field: es ? 'Frase de acceso' : 'Passphrase', show: es ? 'Mostrar' : 'Show' } })) as string | null));
       if (!x) return;
       if (store.has(x.id)) {
