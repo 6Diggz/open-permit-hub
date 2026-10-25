@@ -74,10 +74,10 @@ async function sitePlanSheet(doc: PDFDocument, p: Project, kind: Kind, sheets: s
     ['Rule pack', `${PACK_ID} (checked ${PACK.verifiedOn})`],   ];
   // Project data (LADBS item I.C.8): lot size, occupancy, type of construction, stories, height, fire zone, sprinklers.
   const yn = (v: string) => v === 'yes' ? 'Yes' : v === 'no' ? 'No' : 'Not answered';
-  rows.push(['Lot area', fmtSqFt(area(p.site.lot))], ['Occupancy', 'R-3 (dwelling unit; preparer to confirm)'],
+  rows.push(['Legal description', safe(p.site.legalDescription || 'Not entered (tract, block and lot from the deed or ZIMAS)').slice(0, 120)], ['Lot area', fmtSqFt(area(p.site.lot))], ['Occupancy', 'R-3 (dwelling unit; preparer to confirm)'],
     ['Construction type', p.adu.garageConstruction === 'wood' ? 'Type V-B wood frame (preparer to confirm)' : 'Preparer to state'],
     ['Stories', p.adu.mode === 'conversion' ? '1 (existing garage)' : 'Preparer to state'], ['ADU height', p.adu.heightMm ? fmtFtIn(p.adu.heightMm) : '-'],
-    ['Very High Fire Hazard Severity Zone', yn(p.site.flags.vhfhsz)], ['Sprinklers', yn(p.adu.sprinklered)], ['Sheet index', sheets.join('; ')]);
+    ['Very High Fire Hazard Severity Zone', yn(p.site.flags.vhfhsz)], ['Sprinklers', yn(p.adu.sprinklered)], ['Vicinity map', 'Not drawn by this app. The preparer adds one (a ZIMAS map works).'], ['Sheet index', sheets.join('; ')]);
   titleBlock(pg, p, 'SITE PLAN', 'A-1 Site plan', rows, f, fb);
   if (kind === 'draft') pg.drawText('DRAFT - NOT FOR SUBMITTAL', { x: W * 0.2, y: H * 0.25, size: 96, font: fb, color: rgb(0.85, 0.2, 0.15), opacity: 0.13, rotate: degrees(28) });
   if (kind === 'precheck') pg.drawText('Pre-check copy - not a submittal', { x: 44, y: H - 50, size: 10, font: fb, color: RED });

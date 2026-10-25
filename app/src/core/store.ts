@@ -1,6 +1,6 @@
 import type { Project } from './model';
 import { uid } from './model';
-import { migrate, serialize } from './permitpack';
+import { contentKey, migrate, serialize } from './permitpack';
 
 /** Many projects on one device (drafter workflow). Keys: opa.index (list), opa.p.<id> (data). Every access is try/catch. */
 export interface Entry { id: string; name: string; address: string; updatedAt: string; demo: boolean }
@@ -31,13 +31,17 @@ export function makeStore(kv: () => KV | null) {
     return index();
   }
   /** Save. Refuses ('conflict') when another tab saved this project after this tab last read it, unless `force`. */
-  function save(p: Project, opts: { force?: boolean } = {}): SaveResult {
+  /** Save. `keepTime` keeps the project's own "last edited" time (restoring a backup). */
+  function save(p: Project, opts: { force?: boolean; keepTime?: boolean } = {}): SaveResult {
     const cur = storedRev(p.id), mine = seen.get(p.id);
     if (!opts.force && cur != null && mine != null && cur !== mine) return 'conflict';
     const rev = (cur ?? 0) + 1; const before = get(P(p.id));
-    if (!set(P(p.id), serialize({ ...p, rev }))) return 'blocked';
+    // Opening a project, or saving it unchanged, must not move its "last edited" date.
+    if (before && !opts.keepTime) { try { const old = migrate(JSON.parse(before)); if (contentKey(old) === contentKey(p) && index().some(e => e.id === p.id)) { seen.set(p.id, cur ?? 0); return 'ok'; } } catch { /* damaged: overwrite */ } }
+    const at = opts.keepTime && p.updatedAt && !Number.isNaN(Date.parse(p.updatedAt)) ? p.updatedAt : new Date().toISOString();
+    if (!set(P(p.id), serialize({ ...p, rev }, at))) return 'blocked';
     const l = index().filter(e => e.id !== p.id);
-    l.unshift({ id: p.id, name: p.name, address: p.site.address, updatedAt: new Date().toISOString(), demo: p.site.apn.startsWith('0000-') });
+    l.unshift({ id: p.id, name: p.name, address: p.site.address, updatedAt: at, demo: p.site.apn.startsWith('0000-') });
     // If the list can't be written, undo the data write so no project is stored but missing from the list.
     if (!set(IDX, JSON.stringify(l))) { if (before == null) del(P(p.id)); else set(P(p.id), before); return 'blocked'; }
     seen.set(p.id, rev);

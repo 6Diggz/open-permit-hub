@@ -70,7 +70,7 @@ export function migrate(raw: any): Project {
   s.northDeg = fix('north direction', s.northDeg, x => isNum(x) && x >= 0 && x < 360, null);
   s.primaryHeightMm = fix('house height', s.primaryHeightMm, len, base.site.primaryHeightMm);
   s.existingAdus = numOrNull(s.existingAdus, 100); s.existingJadus = numOrNull(s.existingJadus, 100);
-  s.address = str(s.address); s.apn = str(s.apn, 40);
+  s.address = str(s.address); s.apn = str(s.apn, 40); s.legalDescription = str(s.legalDescription, 300);
   for (const k of Object.keys(base.site.flags) as (keyof typeof base.site.flags)[]) s.flags[k] = tri(s.flags[k]);
   s.otherBuildings = tri(s.otherBuildings); s.otherBuildingGapMm = fix('distance to other buildings', s.otherBuildingGapMm, len, null);
   s.jurisdictionConfirmed = s.jurisdictionConfirmed === true;
@@ -132,7 +132,9 @@ export function migrate(raw: any): Project {
   out.repairNotes = notes.length ? notes : undefined;
   return out;
 }
-export const serialize = (p: Project) => { const { repairNotes: _r, ...rest } = p; return JSON.stringify({ ...rest, updatedAt: new Date().toISOString() }, null, 1); };
+export const serialize = (p: Project, at = new Date().toISOString()) => { const { repairNotes: _r, ...rest } = p; return JSON.stringify({ ...rest, updatedAt: at }, null, 1); };
+/** What the user made, without save bookkeeping: two copies with the same key are the same project state. */
+export const contentKey = (p: Project) => { const { repairNotes: _r, updatedAt: _u, rev: _v, ...rest } = p as Project & { rev?: number }; return JSON.stringify(rest); };
 
 // Encrypted share/backup: AES-GCM 256, key from passphrase via PBKDF2-SHA256 600k (PR50, UU1524).
 // v1: header not authenticated. v2 (current): the header (format, v, kdf, salt, iv) is bound as AES-GCM additional data.

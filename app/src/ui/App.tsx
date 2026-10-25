@@ -23,7 +23,7 @@ import { CATALOG, RULE_ITEMS } from '../rules/ladbs-adu-2025';
 import { citeText } from '../rules/cites-es';
 import { tr, type Lang } from './i18n';
 import { L, setUiLang, uiLang } from './lang';
-import { encryptPack, passphraseProblem, readPackFile, serialize, serializeAll, readBundle, MAX_BUNDLE_BYTES } from '../core/permitpack';
+import { encryptPack, passphraseProblem, readPackFile, serialize, serializeAll, readBundle, contentKey, MAX_BUNDLE_BYTES } from '../core/permitpack';
 import { takeoff, takeoffCSV } from '../out/takeoff';
 import { plainWasmError } from '../out/wasm';
 import { missingGlyphNote } from '../out/glyphs';
@@ -103,7 +103,7 @@ export default function App() {
 
   if (tool === 'clean') return <><CleanFix onBack={() => openTool('adu')} /><AskHost /></>;
   if (!p || !report) return <><AskHost /><Welcome onPick={id => { try { show(store.open(id)); } catch (e) { loadError = (e as Error).message; loadErrorId = id; setP(null); } }} onClean={() => openTool('clean')} lang={lang} setLang={setLang}
-    onStart={(d) => { const x = d ? demoProject() : blankProject(); x.people.language = lang; if (!d && lang === 'es') x.name = 'Mi conversión de garaje'; show(x); }} onOpen={x => show(x, 3)} /></>;
+    onStart={(d) => { const x = d ? demoProject() : blankProject(); x.people.language = lang; if (lang === 'es') x.name = d ? 'Lote de ejemplo (no es una dirección real)' : 'Mi conversión de garaje'; show(x); }} onOpen={x => show(x, 3)} /></>;
 
   const steps: string[] = tr(lang, 'steps');
   const stepDot = (i: number) => { const mod = [['core', 'zoning', 'hazards'], ['zoning', 'fire', 'structural', 'fees'], ['egress'], [], [], []][i]; const rs = report.results.filter(r => mod.includes(r.rule.module)); return rs.some(r => r.status === 'FAIL') ? 'var(--fix)' : rs.some(r => r.status === 'UNKNOWN') ? 'var(--info-need)' : rs.some(r => r.status === 'NOT_CHECKED') ? 'var(--off)' : rs.some(r => r.status === 'PASS') ? 'var(--pass)' : 'transparent'; };
@@ -200,14 +200,14 @@ function Welcome({ lang, setLang, onStart, onOpen, onClean, onPick }: { onPick: 
       const text = await f.text(); const bundle = readBundle(text);
       if (bundle) {
         // A project already on this device: an identical copy is skipped; for changed ones, ask once what to do.
-        const same = (x: Project) => { try { const m = store.open(x.id); return m.updatedAt === x.updatedAt && serialize({ ...m, rev: 0 }) === serialize({ ...x, rev: 0 }); } catch { return false; } };
+        const same = (x: Project) => { try { return contentKey(store.open(x.id)) === contentKey(x); } catch { return false; } };
         const dupes = bundle.projects.filter(x => store.has(x.id)); const changed = dupes.filter(x => !same(x));
         let how: string | null = 'replace';
         if (changed.length) { how = await ask({ title: es ? 'Ya tiene algunos de estos proyectos' : 'You already have some of these projects', body: es ? `${changed.length} proyectos de la copia de seguridad ya están en este dispositivo con cambios distintos.` : `${changed.length} projects in the backup are already on this device with different changes.`, confirm: es ? 'Guardar los dos' : 'Keep both', alt: { label: es ? 'Reemplazar los míos' : 'Replace mine', value: 'replace' }, cancel: es ? 'Omitirlos' : 'Skip them' }) as string | null; if (how !== 'replace') how = how ? 'both' : 'skip'; }
         let n = 0, upd = 0, kept = 0, full = 0;
         for (const x of bundle.projects) {
           if (store.has(x.id)) { if (same(x)) { kept++; continue; } if (how === 'skip') { kept++; continue; } if (how === 'both') { x.id = uid(); x.name = `${x.name} ${es ? '(copia abierta)' : '(opened copy)'}`; } }
-          const wasThere = store.has(x.id); const r = store.save(x, { force: true });
+          const wasThere = store.has(x.id); const r = store.save(x, { force: true, keepTime: true });
           if (r === 'ok') { if (wasThere) upd++; else n++; } else full++;
         }
         const parts = es
@@ -265,6 +265,7 @@ function LotStep({ p, update, replace }: { p: Project; update: U; lang: Lang; re
       <div className="field"><label htmlFor="addr">{L("Street address")}</label><input id="addr" value={p.site.address} onChange={e => update(d => { d.site.address = e.target.value; }, 'addr')} autoComplete="street-address" /><span className="help">{p.site.address ? <a href={zimas} target="_blank" rel="noreferrer">{L("Open this address in ZIMAS")}</a> : L("Used only on your sheets. It stays on this device.")}</span></div>
       <ParcelLookup p={p} commit={replace} />
       <div className="field"><label htmlFor="apn">{L("Parcel number (APN)")}</label><input id="apn" value={p.site.apn} onChange={e => update(d => { d.site.apn = e.target.value; unmark(d, 'apn'); }, 'apn')} placeholder="1234-567-890" aria-describedby="apn-h" /><span className="help" id="apn-h">{tag('apn', L("The 10-digit number on your property tax bill."))}</span></div>
+      <div className="field"><label htmlFor="legal">{L("Legal description (tract, block and lot)")}</label><input id="legal" value={p.site.legalDescription ?? ''} maxLength={300} onChange={e => update(d => { d.site.legalDescription = e.target.value; }, 'legal')} aria-describedby="legal-h" /><span className="help" id="legal-h">{L("On your deed or in ZIMAS under \"Legal\". Optional; the title sheet shows it.")}</span></div>
       <div className="field"><label htmlFor="zone">{L("Zone")}</label><input id="zone" value={p.site.zone} onChange={e => update(d => { d.site.zone = e.target.value; unmark(d, 'zone'); }, 'zone')} placeholder="R1-1" aria-describedby="zone-h" /><span className="help" id="zone-h">{tag('zone', L("Shown in ZIMAS, like R1-1. Printed on your site plan."))}</span></div>
       <div className="field"><label htmlFor="jur">{L("City")}</label><select id="jur" value={p.site.jurisdiction} aria-describedby="jur-h" onChange={e => update(d => { d.site.jurisdiction = e.target.value as Project['site']['jurisdiction']; unmark(d, 'jurisdiction'); })}>
         <option value="unknown">{L("Not sure yet")}</option><option value="la-city">{L("City of Los Angeles")}</option><option value="la-county">{L("Unincorporated LA County")}</option><option value="other">{L("Another city")}</option></select>
@@ -542,17 +543,21 @@ export { SAFETY_MODULES, toFt };
 
 function Projects({ lang, onPick, onNew }: { lang: Lang; onPick: (id: string) => void; onNew: () => void }) {
   const [items, setItems] = useState(store.list); const es = lang === 'es';
-  const [renaming, setRenaming] = useState<string | null>(null); const [name, setName] = useState('');
+  const [renaming, setRenaming] = useState<string | null>(null); const [name, setName] = useState(''); const [backupNote, setBackupNote] = useState('');
   if (!items.length) return null;
   return <section aria-label={es ? 'Sus proyectos' : 'Your projects'} style={{ marginTop: 28 }}>
     <div style={{ display: 'flex', gap: 8, alignItems: 'center', flexWrap: 'wrap', margin: '0 0 8px' }}><h2 style={{ fontSize: '1.05rem', margin: 0, flex: 1 }}>{es ? 'Sus proyectos en este dispositivo' : 'Your projects on this device'}</h2>
       <button className="btn" onClick={onNew}>{es ? '+ Proyecto nuevo' : '+ New project'}</button>
-      <button className="btn quiet" onClick={() => { const ps = items.flatMap(e => { try { return [store.open(e.id)]; } catch { return []; } }); download(`all-projects-${new Date().toISOString().slice(0, 10)}.permitpack`, serializeAll(ps), 'application/json'); }}>{es ? 'Respaldar todos los proyectos' : 'Back up all projects'}</button></div>
+      <button className="btn quiet" onClick={() => { const bad: string[] = []; const ps = items.flatMap(e => { try { return [store.open(e.id)]; } catch { bad.push(e.name || e.address || e.id); return []; } });
+        // Local date in the file name (an evening backup in LA is still today's).
+        download(`all-projects-${new Date(Date.now() - new Date().getTimezoneOffset() * 60000).toISOString().slice(0, 10)}.permitpack`, serializeAll(ps), 'application/json');
+        setBackupNote(bad.length ? (es ? `${bad.length} proyectos no se pudieron leer y no están en este respaldo: ${bad.join(', ')}. Ábralos uno por uno para descargar su copia guardada.` : `${bad.length} projects could not be read and are not in this backup: ${bad.join(', ')}. Open each one to download its saved copy.`) : ''); }}>{es ? 'Respaldar todos los proyectos' : 'Back up all projects'}</button></div>
+    {backupNote && <p className="help" role="alert" style={{ color: 'var(--fix)' }}>{backupNote}</p>}
     <p className="help" style={{ margin: '0 0 8px' }}>{es ? 'Los proyectos viven solo en este dispositivo. Guarde un respaldo de todos a menudo; ábralo con "Abrir un archivo" para restaurarlos.' : 'Projects live only on this device. Back them all up often; open the file with "Open a saved pack" to restore them.'}</p>
     <ul className="results" style={{ padding: 0 }}>{items.map(e => <li key={e.id} className="res" style={{ display: 'flex', gap: 8, alignItems: 'center', flexWrap: 'wrap' }}>
       {renaming === e.id ? <form style={{ display: 'flex', gap: 6, flex: 1 }} onSubmit={ev => { ev.preventDefault(); try { const x = store.open(e.id); x.name = name.trim() || x.name; store.save(x); } catch { /* gone */ } setRenaming(null); setItems(store.list()); }}>
         <label className="sr" htmlFor={'rn-' + e.id}>{es ? 'Nombre' : 'Name'}</label><input id={'rn-' + e.id} autoFocus value={name} onChange={ev => setName(ev.target.value)} style={{ flex: 1, padding: 6 }} /><button className="btn">{es ? 'Guardar' : 'Save'}</button></form>
-        : <button className="btn quiet" style={{ flex: 1, textAlign: 'left', border: 0 }} onClick={() => onPick(e.id)}><strong>{e.name}</strong>{e.demo ? (es ? ' (ejemplo)' : ' (demo)') : ''}<br /><span style={{ fontSize: '.82rem', color: 'var(--pencil)' }}>{e.address || (es ? 'Sin dirección' : 'No address yet')} · {new Date(e.updatedAt).toLocaleDateString()}</span></button>}
+        : <button className="btn quiet" style={{ flex: 1, textAlign: 'left', border: 0 }} onClick={() => onPick(e.id)}><strong>{(e.name === 'My garage conversion' || e.name === 'Mi conversión de garaje') && e.address.trim() ? e.address.split(',')[0] : e.name}</strong>{e.demo ? (es ? ' (ejemplo)' : ' (demo)') : ''}<br /><span style={{ fontSize: '.82rem', color: 'var(--pencil)' }}>{e.address || (es ? 'Sin dirección' : 'No address yet')} · {new Date(e.updatedAt).toLocaleDateString()}</span></button>}
       <button className="btn quiet" onClick={() => { setRenaming(e.id); setName(e.name); }}>{es ? 'Renombrar' : 'Rename'}</button>
       <button className="btn quiet" onClick={() => { try { store.duplicate(e.id); } catch { /* damaged */ } setItems(store.list()); }}>{es ? 'Duplicar' : 'Duplicate'}</button>
       <button className="btn quiet" onClick={async () => { if (await ask({ title: es ? '¿Borrar este proyecto?' : 'Delete this project?', body: es ? `"${e.name}" se borra de este dispositivo. Guarde una copia antes si la necesita.` : `"${e.name}" is removed from this device. Save a backup first if you need it.`, confirm: es ? 'Borrar' : 'Delete', cancel: es ? 'Cancelar' : 'Cancel', danger: true })) { store.remove(e.id); setItems(store.list()); } }}>{es ? 'Borrar' : 'Delete'}</button>

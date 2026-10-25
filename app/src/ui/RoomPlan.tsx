@@ -1,6 +1,8 @@
 import { useEffect, useRef, useState } from 'react';
 import type { Project, Room } from '../core/model';
-import { bbox, type Poly, type Pt } from '../core/geom';
+import { bbox, segmentsCross, type Poly, type Pt } from '../core/geom';
+/** True when two non-neighboring edges cross (a bowtie). */
+const selfCrosses = (pl: Poly) => pl.some((a, i) => pl.some((c, j) => j > i + 1 && !(i === 0 && j === pl.length - 1) && segmentsCross(a, pl[(i + 1) % pl.length], c, pl[(j + 1) % pl.length])));
 import { fmtFtIn, fmtSqFt, ft, inch } from '../core/units';
 import { clampMove, overlappingRooms, footLocal, roomArea, roomFits, roomSize, snap, wallPoint, openingProblems } from '../core/rooms';
 import { L } from './lang';
@@ -29,7 +31,7 @@ export function RoomPlan({ p, selected, onSelect, onChange, onRemove }: { p: Pro
     const list = svg.current?.querySelectorAll<SVGElement>('polygon[role="button"]'); const el = list?.length ? list[Math.min(i, list.length - 1)] : svg.current; el?.focus(); }, [rooms.length]);
   const over = new Set(overlappingRooms(rooms).flat().map(r => r.id));
   const describe = (r: Room) => { const z = roomSize(r); return `${r.name || L('Room')}, ${roomUseLabel(r.use)}, ${fmtFtIn(z.w)} x ${fmtFtIn(z.d)}, ${fmtSqFt(roomArea(r))}${z.taped ? `, ${L('tape-measured')}` : ''}`; };
-  const tryPoly = (r: Room, poly: Poly, key: string) => { if (roomFits(poly, foot)) { setBlocked(false); onChange(r.id, poly, key); return true; } setBlocked(true); return false; };
+  const tryPoly = (r: Room, poly: Poly, key: string) => { if (selfCrosses(poly)) { setBlocked(true); setLive(L('A room outline cannot cross itself.')); return false; } if (roomFits(poly, foot)) { setBlocked(false); onChange(r.id, poly, key); return true; } setBlocked(true); return false; };
 
   /** New corner position for a drag of corner `i`: rectangles keep square corners (the opposite corner stays put). */
   const reshape = (r: Room, base: Poly, i: number, to: Pt): Poly => {

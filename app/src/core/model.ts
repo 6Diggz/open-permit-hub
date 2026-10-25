@@ -37,6 +37,7 @@ export interface Project {
     address: string; apn: string; jurisdiction: 'la-city' | 'la-county' | 'other' | 'unknown';
     lotSource: 'manual' | 'gis' | 'survey'; lotUncertaintyMm: number;
     lot: Poly; streetEdge: number; // index of lot edge facing street
+    /** Tract, block and lot as on the deed or ZIMAS (plan checkers ask for it on sheet 1). */ legalDescription?: string;
     /** Other lot edges on a street or alley (a corner lot's side street, a rear alley). */ streetEdges?: number[];
     /** Degrees clockwise from sheet-up to true north (null = not known yet). Set from the parcel map, or by the user. */
     northDeg: number | null;
