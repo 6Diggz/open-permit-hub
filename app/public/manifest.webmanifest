@@ -1,0 +1,1 @@
+{ "name": "Garage to ADU Check", "short_name": "ADU Check", "start_url": "./", "display": "standalone", "background_color": "#eef0ee", "theme_color": "#1e2228", "icons": [{ "src": "icon.svg", "sizes": "any", "type": "image/svg+xml" }] }
