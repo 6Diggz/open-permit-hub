@@ -16,7 +16,7 @@ export function furnished() {
   const P = (x: number, y: number) => ({ x: ft(x), y: ft(y) });
   p.cad = { ...DEFAULT_CAD(), ents: [
     { id: 'e1', t: 'dim', layer: 'A-ANNO-DIMS', pts: [P(28, 128), P(48, 128)], off: ft(3) }, { id: 'e2', t: 'dim', layer: 'A-ANNO-DIMS', pts: [P(48, 108), P(48, 115)], off: ft(-3) }, { id: 'e2b', t: 'dim', layer: 'A-ANNO-DIMS', pts: [P(48, 115), P(48, 128)], off: ft(-3) },
-    { id: 'e3', t: 'leader', layer: 'A-ANNO-NOTE', pts: [P(42, 111), P(49, 107)], text: '1-HR WALL AT PROPERTY LINE' }, { id: 'e4', t: 'text', layer: 'A-ANNO-NOTE', pts: [P(50, 124)], text: 'NEW 2X4 PARTITIONS' },
+    { id: 'e3', t: 'leader', layer: 'A-ANNO-NOTE', pts: [P(47.8, 111), P(51.8, 107)], text: '1-HR WALL AT PROPERTY LINE' }, { id: 'e4', t: 'text', layer: 'A-ANNO-NOTE', pts: [P(50, 124)], text: 'NEW 2X4 PARTITIONS' },
     { id: 'e5', t: 'line', layer: 'A-DETL', pts: [P(20, 100), P(26, 100)] }] } as any;
   return p;
 }

@@ -27,7 +27,7 @@ const plan = async page => { const cmd = async (...l) => { for (const x of l) { 
   await cmd('RM', 'BED', '28.5,108.5', '37.5,119.5'); await cmd('RM', 'BATH', '37.9,108.5', '47.5,115'); await cmd('RM', 'KITCHEN', '37.9,115.4', '47.5,127.5'); await cmd('RM', 'LIVING', '28.5,119.9', '37.5,127.5');
   await cmd('WI', '32,108.5'); await cmd('WI', '28.5,114'); await cmd('DR', '37.5,117'); await cmd('DR', '42,115'); await cmd('WI', '47.5,121'); await cmd('DR', '33,127.5');
   await cmd('DLI', '28,128', '48,128', '38,131'); await cmd('DLI', '48,108', '48,115', '51,111'); await cmd('DLI', '48,115', '48,128', '51,121');
-  await cmd('LE', '42,111', '@7,-4', '', '1-HR WALL AT PROPERTY LINE'); await cmd('T', '50,124', 'NEW 2X4 PARTITIONS'); await page.keyboard.press('Escape'); await page.mouse.move(2, 2); await page.waitForTimeout(400); };
+  await cmd('LE', '47.8,111', '@4,-4', '', '1-HR WALL AT PROPERTY LINE'); await cmd('T', '50,124', 'NEW 2X4 PARTITIONS'); await page.keyboard.press('Escape'); await page.mouse.move(2, 2); await page.waitForTimeout(400); };
 /** Geometry checks run in the page on the rendered SVG. */
 const measure = page => page.evaluate(() => {
   const vp = document.querySelector('[data-testid=viewport]').getBoundingClientRect();

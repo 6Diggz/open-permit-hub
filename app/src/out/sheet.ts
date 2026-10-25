@@ -6,12 +6,12 @@
 import type { Project } from '../core/model';
 import type { Pt } from '../core/geom';
 import { bbox, area } from '../core/geom';
-import { fmtSqFt, toSqFt } from '../core/units';
+import { fmtSqFt, toSqFt, ft } from '../core/units';
 import { withRooms, roomSize, roomArea, roomCeiling, roomAbs } from '../core/rooms';
 import { PACK, PACK_ID } from '../rules/pack';
 import { siteFacts } from '../core/sitefacts';
 import { missingGlyphNote } from './glyphs';
-import { draft, SCALES, textW, fmtArch, type Drawing, type DimRef, type Fill, type Dash } from '../ui/pro/drafting';
+import { draft, SCALES, textW, fmtArch, type Drawing, type DimRef, type Fill, type Dash, type Txt } from '../ui/pro/drafting';
 
 export type PaperId = 'archd' | 'tabloid' | 'letter';
 export const PAPER_IN: Record<PaperId, { w: number; h: number; label: string }> = { archd: { w: 36, h: 24, label: '24x36' }, tabloid: { w: 17, h: 11, label: '11x17' }, letter: { w: 8.5, h: 11, label: '8.5x11' } };
@@ -142,16 +142,20 @@ function frame(sb: SB, I: Info, scaleLabel: string, extraNote = ''): Rect {
 
 // ---------- viewports ----------
 /** Largest standard scale (at most `maxK` inverse: the smallest k allowed) at which the drawing fits the box. Draws at each scale tried. */
-function fitDraw(p: Project, box: { w: number; h: number }, o: { es: boolean; scope: 'site' | 'adu'; minK?: number; userDims?: { a: Pt; b: Pt }[] }): { d: Drawing; sc: { label: string; k: number } } {
-  const cands = SCALES.filter(s => s.k >= (o.minK ?? 12) && s.k <= 720);
+/** Engineer's scales: the one scale style for plot plans (A-1.1 at every paper size, its main view and its enlarged view). */
+export const ENG_SCALES = [{ label: '1" = 10\'', k: 120 }, { label: '1" = 20\'', k: 240 }, { label: '1" = 30\'', k: 360 }, { label: '1" = 40\'', k: 480 }, { label: '1" = 50\'', k: 600 }, { label: '1" = 60\'', k: 720 }] as const;
+type Sc = { label: string; k: number };
+function fitDraw(p: Project, box: { w: number; h: number }, o: { es: boolean; scope: 'site' | 'adu'; minK?: number; userDims?: { a: Pt; b: Pt }[]; scales?: readonly Sc[]; drop?: Rect }): { d: Drawing; sc: { label: string; k: number } } {
+  const cands = (o.scales ?? SCALES).filter(s => s.k >= (o.minK ?? 12) && s.k <= 720);
   let last: { d: Drawing; sc: { label: string; k: number } } | null = null;
-  for (const sc of cands) { const mmPerIn = sc.k * 25.4; const d = draft(p, { anno: mmPerIn, es: o.es, scope: o.scope, withCad: true, detail: o.scope === 'adu' ? 'plan' : 'site', userDims: o.userDims });
+  for (const sc of cands) { const mmPerIn = sc.k * 25.4; const d0 = draft(p, { anno: mmPerIn, es: o.es, scope: o.scope, withCad: true, detail: o.scope === 'adu' ? 'plan' : 'site', userDims: o.userDims }) as Drawing;
+    const d = o.drop ? dropInside(d0, o.drop) : d0;
     last = { d, sc }; const e = d.extents; if ((e.maxX - e.minX) / mmPerIn <= box.w && (e.maxY - e.minY) / mmPerIn <= box.h) return last; }
   return last!;
 }
 /** Put a drawing on the sheet: centered in `box`, paths and text moved to paper inches. Model-only layers (check pins) are dropped. */
-function place(sb: SB, d: Drawing, sc: { label: string; k: number }, box: Rect, drop = new Set(['G-ANNO-REDL'])): Viewport {
-  const mmPerIn = sc.k * 25.4; const e = d.extents; const cx = (e.minX + e.maxX) / 2, cy = (e.minY + e.maxY) / 2;
+function place(sb: SB, d: Drawing, sc: { label: string; k: number }, box: Rect, drop = new Set(['G-ANNO-REDL']), center?: Pt, noDims = false): Viewport {
+  const mmPerIn = sc.k * 25.4; const e = d.extents; const cx = center?.x ?? (e.minX + e.maxX) / 2, cy = center?.y ?? (e.minY + e.maxY) / 2;
   const model = { x: cx - (box.w / 2) * mmPerIn, y: cy - (box.h / 2) * mmPerIn, w: box.w * mmPerIn, h: box.h * mmPerIn };
   const X = (x: number) => box.x + (x - model.x) / mmPerIn, Y = (y: number) => box.y + (y - model.y) / mmPerIn;
   const tr = (s: string) => s.replace(/(-?[\d.]+) (-?[\d.]+)/g, (_, a, b) => `${f4(X(+a))} ${f4(Y(+b))}`);
@@ -161,10 +165,98 @@ function place(sb: SB, d: Drawing, sc: { label: string; k: number }, box: Rect, 
     const h = t.h / mmPerIn; let x = X(t.x), y = Y(t.y);
     if (t.mid) { const r = ((t.rot ?? 0) * Math.PI) / 180; const dy = 0.36 * h; x += -Math.sin(r) * dy; y += Math.cos(r) * dy; }
     sb.items.push({ k: 't', layer: t.layer, x, y, h, s: t.s, anchor: t.anchor, rot: t.rot, bold: t.bold, tone: t.tone, g: t.g, slide: t.slide }); }
-  sb.dims.push(...d.dims);
+  if (!noDims) sb.dims.push(...d.dims);
   const vp: Viewport = { ...box, model, scale: sc }; sb.vps.push(vp); return vp;
 }
 const toPaper = (vp: Viewport, q: Pt) => ({ x: vp.x + (q.x - vp.model.x) / (vp.scale.k * 25.4), y: vp.y + (-q.y - vp.model.y) / (vp.scale.k * 25.4) });
+
+// ---------- enlarged ADU view (a second viewport at a larger scale) ----------
+/** Annotation groups that stay whole: a dimension, keynote, tag or room tag is shown complete or not at all. */
+const ANNO_G = /^(dim|key|tag|room)/;
+const inR = (r: Rect, x: number, y: number) => x >= r.x - 1e-6 && x <= r.x + r.w + 1e-6 && y >= r.y - 1e-6 && y <= r.y + r.h + 1e-6;
+/** Model window (screen-oriented mm, y down) around the ADU: 12 ft each way, never more than 8 ft past the lot. */
+export function aduWindow(p: Project, margin = ft(12)): Rect {
+  const f = bbox(p.adu.footprint), l = bbox(p.site.lot); const pad = ft(8);
+  const x0 = Math.max(f.minX - margin, l.minX - pad), x1 = Math.min(f.maxX + margin, l.maxX + pad), y0 = Math.max(f.minY - margin, l.minY - pad), y1 = Math.min(f.maxY + margin, l.maxY + pad);
+  return { x: x0, y: -y1, w: x1 - x0, h: y1 - y0 };
+}
+/** The main view leaves out the annotation the enlarged view shows (dims, tags and notes inside its window): a small-scale
+ * plot plan cannot hold 2'-0" setback dims next to each other without stacking them (review 4 F4). */
+export function dropInside(d: Drawing, win: Rect): Drawing {
+  const goneG = new Set<string>(); const goneObj = new Set<string>(); const byG = new Map<string, Txt[]>();
+  for (const t of d.texts) if (t.g && ANNO_G.test(t.g)) byG.set(t.g, [...(byG.get(t.g) ?? []), t]);
+  for (const [g, ts] of byG) if (!g.startsWith('dim') && ts.every(t => inR(win, t.x, t.y))) goneG.add(g);
+  // A dimension goes when both points it measures are inside (its line sits far out at a small scale, so its text may not be).
+  for (const x of d.prims) if (x.g?.startsWith('dim') && !goneG.has(x.g)) { const sg = segs(x.d); if (!sg.length) continue; const [a, b] = sg;
+    // with extension lines the first two segments are them (parallel, starting at the measured points); without, the ticks mark the points
+    const par = b && Math.abs((a[2] - a[0]) * (b[3] - b[1]) - (a[3] - a[1]) * (b[2] - b[0])) < 1e-3 * Math.hypot(a[2] - a[0], a[3] - a[1]) * Math.hypot(b[2] - b[0], b[3] - b[1]);
+    const mid = (q: number[]) => [(q[0] + q[2]) / 2, (q[1] + q[3]) / 2]; const m = par ? [[a[0], a[1]], [b[0], b[1]]] : sg.length >= 3 ? [mid(sg[1]), mid(sg[2])] : [[a[0], a[1]], [a[2], a[3]]]; if (m.every(([x0, y0]) => inR(win, x0, y0))) goneG.add(x.g); }
+  const texts = d.texts.filter(t => { if (t.g && goneG.has(t.g)) return false;
+    if (!t.g && (t.obj?.startsWith('ent:') || /^(A-ANNO-(TEXT|KEYN|DIMS)|A-AREA-IDEN|P-FIXT|A-EQPM)$/.test(t.layer)) && inR(win, t.x, t.y)) { if (t.obj?.startsWith('ent:')) goneObj.add(t.obj); return false; } return true; });
+  const prims = d.prims.filter(x => !(x.g && goneG.has(x.g)) && !(x.obj && goneObj.has(x.obj)));
+  return { ...d, texts, prims, extents: extentsOf(prims, texts, ft(4)) };
+}
+/** Extents of paths and text boxes plus a margin (same measure as draft()). */
+function extentsOf(prims: Drawing['prims'], texts: Txt[], pad: number) {
+  const ex = { minX: Infinity, minY: Infinity, maxX: -Infinity, maxY: -Infinity }; const g = (x: number, y: number) => { ex.minX = Math.min(ex.minX, x); ex.maxX = Math.max(ex.maxX, x); ex.minY = Math.min(ex.minY, y); ex.maxY = Math.max(ex.maxY, y); };
+  for (const q of prims) for (const sg of segs(q.d)) { g(sg[0], sg[1]); g(sg[2], sg[3]); }
+  for (const t of texts) { const w = textW(t.s, t.h, t.bold); const r = ((t.rot ?? 0) * Math.PI) / 180; const e1 = Math.abs(Math.cos(r)) * w + Math.abs(Math.sin(r)) * t.h, e2 = Math.abs(Math.sin(r)) * w + Math.abs(Math.cos(r)) * t.h; g(t.x - e1, t.y - e2); g(t.x + e1, t.y + e2); }
+  return { minX: ex.minX - pad, minY: ex.minY - pad, maxX: ex.maxX + pad, maxY: ex.maxY + pad };
+}
+function subpaths(d: string): Pt[][] { const out: Pt[][] = []; const re = /([MLZ])\s*(-?[\d.]+)?\s*(-?[\d.]+)?/g; let m: RegExpExecArray | null; let cur: Pt[] = [];
+  while ((m = re.exec(d))) { if (m[1] === 'Z') { if (cur.length) out.push(cur); cur = []; continue; } if (m[1] === 'M') { if (cur.length) out.push(cur); cur = []; } cur.push({ x: +m[2], y: +m[3] }); } if (cur.length) out.push(cur); return out; }
+/** Sutherland-Hodgman: polygon clipped to a rectangle. */
+function clipPoly(pl: Pt[], r: Rect): Pt[] {
+  const edges: [(q: Pt) => boolean, (a: Pt, b: Pt) => Pt][] = [
+    [q => q.x >= r.x, (a, b) => ({ x: r.x, y: a.y + ((b.y - a.y) * (r.x - a.x)) / (b.x - a.x) })], [q => q.x <= r.x + r.w, (a, b) => ({ x: r.x + r.w, y: a.y + ((b.y - a.y) * (r.x + r.w - a.x)) / (b.x - a.x) })],
+    [q => q.y >= r.y, (a, b) => ({ x: a.x + ((b.x - a.x) * (r.y - a.y)) / (b.y - a.y), y: r.y })], [q => q.y <= r.y + r.h, (a, b) => ({ x: a.x + ((b.x - a.x) * (r.y + r.h - a.y)) / (b.y - a.y), y: r.y + r.h })]];
+  let out = pl; for (const [ins, cut] of edges) { const src = out; out = []; src.forEach((b, i) => { const a = src[(i + src.length - 1) % src.length]; if (ins(b)) { if (!ins(a)) out.push(cut(a, b)); out.push(b); } else if (ins(a)) out.push(cut(a, b)); }); if (!out.length) break; }
+  return out;
+}
+/** Liang-Barsky: segment clipped to a rectangle, or null. */
+function clipSeg([x0, y0, x1, y1]: [number, number, number, number], r: Rect): [number, number, number, number] | null {
+  let t0 = 0, t1 = 1; const dx = x1 - x0, dy = y1 - y0;
+  for (const [pp, q] of [[-dx, x0 - r.x], [dx, r.x + r.w - x0], [-dy, y0 - r.y], [dy, r.y + r.h - y0]] as [number, number][]) {
+    if (Math.abs(pp) < 1e-12) { if (q < 0) return null; continue; } const t = q / pp; if (pp < 0) { if (t > t1) return null; t0 = Math.max(t0, t); } else { if (t < t0) return null; t1 = Math.min(t1, t); } }
+  return t1 - t0 < 1e-9 ? null : [x0 + dx * t0, y0 + dy * t0, x0 + dx * t1, y0 + dy * t1];
+}
+/** Clip the items from index `from` on to the viewport: linework is cut at its edge, fills are clipped, a dimension, tag or
+ * keynote that does not fit whole is left out, and so is any text not fully inside. */
+function clipTo(sb: SB, from: number, r: Rect) {
+  const its = sb.items.slice(from); const pts = (d: string) => segs(d).flatMap(q => [[q[0], q[1]], [q[2], q[3]]]);
+  const textIn = (t: SText) => corners(textBox(t)).every(q => inR(r, q.x, q.y)); const bad = new Set<string>();
+  for (const it of its) if (it.g && ANNO_G.test(it.g) && (it.k === 't' ? !textIn(it) : !pts(it.d).every(([x, y]) => inR(r, x, y)))) bad.add(it.g);
+  const out: SItem[] = [];
+  for (const it of its) { if (it.g && bad.has(it.g)) continue;
+    if (it.k === 't') { if (textIn(it)) { out.push(it); continue; }
+      // a loose note (the drafter's text or leader note) is kept, slid inside the view; the label pass gives it a leader
+      if (!it.g && it.layer.startsWith('A-ANNO')) { const c = corners(textBox(it)); const dx = Math.max(0, r.x - Math.min(...c.map(q => q.x))) - Math.max(0, Math.max(...c.map(q => q.x)) - (r.x + r.w)), dy = Math.max(0, r.y - Math.min(...c.map(q => q.y))) - Math.max(0, Math.max(...c.map(q => q.y)) - (r.y + r.h));
+        const m = { ...it, x: it.x + dx, y: it.y + dy }; if (textIn(m) && Math.hypot(dx, dy) < 2) out.push(m); } continue; }
+    if (pts(it.d).every(([x, y]) => inR(r, x, y))) { out.push(it); continue; }
+    if (it.fill && it.fill !== 'none') { const polys = subpaths(it.d).map(pl => clipPoly(pl, r)).filter(pl => pl.length >= 3);
+      if (polys.length) out.push({ ...it, d: polys.map(pl => 'M' + pl.map(q => `${f4(q.x)} ${f4(q.y)}`).join('L') + 'Z').join(''), stroke: false }); if (it.stroke === false) continue; }
+    const ss = segs(it.d).map(q => clipSeg(q, r)).filter((q): q is [number, number, number, number] => !!q);
+    if (ss.length) out.push({ ...it, fill: undefined, d: ss.map(q => Ln(...q)).join('') }); }
+  sb.items.splice(from, its.length, ...out);
+}
+/** The enlarged ADU view in `box` at the largest scale of `scales` that holds its window, when that is at least twice the
+ * main view's scale. Returns the viewport and the model window it shows. */
+function enlarged(sb: SB, p: Project, I: Info, o: SheetOpts, box: Rect, mainK: number, scales: readonly Sc[]): { vp: Viewport; sc: Sc } | null {
+  // the largest scale at which a window of 12 ft (else 8, else 5) around the ADU fits
+  let best: { w0: Rect; sc: Sc } | null = null;
+  for (const mg of [12, 8, 5]) { const w0 = aduWindow(p, ft(mg)); const sc = [...scales].sort((a, b) => a.k - b.k).find(s => w0.w / (s.k * 25.4) <= box.w && w0.h / (s.k * 25.4) <= box.h); if (sc && (!best || sc.k < best.sc.k)) best = { w0, sc }; }
+  if (!best || best.sc.k * 2 > mainK) return null; const { w0, sc } = best;
+  const d = draft(p, { anno: sc.k * 25.4, es: I.es, scope: 'site', withCad: true, detail: 'site', userDims: o.userDims });
+  const from = sb.items.length; const vp = place(sb, d, sc, box, undefined, { x: w0.x + w0.w / 2, y: w0.y + w0.h / 2 }, true); clipTo(sb, from, box);
+  return { vp, sc };
+}
+/** Enlargement boundary on the main view (dashed) with a SEE n note. */
+function enlargeMark(sb: SB, vp: Viewport, win: Rect, n: string, es: boolean) {
+  const k = vp.scale.k * 25.4; const X = (x: number) => Math.max(vp.x, Math.min(vp.x + vp.w, vp.x + (x - vp.model.x) / k)), Y = (y: number) => Math.max(vp.y, Math.min(vp.y + vp.h, vp.y + (y - vp.model.y) / k));
+  const x0 = X(win.x), y0 = Y(win.y), x1 = X(win.x + win.w), y1 = Y(win.y + win.h);
+  sb.path(R(x0, y0, x1 - x0, y1 - y0), 0.18, { layer: 'A-ANNO-SYMB', dash: 'hidden' });
+  sb.items.push({ k: 't', layer: 'A-ANNO-SYMB', x: x0, y: y0 - 0.06, h: T1, s: es ? `VER ${n}` : `SEE ${n}`, bold: true });
+}
 
 // ---------- sheet annotation ----------
 /** Drawing title: numbered bubble, title, scale under it. */
@@ -259,6 +351,9 @@ export function overlaps(sh: { items: SItem[] }): { a: string; b: string }[] {
   T.forEach((t, i) => { const gi = t.fixed ? boxes[i] : grow(boxes[i], CLEAR_IN);
     for (let j = i + 1; j < T.length; j++) if (!(t.g && t.g === T[j].g && !t.g.startsWith('dim') && !obbHit(boxes[i], boxes[j])) && obbHit(t.fixed && !T[j].fixed ? grow(boxes[i], CLEAR_IN) : gi, boxes[j])) out.push({ a: t.s, b: T[j].s });
     for (const p of S) { const own = !!p.g && p.g === t.g; if (own && !p.g!.startsWith('dim')) continue; const b = own ? boxes[i] : gi; if (p.s.some(q => segHit(b, ...q))) { out.push({ a: t.s, b: 'linework' }); break; } } });
+  // door and window tag symbols must not touch each other
+  const tb = new Map<string, number[]>(); for (const p of S) if (p.g?.startsWith('tag')) { const b = tb.get(p.g) ?? [Infinity, Infinity, -Infinity, -Infinity]; for (const q of p.s) { b[0] = Math.min(b[0], q[0], q[2]); b[1] = Math.min(b[1], q[1], q[3]); b[2] = Math.max(b[2], q[0], q[2]); b[3] = Math.max(b[3], q[1], q[3]); } tb.set(p.g, b); }
+  const tl = [...tb]; for (let i = 0; i < tl.length; i++) for (let j = i + 1; j < tl.length; j++) { const a = tl[i][1], b = tl[j][1]; if (a[0] < b[2] && a[2] > b[0] && a[1] < b[3] && a[3] > b[1]) out.push({ a: tl[i][0], b: tl[j][0] }); }
   return out;
 }
 /** Moves drawing labels off linework, borders and each other: dimension text slides along its line, then flips sides; other
@@ -276,6 +371,7 @@ function labelPass(sb: SB, maxR = 40, stuck?: Set<SText>) {
   const clear = (t: SText, b: OBB, skipG0: string | undefined, groupPaths: SPath[] = []) => { const skipG = skipG0?.startsWith('dim') ? undefined : skipG0; const gb = grow(b, CLEAR_IN);
     return !placed.some(q => obbHit(q, gb)) && !P.some(p => !near(p, gb) || (skipG && p.g === skipG) || groupPaths.includes(p) ? false : segOf.get(p)!.some(s => segHit(t.g && p.g === t.g ? b : gb, ...s))) && (t.fixed || inVp(b)); };
   const fixedB = T.filter(o => o.fixed).map(o => [o, textBox(o)] as const);
+  const placedSym: number[][] = []; const symBox = (ps: SPath[]) => { let x0 = Infinity, y0 = Infinity, x1 = -Infinity, y1 = -Infinity; for (const p of ps) for (const q of segOf.get(p)!) { x0 = Math.min(x0, q[0], q[2]); y0 = Math.min(y0, q[1], q[3]); x1 = Math.max(x1, q[0], q[2]); y1 = Math.max(y1, q[1], q[3]); } return [x0, y0, x1, y1]; };
   const done = new Set<SText>(); const pByG = new Map<string, SPath[]>(); const tByG = new Map<string, SText[]>();
   for (const p of P) if (p.g) pByG.set(p.g, [...(pByG.get(p.g) ?? []), p]); for (const t of T) if (t.g) tByG.set(t.g, [...(tByG.get(t.g) ?? []), t]);
   for (const t of order) {
@@ -289,7 +385,9 @@ function labelPass(sb: SB, maxR = 40, stuck?: Set<SText>) {
         const sym = moved.flatMap(m => m.s); let x0 = Infinity, y0 = Infinity, x1 = -Infinity, y1 = -Infinity; for (const q of sym) { x0 = Math.min(x0, q[0], q[2]); y0 = Math.min(y0, q[1], q[3]); x1 = Math.max(x1, q[0], q[2]); y1 = Math.max(y1, q[1], q[3]); }
         const nb = (o: OBB) => { const r = Math.hypot(o.hw, o.hh); return !(o.cx - r > x1 || o.cx + r < x0 || o.cy - r > y1 || o.cy + r < y0); };
         const symHit = placed.some(q => nb(q) && sym.some(s => segHit(q, ...s))) || fixedB.some(([o, ob]) => o.g !== t.g && nb(ob) && sym.some(s => segHit(ob, ...s)));
-        if (symHit) return false; }
+        if (symHit) return false;
+        // tag symbols keep clear of each other (door tags 1 and 2 touched: circles never cross a text box, so check boxes)
+        if (placedSym.some(q => q[0] < x1 + CLEAR_IN && q[2] > x0 - CLEAR_IN && q[1] < y1 + CLEAR_IN && q[3] > y0 - CLEAR_IN)) return false; }
       if (!tag && !t.slide && !free && Math.hypot(dx, dy) > t.h * 2.2) { const tx = t.x, ty = t.y - t.h * 0.36; if (placed.some(q => segHit(grow(q, CLEAR_IN), b.cx, b.cy, tx, ty))) return false; }
       if (mates.some(m => { const mb = textBox({ ...m, x: m.x + dx, y: m.y + dy }); return !clear(m, mb, t.g, gPaths) || obbHit(mb, b); })) return false;
       return clear(c, b, t.g, tag ? gPaths : []); };
@@ -301,7 +399,7 @@ function labelPass(sb: SB, maxR = 40, stuck?: Set<SText>) {
     if (!best) { const step = t.h * 0.6; outer: for (let r = 1; r <= maxR; r++) for (let a = 0; a < 16; a++) { const an = (a / 16) * Math.PI * 2; const dx = Math.cos(an) * step * r, dy = Math.sin(an) * step * r; if (try1(dx, dy)) { best = [dx, dy]; break outer; } } }
     if (!best && !t.g) { free = true; const step = t.h * 0.6; outer2: for (let r = 1; r <= maxR; r++) for (let a = 0; a < 16; a++) { const an = (a / 16) * Math.PI * 2; const dx = Math.cos(an) * step * r, dy = Math.sin(an) * step * r; if (try1(dx, dy)) { best = [dx, dy]; break outer2; } } }
     if (!best && stuck) { stuck.add(t); mates.forEach(m => stuck.add(m)); continue; } // model space: shown again when zoomed in
-    if (!best) { placed.push(textBox(t)); for (const m of mates) placed.push(textBox(m)); continue; } // left where it was: the overlap test reports it
+    if (!best) { placed.push(textBox(t)); for (const m of mates) placed.push(textBox(m)); if (tag) placedSym.push(symBox(gPaths)); continue; } // left where it was: the overlap test reports it
     const [dx, dy] = best;
     if (dx || dy) { const t0 = { x: t.x, y: t.y }; t.x += dx; t.y += dy;
       if (tag) for (const m of mates) { m.x += dx; m.y += dy; }
@@ -311,7 +409,7 @@ function labelPass(sb: SB, maxR = 40, stuck?: Set<SText>) {
         const vx = to.x - b.cx, vy = to.y - b.cy; const lu = vx * b.c + vy * b.s, lv = -vx * b.s + vy * b.c; const k = Math.min(Math.abs(lu) > 1e-9 ? (b.hw + 0.03) / Math.abs(lu) : Infinity, Math.abs(lv) > 1e-9 ? (b.hh + 0.03) / Math.abs(lv) : Infinity, 1);
         const from = { x: b.cx + vx * k, y: b.cy + vy * k }; if (Math.hypot(to.x - from.x, to.y - from.y) > 0.05) {
         const lp: SPath = { k: 'p', layer: t.layer, d: Ln(from.x, from.y, to.x, to.y), lw: 0.13, g: t.g ?? `ld${items.length}` }; t.g = lp.g; items.push(lp); P.push(lp); segOf.set(lp, segs(lp.d)); } } }
-    placed.push(textBox(t)); for (const m of mates) placed.push(textBox(m));
+    placed.push(textBox(t)); for (const m of mates) placed.push(textBox(m)); if (tag) placedSym.push(symBox(gPaths));
   }
 }
 
@@ -344,8 +442,14 @@ function siteSheet(p: Project, I: Info, o: SheetOpts): Sheet {
   const sb = new SB('A-1', I.es ? 'PLANO DEL SITIO' : 'SITE PLAN', 'archd', 'site');
   const da0 = frame(sb, I, '');
   const colW = 6.4; const box: Rect = { x: da0.x, y: da0.y, w: da0.w - colW - 0.4, h: da0.h - 1.55 };
-  const { d, sc } = fitDraw(p, box, { es: I.es, scope: 'site', minK: 48, userDims: o.userDims }); const vp = place(sb, d, sc, box); streetLabel(sb, vp, d, p, I.es);
-  sb.items.filter(x => x.k === 't' && x.field === 'scale').forEach(x => { (x as SText).s = sc.label; });
+  // Grid (review 4 F7): the whole site on the left at its scale, the ADU enlarged (2) in the rest of the field.
+  const f0 = fitDraw(p, box, { es: I.es, scope: 'site', minK: 48, userDims: o.userDims }); const mainW = Math.min(box.w, (f0.d.extents.maxX - f0.d.extents.minX) / (f0.sc.k * 25.4) + 0.8);
+  const insBox: Rect = { x: box.x + mainW + 0.4, y: box.y + 0.3, w: box.w - mainW - 0.4, h: box.h - 0.3 };
+  const ins = insBox.w > 4 ? enlarged(sb, p, I, o, insBox, f0.sc.k, SCALES.filter(s2 => s2.k >= 24 && s2.k <= 64)) : null;
+  const { d, sc } = ins ? fitDraw(p, box, { es: I.es, scope: 'site', minK: f0.sc.k, userDims: o.userDims, scales: [f0.sc], drop: ins.vp.model }) : f0;
+  const vp = place(sb, d, sc, ins ? { ...box, w: mainW } : box); streetLabel(sb, vp, d, p, I.es); if (ins) enlargeMark(sb, vp, ins.vp.model, '2', I.es);
+  sb.items.filter(x => x.k === 't' && x.field === 'scale').forEach(x => { (x as SText).s = ins ? (I.es ? 'INDICADA' : 'AS NOTED') : sc.label; });
+  if (ins) { const iy = da0.y + da0.h - 1.2; drawingTitle(sb, insBox.x + 0.25, iy, '2', I.es ? 'ADU AMPLIADA' : 'ENLARGED SITE PLAN AT ADU', ins.sc.label, 6); scaleBar(sb, insBox.x + 0.25 + 6.6, iy + 0.1, ins.sc.k, 2.5); }
   const by = da0.y + da0.h - 1.2; drawingTitle(sb, da0.x + 0.25, by, '1', sb.title, sc.label, 6); scaleBar(sb, 1.0, by + 0.62, sc.k, 4);
   northArrow(sb, da0.x + 9.4, by + 0.25, 0.34, p.site.northDeg);
   // Right column: project data (LADBS I.C.8), site data, sheet index, keynotes.
@@ -378,7 +482,7 @@ function floorSheets(p: Project, I: Info, o: SheetOpts): Sheet[] {
   const out: Sheet[] = []; const title = I.es ? 'PLANTA' : 'FLOOR PLAN';
   let sb = new SB('A-2', title, 'archd', 'floor'); let da = frame(sb, I, '');
   // Sheet grid (review 3 F7): plan field on the left 7 of 12 columns, schedules on the right 5, so A-2 plots at 1/2" = 1'-0".
-  const col = da.w / 12; const box: Rect = { x: da.x, y: da.y + 0.2, w: col * 7 - 0.25, h: da.h - 1.75 };
+  const col = da.w / 12; const box: Rect = { x: da.x, y: da.y + 0.2, w: col * 8 - 0.25, h: da.h - 1.75 };
   const { d, sc } = fitDraw(p, box, { es: I.es, scope: 'adu', minK: 24, userDims: o.userDims }); place(sb, d, sc, box);
   sb.items.filter(x => x.k === 't' && x.field === 'scale').forEach(x => { (x as SText).s = sc.label; });
   const by = da.y + da.h - 1.2; drawingTitle(sb, da.x + 0.25, by, '1', p.adu.rooms.length ? title : (I.es ? 'PLANTA (CONTORNO)' : 'FLOOR PLAN (OUTLINE)'), sc.label, 6);
@@ -425,16 +529,31 @@ function markupSheets(p: Project, I: Info, o: SheetOpts): Sheet[] {
   out.push(sb.done()); out.forEach((s, i) => { if (i) s.cont = true; }); return out;
 }
 
-/** Dimensioned plot plan on one page (letter: LADBS I.A.1, or 11x17), at the largest standard scale that fits that paper. */
+/** Dimensioned plot plan on one page (letter: LADBS I.A.1, or 11x17), engineer's scale throughout: the whole lot (1) and,
+ * beside it, the ADU and its setbacks enlarged (2), so short setback dims are legible at plot scale (review 4 F4, N3). */
 function plotSheet(p: Project, I: Info, o: SheetOpts, paper: Exclude<PaperId, 'archd'>, no: string): Sheet {
-  const sb = new SB(no, I.es ? 'PLANO DE PARCELA' : 'PLOT PLAN', paper, 'plot'); const da = frame(sb, I, '');
-  const box: Rect = { x: da.x, y: da.y + 0.1, w: da.w - (paper === 'tabloid' ? 0 : 0), h: da.h - 1.25 };
-  const { d, sc } = fitDraw(p, box, { es: I.es, scope: 'site', minK: 96, userDims: o.userDims }); const vp = place(sb, d, sc, box); streetLabel(sb, vp, d, p, I.es);
-  sb.items.filter(x => x.k === 't' && x.field === 'scale').forEach(x => { (x as SText).s = sc.label; });
-  const by = da.y + da.h - 1.0; drawingTitle(sb, da.x + 0.1, by, '1', sb.title, sc.label, 2.6);
-  const end = scaleBar(sb, da.x + 0.1, by + 0.55, sc.k, 1.6); sb.text(Math.max(end + 0.25, da.x + 3.2), by - 0.02, T1, `Scale ${sc.label} on ${PAPER_IN[paper].label} sheet. Print at actual size.`, {});
-  const sd = siteData(p, I.es); let sy = by + 0.2; const sx = Math.max(end + 0.25, da.x + 3.2); for (const [a, b] of sd) { sb.text(sx, sy, T1, `${a} ${b}`, {}); sy += T1 * 1.3; }
-  northArrow(sb, da.x + da.w - 0.45, by + 0.35, 0.28, p.site.northDeg);
+  const sb = new SB(no, I.es ? 'PLANO DE PARCELA' : 'PLOT PLAN', paper, 'plot'); const da = frame(sb, I, ''); const letter = paper === 'letter';
+  // Grid: drawing field (main | enlarged), titles under it; notes in a right column (11x17) or a band at the bottom (letter).
+  const notesW = letter ? 0 : 3.2, notesH = letter ? 1.6 : 0, titleH = 1.25;
+  const fieldW = da.w - (notesW ? notesW + 0.3 : 0), fieldH = da.h - notesH - titleH;
+  const mainBox: Rect = { x: da.x, y: da.y + 0.1, w: fieldW * (letter ? 0.4 : 0.4), h: fieldH - 0.1 };
+  const insBox: Rect = { x: mainBox.x + mainBox.w + 0.3, y: da.y + 0.1, w: fieldW - mainBox.w - 0.3, h: fieldH - 0.1 };
+  const n0 = sb.items.length; let ins = enlarged(sb, p, I, o, insBox, Infinity, ENG_SCALES); let fit = fitDraw(p, mainBox, { es: I.es, scope: 'site', minK: 96, userDims: o.userDims, scales: ENG_SCALES, drop: ins?.vp.model });
+  if (ins && ins.sc.k * 2 > fit.sc.k) { sb.items.splice(n0); sb.vps.pop(); ins = null; } // not worth an enlarged view: the whole lot gets the field
+  if (!ins) fit = fitDraw(p, { ...mainBox, w: fieldW }, { es: I.es, scope: 'site', minK: 96, userDims: o.userDims, scales: ENG_SCALES });
+  const { d, sc } = fit; const vp = place(sb, d, sc, ins ? mainBox : { ...mainBox, w: fieldW }); streetLabel(sb, vp, d, p, I.es);
+  if (ins) enlargeMark(sb, vp, ins.vp.model, '2', I.es);
+  sb.items.filter(x => x.k === 't' && x.field === 'scale').forEach(x => { (x as SText).s = ins ? (I.es ? 'INDICADA' : 'AS NOTED') : sc.label; });
+  northArrow(sb, vp.x + vp.w - 0.35, vp.y + 0.45, 0.25, p.site.northDeg);
+  const by = da.y + fieldH + 0.35;
+  drawingTitle(sb, mainBox.x + 0.05, by, '1', sb.title, sc.label, Math.min(2.4, mainBox.w - 0.8)); scaleBar(sb, mainBox.x + 0.05, by + 0.42, sc.k, 1.1);
+  if (ins) { drawingTitle(sb, insBox.x + 0.05, by, '2', I.es ? 'ADU AMPLIADA' : 'ENLARGED AT ADU', ins.sc.label, Math.min(2.4, insBox.w - 0.8)); scaleBar(sb, insBox.x + 0.05, by + 0.42, ins.sc.k, 1.1); }
+  // Notes: print note, site data, keynote legend.
+  const nx = letter ? da.x : da.x + da.w - notesW, nw = letter ? da.w / 2 - 0.2 : notesW; let ny = letter ? da.y + fieldH + titleH + 0.05 : da.y + 0.25;
+  ny = sb.para(nx, ny, nw, T1, `Engineer's scale as noted on ${PAPER_IN[paper].label} paper. Print at actual size.`, {}, 1.3) + 0.05;
+  sb.text(nx, ny, T1, I.es ? 'DATOS DEL SITIO' : 'SITE DATA', { bold: true }); ny += T1 * 1.4;
+  for (const [a, b] of siteData(p, I.es)) ny = sb.para(nx, ny, nw, T1, `${a} ${b}`, {}, 1.3);
+  legend(sb, letter ? da.x + da.w / 2 : nx, letter ? da.y + fieldH + titleH + 0.05 : ny + 0.2, letter ? da.w / 2 : nw, d, I.es);
   labelPass(sb); return sb.done();
 }
 

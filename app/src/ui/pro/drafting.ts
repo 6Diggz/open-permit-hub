@@ -66,7 +66,7 @@ export interface DimRef { a: Pt; b: Pt; text: string }
 export interface Keynote { n: number; text: string }
 /** One door or window as tagged on the plan, for the schedules. */
 export interface OpeningTag { kind: 'door' | 'window'; mark: string; room: Room; op: Room['openings'][number] }
-export interface Drawing { openings: OpeningTag[]; /** Where the STREET label goes (model point, outside the street dimension) and its reading angle. */ street: { at: Pt; rot: number } | null; prims: Prim[]; texts: Txt[]; extents: { minX: number; minY: number; maxX: number; maxY: number }; dims: DimRef[]; keynotes: Keynote[]; /** The ADU plus room for its dims, for the default view (screen-oriented). */ focus: { minX: number; minY: number; maxX: number; maxY: number } }
+export interface Drawing { /** Door marks whose swing still crosses a fixture or another swing after trying every hinge and side. */ swingClashes?: string[]; openings: OpeningTag[]; /** Where the STREET label goes (model point, outside the street dimension) and its reading angle. */ street: { at: Pt; rot: number } | null; prims: Prim[]; texts: Txt[]; extents: { minX: number; minY: number; maxX: number; maxY: number }; dims: DimRef[]; keynotes: Keynote[]; /** The ADU plus room for its dims, for the default view (screen-oriented). */ focus: { minX: number; minY: number; maxX: number; maxY: number } }
 /** Same two points (either order) within tolerance. */
 export const sameDim = (a: { a: Pt; b: Pt }, b: { a: Pt; b: Pt }, tol = 25) => { const n = (p: Pt, q: Pt) => Math.hypot(p.x - q.x, p.y - q.y) <= tol; return (n(a.a, b.a) && n(a.b, b.b)) || (n(a.a, b.b) && n(a.b, b.a)); };
 
@@ -158,35 +158,45 @@ const fRect = (F: Frame, u0: number, v0: number, w: number, d: number) => ring([
 const fEllipse = (F: Frame, cu: number, cv: number, ru: number, rv: number, n = 28) => ring(Array.from({ length: n }, (_, i) => { const t = (i / n) * Math.PI * 2; return F.at(cu + Math.cos(t) * ru, cv + Math.sin(t) * rv); }));
 const fCircle = (F: Frame, cu: number, cv: number, r: number) => fEllipse(F, cu, cv, r, r, 24);
 
+/** Do two convex polygons overlap (more than touching)? Separating-axis test. */
+export function convexHit(a: Pt[], b: Pt[], eps = 1): boolean {
+  for (const pl of [a, b]) for (let i = 0; i < pl.length; i++) { const p0 = pl[i], p1 = pl[(i + 1) % pl.length]; const ax = { x: -(p1.y - p0.y), y: p1.x - p0.x }; const L = Math.hypot(ax.x, ax.y); if (L < 1e-9) continue;
+    const pa = a.map(q => (q.x * ax.x + q.y * ax.y) / L), pb = b.map(q => (q.x * ax.x + q.y * ax.y) / L); if (Math.max(...pa) - eps <= Math.min(...pb) || Math.max(...pb) - eps <= Math.min(...pa)) return false; }
+  return true;
+}
+/** The floor a door leaf sweeps: hinge, then the quarter arc from the open leaf to the closed position. */
+export function swingArea(hinge: Pt, open: Pt, along: Pt, w: number, n = 12): Pt[] { const out: Pt[] = [hinge]; for (let k = 0; k <= n; k++) { const t = (k / n) * Math.PI / 2; out.push(add(add(hinge, open, Math.cos(t) * w), along, Math.sin(t) * w)); } return out; }
+
 /** Plumbing fixtures and appliances for a room, placed along its longest wall from what the room is used for. */
-export function fixtures(p: Project, r: Room, waterHeater: boolean, th = inch(3)): { prims: Prim[]; texts: Txt[] } {
-  const prims: Prim[] = []; const texts: Txt[] = []; if (r.use !== 'bath' && r.use !== 'kitchen' && !waterHeater) return { prims, texts };
+export function fixtures(p: Project, r: Room, waterHeater: boolean, th = inch(3)): { prims: Prim[]; texts: Txt[]; boxes: Pt[][] } {
+  const prims: Prim[] = []; const texts: Txt[] = []; const boxes: Pt[][] = []; if (r.use !== 'bath' && r.use !== 'kitchen' && !waterHeater) return { prims, texts, boxes };
   const pl = roomAbs(p, applyTape(r)); const b = bbox(pl); const W = b.maxX - b.minX, D = b.maxY - b.minY;
   // Back wall = the longer side, on the side away from the street (max y); u runs left to right along it.
   const along = W >= D ? W : D; const depth = W >= D ? D : W;
   const F = W >= D ? frame({ x: b.minX, y: b.maxY }, { x: 1, y: 0 }, { x: 0, y: -1 }) : frame({ x: b.maxX, y: b.minY }, { x: 0, y: 1 }, { x: -1, y: 0 });
   const P = (layer: LayerId, d: string) => prims.push({ layer, lw: PEN[layer], d, obj: 'room:' + r.id });
+  /** Floor area a fixture takes (for the door-swing clearance check). */ const B = (u0: number, w: number, d: number) => boxes.push([F.at(u0, 0), F.at(u0 + w, 0), F.at(u0 + w, d), F.at(u0, d)]);
   const label = (layer: LayerId, q: Pt, s: string) => texts.push({ layer, x: q.x, y: -q.y, h: th, s, anchor: 'middle', obj: 'room:' + r.id, mid: true, mask: true });
   let u = inch(2);
   const fits = (w: number, d: number) => u + w <= along - inch(2) && d <= depth - inch(18);
   if (r.use === 'bath') {
-    if (fits(inch(36), inch(36))) { P('P-FIXT', fRect(F, u, 0, inch(36), inch(36)) + fRect(F, u + inch(2), inch(2), inch(32), inch(32)) + fCircle(F, u + inch(18), inch(18), inch(1.5)) + `M${S(F.at(u + inch(2), inch(2)))}L${S(F.at(u + inch(16.9), inch(16.9)))}M${S(F.at(u + inch(34), inch(2)))}L${S(F.at(u + inch(19.1), inch(16.9)))}`); label('P-FIXT', F.at(u + inch(18), inch(28)), 'SHWR'); u += inch(36) + inch(4); }
-    if (fits(inch(30), inch(28))) { const c = u + inch(15); P('P-FIXT', fRect(F, c - inch(10), 0, inch(20), inch(8)) + fEllipse(F, c, inch(18.5), inch(7.5), inch(10.5)) + fEllipse(F, c, inch(19), inch(5.5), inch(8))); u += inch(30) + inch(2); }
-    if (fits(inch(24), inch(20))) { const c = u + inch(12); P('P-FIXT', fRect(F, u, 0, inch(24), inch(20)) + fEllipse(F, c, inch(11), inch(8), inch(6)) + fCircle(F, c, inch(3), inch(1))); label('P-FIXT', F.at(c, inch(25)), 'LAV'); u += inch(26); }
+    if (fits(inch(36), inch(36))) { P('P-FIXT', fRect(F, u, 0, inch(36), inch(36)) + fRect(F, u + inch(2), inch(2), inch(32), inch(32)) + fCircle(F, u + inch(18), inch(18), inch(1.5)) + `M${S(F.at(u + inch(2), inch(2)))}L${S(F.at(u + inch(16.9), inch(16.9)))}M${S(F.at(u + inch(34), inch(2)))}L${S(F.at(u + inch(19.1), inch(16.9)))}`); B(u, inch(36), inch(36)); label('P-FIXT', F.at(u + inch(18), inch(28)), 'SHWR'); u += inch(36) + inch(4); }
+    if (fits(inch(30), inch(28))) { const c = u + inch(15); P('P-FIXT', fRect(F, c - inch(10), 0, inch(20), inch(8)) + fEllipse(F, c, inch(18.5), inch(7.5), inch(10.5)) + fEllipse(F, c, inch(19), inch(5.5), inch(8))); B(c - inch(10), inch(20), inch(29)); u += inch(30) + inch(2); }
+    if (fits(inch(24), inch(20))) { const c = u + inch(12); P('P-FIXT', fRect(F, u, 0, inch(24), inch(20)) + fEllipse(F, c, inch(11), inch(8), inch(6)) + fCircle(F, c, inch(3), inch(1))); B(u, inch(24), inch(20)); label('P-FIXT', F.at(c, inch(25)), 'LAV'); u += inch(26); }
   }
   if (r.use === 'kitchen') {
     const run0 = u;
-    if (fits(inch(36), inch(30))) { P('A-EQPM', fRect(F, u, 0, inch(36), inch(30)) + `M${S(F.at(u, inch(28)))}L${S(F.at(u + inch(36), inch(28)))}`); label('A-EQPM', F.at(u + inch(18), inch(16)), 'REF'); u += inch(37); }
+    if (fits(inch(36), inch(30))) { P('A-EQPM', fRect(F, u, 0, inch(36), inch(30)) + `M${S(F.at(u, inch(28)))}L${S(F.at(u + inch(36), inch(28)))}`); B(u, inch(36), inch(30)); label('A-EQPM', F.at(u + inch(18), inch(16)), 'REF'); u += inch(37); }
     const c0 = u;
-    if (fits(inch(33), inch(25))) { P('P-FIXT', fRect(F, u + inch(1.5), inch(2), inch(14.5), inch(16)) + fRect(F, u + inch(17), inch(2), inch(14.5), inch(16)) + fCircle(F, u + inch(16.5), inch(20.5), inch(1))); label('P-FIXT', F.at(u + inch(16.5), inch(-0.1) + inch(31)), 'SINK'); u += inch(36); }
-    if (fits(inch(30), inch(25))) { P('A-EQPM', fRect(F, u, 0, inch(30), inch(25)) + fCircle(F, u + inch(8), inch(7), inch(4.5)) + fCircle(F, u + inch(22), inch(7), inch(3.5)) + fCircle(F, u + inch(8), inch(18), inch(3.5)) + fCircle(F, u + inch(22), inch(18), inch(4.5))); label('A-EQPM', F.at(u + inch(15), inch(31)), 'RANGE'); u += inch(30); }
+    if (fits(inch(33), inch(25))) { P('P-FIXT', fRect(F, u + inch(1.5), inch(2), inch(14.5), inch(16)) + fRect(F, u + inch(17), inch(2), inch(14.5), inch(16)) + fCircle(F, u + inch(16.5), inch(20.5), inch(1))); B(u, inch(33), inch(25)); label('P-FIXT', F.at(u + inch(16.5), inch(-0.1) + inch(31)), 'SINK'); u += inch(36); }
+    if (fits(inch(30), inch(25))) { P('A-EQPM', fRect(F, u, 0, inch(30), inch(25)) + fCircle(F, u + inch(8), inch(7), inch(4.5)) + fCircle(F, u + inch(22), inch(7), inch(3.5)) + fCircle(F, u + inch(8), inch(18), inch(3.5)) + fCircle(F, u + inch(22), inch(18), inch(4.5))); B(u, inch(30), inch(25)); label('A-EQPM', F.at(u + inch(15), inch(31)), 'RANGE'); u += inch(30); }
     if (u > c0) P('A-EQPM', `M${S(F.at(c0, inch(25)))}L${S(F.at(Math.min(along - inch(2), u + inch(24)), inch(25)))}L${S(F.at(Math.min(along - inch(2), u + inch(24)), 0))}`);
     void run0;
   }
   // Water heater: in the back corner when there is room, else in the opposite corner on the front wall.
   if (waterHeater) { const back = along - u >= inch(26) && depth >= inch(40); const front = !back && depth >= inch(64) && along >= inch(30);
-    if (back || front) { const c = along - inch(13), v = back ? inch(13) : depth - inch(13); P('P-FIXT', fCircle(F, c, v, inch(11)) + fCircle(F, c, v, inch(9.5))); label('P-FIXT', F.at(c, v + inch(1.2)), 'WH'); } }
-  return { prims, texts };
+    if (back || front) { const c = along - inch(13), v = back ? inch(13) : depth - inch(13); P('P-FIXT', fCircle(F, c, v, inch(11)) + fCircle(F, c, v, inch(9.5))); B(c - inch(11), inch(22), 0); boxes[boxes.length - 1] = [F.at(c - inch(11), v - inch(11)), F.at(c + inch(11), v - inch(11)), F.at(c + inch(11), v + inch(11)), F.at(c - inch(11), v + inch(11))]; label('P-FIXT', F.at(c, v + inch(1.2)), 'WH'); } }
+  return { prims, texts, boxes };
 }
 
 export interface DraftOpts { /** Model mm per paper inch (annotation scale), e.g. 96 * 25.4 for 1/8" = 1'-0". */ anno: number; es?: boolean; garageDoorFor?: boolean;
@@ -299,6 +309,9 @@ export function draft(p: Project, o: DraftOpts): Drawing {
       prims.push({ layer: 'A-WALL', lw: PEN['A-WALL'], d: line(a, b) + line(a2, b2), obj: 'room:' + r.id }); parts.push({ a: add(a, out, -INT_WALL / 2), b: add(b, out, -INT_WALL / 2) }); });
   }
   let doorNo = 0, winNo = 0; const tagR = h * 1.25;
+  // Door-swing clearance (review 4 N2): no swing may cross a fixture or another door's swing. Each door tries hinge left or
+  // right, into the room or out of it, and takes the first clear one; a door with no clear swing is drawn in the fix color.
+  const fixBoxes = p.adu.rooms.flatMap(r => fixtures(p, r, r === wh).boxes); const swings: Pt[][] = []; const swingClashes: string[] = []; const tagBoxes: Pt[][] = [];
   p.adu.rooms.forEach((r, ri) => {
     const pl = roomAbs(p, applyTape(r));
     for (const op of r.openings) {
@@ -320,12 +333,18 @@ export function draft(p: Project, o: DraftOpts): Drawing {
         openings.push({ kind: 'window', mark: id, room: r, op });
         if (detail === 'plan') { const g = gid('tag'); prims.push({ layer: 'A-GLAZ-IDEN', lw: 0.09, d: hexRing(tc, tagR), fill: 'bg', stroke: false, obj, g }, { layer: 'A-GLAZ-IDEN', lw: PEN['A-GLAZ-IDEN'], d: hexRing(tc, tagR), obj, g }); T({ layer: 'A-GLAZ-IDEN', x: tc.x, y: -tc.y, h, s: id, anchor: 'middle', mid: true, obj, g }); }
       } else {
-        const W = op.widthMm; const tip = add(s0, nin, W); const leaf = [s0, add(s0, u, inch(1.5)), add(tip, u, inch(1.5)), tip];
-        const arc: Pt[] = []; for (let k = 0; k <= 18; k++) { const t = (k / 18) * Math.PI / 2; arc.push(add(add(s0, nin, Math.cos(t) * W), u, Math.sin(t) * W)); }
-        prims.push({ layer: 'A-DOOR', lw: PEN['A-DOOR'], d: ring(leaf) + line(s0, o0) + line(s1, o1), obj });
-        prims.push({ layer: 'A-DOOR', lw: 0.13, d: ring(arc, false), obj });
-        const id = String(++doorNo);
+        const W = op.widthMm; const id = String(++doorNo); const neg = (v: Pt) => ({ x: -v.x, y: -v.y });
+        const opts = [[s0, nin, u], [s1, nin, neg(u)], [o0, neg(nin), u], [o1, neg(nin), neg(u)]] as [Pt, Pt, Pt][];
+        const ok = (o: [Pt, Pt, Pt]) => { const a = swingArea(o[0], o[1], o[2], W); return !fixBoxes.some(b => convexHit(a, b)) && !swings.some(q => convexHit(a, q)); };
+        const pick = opts.find(ok); if (!pick) swingClashes.push(id); const [H, nv, al] = pick ?? opts[0]; swings.push(swingArea(H, nv, al, W));
+        const dtone = pick ? undefined : 'fix' as const;
+        const tip = add(H, nv, W); const leaf = [H, add(H, al, inch(1.5)), add(tip, al, inch(1.5)), tip];
+        const arc: Pt[] = []; for (let k = 0; k <= 18; k++) { const t = (k / 18) * Math.PI / 2; arc.push(add(add(H, nv, Math.cos(t) * W), al, Math.sin(t) * W)); }
+        prims.push({ layer: 'A-DOOR', lw: PEN['A-DOOR'], d: ring(leaf) + line(s0, o0) + line(s1, o1), obj, tone: dtone });
+        prims.push({ layer: 'A-DOOR', lw: 0.13, d: ring(arc, false), obj, tone: dtone });
         openings.push({ kind: 'door', mark: id, room: r, op });
+        // the tag goes on the side of the wall the door does not swing into
+        const tc = nv === nin ? add(m, nin, -(span + tagR * 1.6)) : add(m, nin, tagR * 1.6);
         if (detail === 'plan') { const g = gid('tag'); prims.push({ layer: 'A-DOOR-IDEN', lw: 0.09, d: circleRing(tc, tagR), fill: 'bg', stroke: false, obj, g }, { layer: 'A-DOOR-IDEN', lw: PEN['A-DOOR-IDEN'], d: circleRing(tc, tagR), obj, g }); T({ layer: 'A-DOOR-IDEN', x: tc.x, y: -tc.y, h, s: id, anchor: 'middle', mid: true, obj, g }); }
       }
     }
@@ -335,6 +354,7 @@ export function draft(p: Project, o: DraftOpts): Drawing {
     const b = bbox(pl); const Wd = b.maxX - b.minX, Dp = b.maxY - b.minY; const fx0 = detail === 'plan' && (r.use === 'bath' || r.use === 'kitchen' || r === wh);
     const c = !fx0 ? { x: (b.minX + b.maxX) / 2, y: (b.minY + b.maxY) / 2 } : Wd >= Dp ? { x: (b.minX + b.maxX) / 2, y: b.minY + Math.max(Math.min(Dp * 0.5, hRoom * 2.2), Math.min(Dp * 0.36, Dp - inch(30) - hRoom * 2.6)) } : { x: b.minX + Math.max(Math.min(Wd * 0.5, h * 3), Math.min(Wd * 0.36, Wd - inch(30) - h * 1.6)), y: (b.minY + b.maxY) / 2 };
     const nm = (r.name.trim() || (es ? 'CUARTO' : 'ROOM')).toUpperCase(); const no = String(101 + ri);
+    if (detail === 'plan') { const hw = Math.max(textW(nm, hRoom, true), h * 3.4) / 2 + h * 0.3, up = h * 0.85 + hRoom * 1.6, dn = h * 2.1; tagBoxes.push([{ x: c.x - hw, y: c.y - dn }, { x: c.x + hw, y: c.y - dn }, { x: c.x + hw, y: c.y + up }, { x: c.x - hw, y: c.y + up }]); }
     if (detail === 'plan') { const g = gid('room'); // one room tag: name, number box and area move together in the label pass
       T({ layer: 'A-AREA-IDEN', x: c.x, y: -c.y - h * 0.85 - hRoom * 0.75, h: hRoom, s: nm, anchor: 'middle', bold: true, obj: 'room:' + r.id, mid: true, mask: true, g });
       const bw = h * 3.2, bh = h * 1.7; prims.push({ layer: 'A-AREA-IDEN', lw: 0.09, d: ring([{ x: c.x - bw / 2, y: c.y + bh / 2 }, { x: c.x + bw / 2, y: c.y + bh / 2 }, { x: c.x + bw / 2, y: c.y - bh / 2 }, { x: c.x - bw / 2, y: c.y - bh / 2 }]), fill: 'bg', stroke: false, obj: 'room:' + r.id, g });
@@ -390,8 +410,15 @@ export function draft(p: Project, o: DraftOpts): Drawing {
     for (const st of strings) dim(st.a, add(st.a, st.u, st.L), st.out * (st.ts.length > 2 ? tB : tA), fmtArch(st.L), 'ink', 'adu');
     // Interior: each room's clear width and depth, once (two rooms that share a span share the dimension).
     for (const r of p.adu.rooms) { const pl = roomAbs(p, applyTape(r)); if (pl.length !== 4) continue; const b = bbox(pl); const W = b.maxX - b.minX, D = b.maxY - b.minY; if (W < ft(3) || D < ft(3)) continue;
-      const y = b.minY + Math.min(D * 0.3, ft(3)), x = b.minX + Math.min(W * 0.3, ft(3));
-      dim({ x: b.minX, y }, { x: b.maxX, y }, 0, fmtArch(W), 'ink', 'room:' + r.id); dim({ x, y: b.minY }, { x, y: b.maxY }, 0, fmtArch(D), 'ink', 'room:' + r.id); }
+      // On a clear line (review 4 N4): not through a fixture, a door swing or the room tag. Tried from near a wall inward;
+      // left out when no line is clear (the room schedule still gives the size).
+      const obs = [...fixBoxes, ...swings, ...tagBoxes]; const fr = [0.12, 0.2, 0.3, 0.4, 0.6, 0.7, 0.8, 0.88];
+      const band = (a: Pt, c: Pt, txt: string) => { const u2 = unit(sub(c, a)); const nn = { x: -u2.y, y: u2.x }; const tw = textW(txt, h) / 2 + h * 0.3; const m2 = add(a, sub(c, a), 0.5);
+        return [[add(a, nn, -h * 0.25), add(c, nn, -h * 0.25), add(c, nn, h * 0.25), add(a, nn, h * 0.25)], [add(add(m2, u2, -tw), nn, -h * 0.2), add(add(m2, u2, tw), nn, -h * 0.2), add(add(m2, u2, tw), nn, h * 1.4), add(add(m2, u2, -tw), nn, h * 1.4)]]; };
+      const clearAt = (a: Pt, c: Pt, txt: string) => band(a, c, txt).every(pl => !obs.some(o => convexHit(pl, o)));
+      const yy = fr.map(f2 => b.minY + D * f2).find(y => clearAt({ x: b.minX, y }, { x: b.maxX, y }, fmtArch(W)));
+      const xx = fr.map(f2 => b.minX + W * f2).find(x => clearAt({ x, y: b.minY }, { x, y: b.maxY }, fmtArch(D)));
+      if (yy != null) dim({ x: b.minX, y: yy }, { x: b.maxX, y: yy }, 0, fmtArch(W), 'ink', 'room:' + r.id); if (xx != null) dim({ x: xx, y: b.minY }, { x: xx, y: b.maxY }, 0, fmtArch(D), 'ink', 'room:' + r.id); }
   }
   if (doorKey) keynote(doorKey.text, doorKey.to, add(add(doorKey.to, doorKey.out, -A * (site ? 0.75 : 1.4)), unit(sub(fp[(door + 1) % n], fp[door])), -A * (site ? 0.3 : 0.9)), 'adu');
 
@@ -433,7 +460,7 @@ export function draft(p: Project, o: DraftOpts): Drawing {
   if (street && !o.sheetAnno) { const w = A * 3.2, hh = hRoom * 2; grow(street.at.x - w, -street.at.y - hh); grow(street.at.x + w, -street.at.y + hh); }
   for (const t of texts) { const w = textW(t.s, t.h, t.bold); const r = ((t.rot ?? 0) * Math.PI) / 180; const ext = Math.abs(Math.cos(r)) * w + Math.abs(Math.sin(r)) * t.h, eyy = Math.abs(Math.sin(r)) * w + Math.abs(Math.cos(r)) * t.h; grow(t.x - ext, t.y - eyy); grow(t.x + ext, t.y + eyy); }
   const pad = site ? ft(4) : ft(1); const fpad = ft(9);
-  return { prims, texts, dims, keynotes, openings, street,
+  return { prims, texts, dims, keynotes, openings, street, swingClashes,
     extents: { minX: ex.minX - pad, minY: ex.minY - pad, maxX: ex.maxX + pad, maxY: ex.maxY + pad },
     focus: { minX: fb.minX - fpad, minY: -(fb.maxY + fpad), maxX: fb.maxX + fpad, maxY: -(fb.minY - fpad) } };
 }
