@@ -1,10 +1,11 @@
-import { PDFDocument, StandardFonts, rgb, degrees, PDFName, PDFString, type PDFPage, type PDFFont } from 'pdf-lib';
+import { PDFDocument, rgb, degrees, PDFName, PDFString, type PDFPage, type PDFFont } from 'pdf-lib';
 import type { Project } from '../core/model';
 import type { Report } from '../rules/engine';
 import { bbox, clearanceToEdge, gap } from '../core/geom';
 import { PACK, PACK_ID, rulesLine } from '../rules/pack';
 import { streetName } from './dxf';
 import { safe, missingGlyphNote } from './glyphs';
+import { sheetFonts } from './pdffonts';
 export { missingGlyphNote };
 import { toSqFt } from '../core/units';
 import { MM_PER_FT, fmtFtIn, fmtSqFt } from '../core/units';
@@ -30,7 +31,7 @@ const setLang = (doc: PDFDocument, lang: string) => doc.catalog.set(PDFName.of('
 /** ARCH D (24x36) sheet with true-scale site plan, scale bar, north arrow, title block. */
 async function sitePlanSheet(doc: PDFDocument, p: Project, kind: Kind, sheets: string[]) {
   const W = 36 * PT_PER_IN, H = 24 * PT_PER_IN; const pg = doc.addPage([W, H]);
-  const f = await doc.embedFont(StandardFonts.Helvetica), fb = await doc.embedFont(StandardFonts.HelveticaBold);
+  const { f, fb } = await sheetFonts(doc);
   pg.drawRectangle({ x: 36, y: 36, width: W - 72, height: H - 72, borderColor: INK, borderWidth: 1.5 });
   const tbX = W - 36 - TB_W;
   // drawing area
@@ -128,7 +129,7 @@ function sigBlock(pg: PDFPage, x: number, y: number, w: number, f: PDFFont, p: P
 /** Sheet A-2: floor plan data from the Rooms step (ADU outline at 1/4" = 1'-0", window schedule with escape tags, alarms, areas). */
 async function floorPlanSheet(doc: PDFDocument, p: Project, kind: Kind) {
   const W = 36 * PT_PER_IN, H = 24 * PT_PER_IN; let pg = doc.addPage([W, H]); const first = pg;
-  const f = await doc.embedFont(StandardFonts.Helvetica), fb = await doc.embedFont(StandardFonts.HelveticaBold);
+  const { f, fb } = await sheetFonts(doc);
   pg.drawRectangle({ x: 36, y: 36, width: W - 72, height: H - 72, borderColor: INK, borderWidth: 1.5 });
   const ab = bbox(p.adu.footprint); const k = (0.25 * PT_PER_IN) / MM_PER_FT; const ox = 108, oy = 260;
   p.adu.footprint.forEach((a, i) => { const b = p.adu.footprint[(i + 1) % p.adu.footprint.length]; pg.drawLine({ start: { x: ox + (a.x - ab.minX) * k, y: oy + (a.y - ab.minY) * k }, end: { x: ox + (b.x - ab.minX) * k, y: oy + (b.y - ab.minY) * k }, thickness: 4, color: INK }); });
@@ -179,7 +180,7 @@ async function floorPlanSheet(doc: PDFDocument, p: Project, kind: Kind) {
 
 /** Sheet G-2: review markup. Numbered pins drawn on a small site plan, the pin list, and correction-letter responses. */
 async function markupSheet(doc: PDFDocument, p: Project) {
-  const W = 36 * PT_PER_IN, H = 24 * PT_PER_IN; const f = await doc.embedFont(StandardFonts.Helvetica), fb = await doc.embedFont(StandardFonts.HelveticaBold);
+  const W = 36 * PT_PER_IN, H = 24 * PT_PER_IN; const { f, fb } = await sheetFonts(doc);
   const newPage = (cont: boolean) => { const pg = doc.addPage([W, H]); pg.drawRectangle({ x: 36, y: 36, width: W - 72, height: H - 72, borderColor: INK, borderWidth: 1.5 });
     pg.drawText(cont ? 'REVIEW MARKUP (CONTINUED)' : 'REVIEW MARKUP', { x: 60, y: H - 80, size: 20, font: fb, color: INK });
     pg.drawText(safe(`G-2 Review markup   ${p.site.address || p.name}   APN ${p.site.apn || '-'}   Notes travel in the .permitpack file.`), { x: 60, y: 54, size: 10, font: f, color: INK });
@@ -228,7 +229,7 @@ const STAT: Record<string, [string, string, ReturnType<typeof rgb>]> = {
 };
 export async function reportPDF(p: Project, rep: Report, lang: 'en' | 'es' = p.people.language) {
   const doc = await PDFDocument.create(); doc.setTitle(`${p.name} - check report`); setLang(doc, lang === 'es' ? 'es-US' : 'en-US');
-  const f = await doc.embedFont(StandardFonts.Helvetica), fb = await doc.embedFont(StandardFonts.HelveticaBold);
+  const { f, fb } = await sheetFonts(doc);
   let pg: PDFPage = doc.addPage([612, 792]); let y = 740; const L = 54, Wd = 504;
   const line = (t: string, size = 10, font = f, color = INK, indent = 0) => { for (const l of wrap(safe(t), font, size, Wd - indent)) { if (y < 60) { pg = doc.addPage([612, 792]); y = 740; } pg.drawText(l, { x: L + indent, y, size, font, color }); y -= size + 4; } };
   const es = lang === 'es';

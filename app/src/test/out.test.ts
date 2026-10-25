@@ -1,3 +1,4 @@
+import { decodeHex } from './pdfglyphs';
 import { describe, it, expect } from 'vitest';
 import { demoProject } from '../core/model';
 import { evaluate } from '../rules/engine';
@@ -44,7 +45,7 @@ function pdfText(bytes: Uint8Array): string {
   // regex cut pages short depending on the date printed on the sheet).
   for (const m of s.matchAll(/\/Length (\d+)\b[^]*?>>\s*stream\r?\n/g)) {
     let body = s.slice(m.index! + m[0].length, m.index! + m[0].length + Number(m[1])); try { const raw = Uint8Array.from(body, c => c.charCodeAt(0)); body = bin(unzlibSync(raw)); } catch { /* not compressed */ }
-    for (const t of body.matchAll(/<([0-9A-Fa-f]+)>\s*Tj/g)) out += t[1].match(/../g)!.map(h => String.fromCharCode(parseInt(h, 16))).join('') + '\n';
+    for (const t of body.matchAll(/<([0-9A-Fa-f]+)>\s*Tj/g)) out += decodeHex(t[1], s) + '\n';
   }
   return out;
 }

@@ -1,3 +1,4 @@
+import { decodeHex } from '../pdfglyphs';
 import { describe, it, expect } from 'vitest';
 import { unzlibSync } from 'fflate';
 import { sheetsPDF } from '../../out/pdf';
@@ -7,7 +8,7 @@ function pdfText(bytes: Uint8Array): string {
   const s = bin(bytes); let out = '';
   for (const m of s.matchAll(/\/Length (\d+)\b[^]*?>>\s*stream\r?\n/g)) {
     let body = s.slice(m.index! + m[0].length, m.index! + m[0].length + Number(m[1])); try { body = bin(unzlibSync(Uint8Array.from(body, c => c.charCodeAt(0)))); } catch { /* raw */ }
-    for (const t of body.matchAll(/<([0-9A-Fa-f]+)>\s*Tj/g)) out += t[1].match(/../g)!.map(h => String.fromCharCode(parseInt(h, 16))).join('') + '\n';
+    for (const t of body.matchAll(/<([0-9A-Fa-f]+)>\s*Tj/g)) out += decodeHex(t[1], s) + '\n';
   }
   return out;
 }
