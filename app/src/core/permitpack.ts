@@ -115,7 +115,14 @@ export function migrate(raw: any): Project {
   if (badRoom) notes.push('a room shape or size');
   // Review markup: pins and correction responses travel in the pack (reviewers need no account).
   const mk = (p.markup && typeof p.markup === 'object') ? p.markup : {};
-  const pins: Pin[] = (Array.isArray(mk.pins) ? mk.pins : []).slice(0, MAX_PINS).filter((x: any) => x && isNum(x.x) && isNum(x.y) && Math.abs(x.x) < 1e9 && Math.abs(x.y) < 1e9)
+  // A pin is kept only near the drawing (lot box plus 100 ft); one far off would blow up DXF extents and fall off the G-2 sheet.
+  const lb = out.site.lot.reduce((b, v) => ({ x0: Math.min(b.x0, v.x), x1: Math.max(b.x1, v.x), y0: Math.min(b.y0, v.y), y1: Math.max(b.y1, v.y) }), { x0: Infinity, x1: -Infinity, y0: Infinity, y1: -Infinity });
+  const PAD = 30480, near = (x: any) => x.x >= lb.x0 - PAD && x.x <= lb.x1 + PAD && x.y >= lb.y0 - PAD && x.y <= lb.y1 + PAD;
+  const rawPins: any[] = Array.isArray(mk.pins) ? mk.pins : [];
+  if (rawPins.length > MAX_PINS) notes.push(`review notes over ${MAX_PINS}`);
+  const okPins = rawPins.slice(0, MAX_PINS).filter((x: any) => x && isNum(x.x) && isNum(x.y));
+  if (okPins.some(x => !near(x))) notes.push('a review note placed far off the plan');
+  const pins: Pin[] = okPins.filter(near)
     .map((x: any, i: number) => ({ id: str(x.id, 60) || uid(), n: Number.isInteger(x.n) && x.n > 0 && x.n < 100000 ? x.n : i + 1, x: x.x, y: x.y, comment: str(x.comment, 2000), status: x.status === 'resolved' ? 'resolved' : 'open', author: str(x.author, 80), at: str(x.at, 40), ...(x.ref ? { ref: str(x.ref, 40) } : {}) }));
   const responses: Response[] = (Array.isArray(mk.responses) ? mk.responses : []).slice(0, MAX_RESPONSES).filter((x: any) => x && typeof x === 'object')
     .map((x: any) => ({ id: str(x.id, 60) || uid(), ref: str(x.ref, 40), text: str(x.text, 2000), response: str(x.response, 2000), sheet: str(x.sheet, 60), done: !!x.done, ...(x.pinId ? { pinId: str(x.pinId, 60) } : {}) }));

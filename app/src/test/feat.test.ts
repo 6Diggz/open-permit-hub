@@ -76,7 +76,7 @@ describe('parcel autofill (recorded fixtures)', () => {
   });
   it('never guesses a neighbor: no exact house-number match -> no lot shape, overlays unknown', async () => {
     const r = await lookupParcel(fx('atwater').address, { fetch: replay(fx('atwater'), (u, b) => { if (u.startsWith(PARCEL_SOURCES.parcel.url)) b.features.forEach((f: any) => { f.attributes.TOOLTIP = '9999 X ST'; }); return b; }) });
-    expect(r.ok).toBe(true); if (!r.ok) return; expect(r.fill.lot).toBeNull(); expect(r.fill.apn).toBe(''); expect(r.fill.flags.hillside).toBe('unknown'); expect(r.fill.failed).toContain('parcel');
+    expect(r.ok).toBe(true); if (!r.ok) return; expect(r.fill.lot).toBeNull(); expect(r.fill.apn).toBe(''); expect(r.fill.flags.hillside).toBe('unknown'); expect(r.fill.noParcelMatch).toBe(true); expect(r.fill.failed).not.toContain('parcel'); // a no-match, not a layer failure (r3people-01)
   });
   it('a cancelled lookup throws AbortError (the screen goes back to idle)', async () => {
     const c = new AbortController(); c.abort();

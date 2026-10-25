@@ -1,6 +1,7 @@
 import { useState } from 'react';
 import type { Pin, Project } from '../core/model';
 import { uid } from '../core/model';
+import { MAX_PINS } from '../core/permitpack';
 import { defaultPinSpot, nextPinNumber, parseLetter, responseLetter, sortPins, type SortKey } from '../core/markup';
 import { L, uiLang } from './lang';
 
@@ -21,7 +22,8 @@ export function ReviewStep({ p, update, sel, setSel, placing, setPlacing, downlo
   const open = pins.filter(x => x.status === 'open').length;
   const setPin = (id: string, fn: (x: Pin) => void, key?: string) => update(d => { const x = d.markup.pins.find(y => y.id === id); if (x) fn(x); }, key);
   /** One update per click: two updates in one handler would each start from the same old project and the second would drop the first. */
-  const addPin = (comment = '', ref?: string, also?: (d: Project, pinId: string) => void) => { const id = uid(); update(d => { const spot = defaultPinSpot(d); d.markup.pins.push({ id, n: nextPinNumber(d.markup.pins), ...spot, comment, status: 'open', author: author.trim(), at: today(), ...(ref ? { ref } : {}) }); also?.(d, id); }); setSel(id); return id; };
+  const full = pins.length >= MAX_PINS;
+  const addPin = (comment = '', ref?: string, also?: (d: Project, pinId: string) => void) => { if (full) return; const id = uid(); update(d => { const spot = defaultPinSpot(d); d.markup.pins.push({ id, n: nextPinNumber(d.markup.pins), ...spot, comment, status: 'open', author: author.trim(), at: today(), ...(ref ? { ref } : {}) }); also?.(d, id); }); setSel(id); return id; };
   const head = (k: SortKey, label: string) => <th aria-sort={sort.k === k ? (sort.d === 1 ? 'ascending' : 'descending') : 'none'} scope="col">
     <button type="button" className="btn quiet" style={{ border: 0, padding: '2px 4px' }} onClick={() => setSort(s => ({ k, d: s.k === k ? (s.d === 1 ? -1 : 1) : 1 }))}>{label}{sort.k === k ? (sort.d === 1 ? ' ▲' : ' ▼') : ''}</button></th>;
   return <>
@@ -31,10 +33,10 @@ export function ReviewStep({ p, update, sel, setSel, placing, setPlacing, downlo
       <div className="field"><label htmlFor="rv-au">{L('Your name (shown on your notes)')}</label><input id="rv-au" value={author} maxLength={80} autoComplete="name" onChange={e => { setAuthor(e.target.value); saveAuthor(e.target.value); }} /></div>
       <div className="field"><label id="rv-add">{L('Add a note')}</label>
         <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap' }} role="group" aria-labelledby="rv-add">
-          <button type="button" className="btn primary" aria-pressed={placing === 'new'} onClick={() => setPlacing(placing === 'new' ? false : 'new')}>{placing === 'new' ? L('Tap the plan to place it') : L('Place a pin on the plan')}</button>
-          <button type="button" className="btn" onClick={() => { setPlacing(false); addPin(); }}>{L('Add a note at the ADU')}</button>
+          <button type="button" className="btn primary" disabled={full} aria-pressed={placing === 'new'} onClick={() => setPlacing(placing === 'new' ? false : 'new')}>{placing === 'new' ? L('Tap the plan to place it') : L('Place a pin on the plan')}</button>
+          <button type="button" className="btn" disabled={full} onClick={() => { setPlacing(false); addPin(); }}>{L('Add a note at the ADU')}</button>
         </div>
-        <span className="help" role="status">{placing ? L('Tap or click the spot on the plan. Press Escape to stop.') : `${pins.length} ${L('notes')}: ${open} ${L('open')}, ${pins.length - open} ${L('resolved')}.`}</span></div>
+        <span className="help" role="status">{full ? `${MAX_PINS} ${L('notes')}: ${L('the most one project can hold. Resolve and delete old notes to add more.')}` : placing ? L('Tap or click the spot on the plan. Press Escape to stop.') : `${pins.length} ${L('notes')}: ${open} ${L('open')}, ${pins.length - open} ${L('resolved')}.`}</span></div>
     </div>
     {pins.length === 0 ? <p className="lead">{L('No notes yet. Place a pin on the plan, or paste a correction letter below.')}</p> :
       <div style={{ overflowX: 'auto' }} role="region" aria-label={L('Notes list')} tabIndex={0}>

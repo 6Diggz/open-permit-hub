@@ -20,21 +20,28 @@ export function makeStore(kv: () => KV | null) {
   const del = (k: string) => { try { kv()?.removeItem(k); } catch { /* blocked */ } };
   const storedRev = (id: string): number | null => { const raw = get(P(id)); if (!raw) return null; try { const r = JSON.parse(raw).rev; return Number.isInteger(r) ? r : 0; } catch { return 0; } };
 
+  const index = (): Entry[] => { try { const l = JSON.parse(get(IDX) ?? '[]'); return Array.isArray(l) ? l.filter(e => e && typeof e.id === 'string').sort((a: Entry, b: Entry) => String(b.updatedAt).localeCompare(String(a.updatedAt))) : []; } catch { return []; } };
   function list(): Entry[] {
     const legacy = get(LEGACY);
-    if (legacy) { try { const p = migrate(JSON.parse(legacy)); save(p); del(LEGACY); } catch { set(LEGACY + '.broken', legacy); del(LEGACY); } }
-    try { const l = JSON.parse(get(IDX) ?? '[]'); return Array.isArray(l) ? l.filter(e => e && typeof e.id === 'string').sort((a: Entry, b: Entry) => String(b.updatedAt).localeCompare(String(a.updatedAt))) : []; } catch { return []; }
+    if (legacy) {
+      // Migrate the v0.1 single-project save once. It is removed only after the new copy is stored and listed.
+      let p: Project | null = null; try { p = migrate(JSON.parse(legacy)); } catch { set(LEGACY + '.broken', legacy); del(LEGACY); }
+      if (p && save(p) === 'ok') del(LEGACY);
+    }
+    return index();
   }
   /** Save. Refuses ('conflict') when another tab saved this project after this tab last read it, unless `force`. */
   function save(p: Project, opts: { force?: boolean } = {}): SaveResult {
     const cur = storedRev(p.id), mine = seen.get(p.id);
     if (!opts.force && cur != null && mine != null && cur !== mine) return 'conflict';
-    const rev = (cur ?? 0) + 1;
+    const rev = (cur ?? 0) + 1; const before = get(P(p.id));
     if (!set(P(p.id), serialize({ ...p, rev }))) return 'blocked';
-    seen.set(p.id, rev);
-    const l = list().filter(e => e.id !== p.id);
+    const l = index().filter(e => e.id !== p.id);
     l.unshift({ id: p.id, name: p.name, address: p.site.address, updatedAt: new Date().toISOString(), demo: p.site.apn.startsWith('0000-') });
-    return set(IDX, JSON.stringify(l)) ? 'ok' : 'blocked';
+    // If the list can't be written, undo the data write so no project is stored but missing from the list.
+    if (!set(IDX, JSON.stringify(l))) { if (before == null) del(P(p.id)); else set(P(p.id), before); return 'blocked'; }
+    seen.set(p.id, rev);
+    return 'ok';
   }
   function open(id: string): Project {
     const raw = get(P(id)); if (!raw) throw new Error('This project is no longer on this device.');

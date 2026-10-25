@@ -32,6 +32,7 @@ export function ParcelLookup({ p, commit }: { p: Project; commit: (next: Project
       const r = await lookupParcel(p.site.address, { signal: c.signal, online: fetchFn ? true : navigator.onLine, fetch: fetchFn });
       if (c.signal.aborted) return;
       if (!r.ok) { setSt({ k: 'error', e: r.error === 'network' && !navigator.onLine ? 'offline' : r.error }); return; }
+      if (r.fill.noParcelMatch) { setSt({ k: 'error', e: 'no-parcel' }); return; }
       const { next, filled } = applyParcel(p, r.fill);
       if (!filled.length) { setSt({ k: 'error', e: r.fill.failed.length ? 'network' : 'no-parcel' }); return; }
       commit(next);

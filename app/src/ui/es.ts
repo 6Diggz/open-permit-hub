@@ -321,6 +321,7 @@ export const ES = {
 "Yes, on the left side (corner lot)": "Sí, del lado izquierdo (lote de esquina)",
 "Yes, on the right side (corner lot)": "Sí, del lado derecho (lote de esquina)",
 "Yes, an alley at the back": "Sí, un callejón atrás",
+"the most one project can hold. Resolve and delete old notes to add more.": "lo máximo que cabe en un proyecto. Resuelva y borre notas viejas para agregar más.",
 "Does the ADU stay inside the existing walls?": "¿El ADU queda dentro de los muros existentes?",
 "Is the added area only for the entry?": "¿El área agregada es solo para la entrada?",
 "Does the slab have a vapor barrier, or will you add an approved epoxy coating?": "¿La losa tiene barrera de vapor, o agregará un recubrimiento epóxico aprobado?",

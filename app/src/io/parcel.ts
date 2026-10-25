@@ -31,6 +31,7 @@ export interface ParcelFill {
   matched: string; zip: string; at: string;
   /** Lot outline in the local frame (mm, street edge first, lot above it), or null if the parcel layer failed. */
   lot: Poly | null; widthMm: number | null; depthMm: number | null;
+  /** The street was found but no parcel carries this house number. */ noParcelMatch?: boolean;
   apn: string; zone: string; jurisdiction: 'la-city' | 'other' | 'unknown'; cityName: string;
   flags: { hillside: Tri3; vhfhsz: Tri3; coastal: Tri3; hpoz: Tri3 };
   /** Sources that did not answer (their fields stay as they were). */
@@ -171,7 +172,9 @@ export async function lookupParcel(address: string, opts: LookupOpts = {}): Prom
     const ring = rings.sort((a, b) => Math.abs(signedArea(b.map(p => ({ x: p[0], y: p[1] })))) - Math.abs(signedArea(a.map(p => ({ x: p[0], y: p[1] })))))[0];
     if (ring) { const l = ringToLot(ring, c.location); if (l.length >= 3 && l.every(p => Math.abs(p.x) <= MAX_LEN_MM && Math.abs(p.y) <= MAX_LEN_MM)) lot = l; else failed.push('parcel'); probe = interiorPoint(ring); }
   } else if (pf) { multiPiece = true; probe = interiorPoint(pf.geometry?.rings?.[0] ?? [[c.location.x, c.location.y]]); }
-  if (near && !pf) failed.push('parcel');
+  // The layer answered but no parcel has this house number (the geocoder interpolated it): a no-match, not a failure.
+  const noParcelMatch = !!near && !pf && apns.length === 0;
+  if (near && !pf && !noParcelMatch) failed.push('parcel');
   const onLot = !!pf;
   const { x, y } = probe;
   const ask = async (k: SourceKey): Promise<Feat[] | null> => { try { return (await getJson(fetchFn, pointQueryUrl(PARCEL_SOURCES[k].url, x, y, false), opts.signal)).features ?? []; } catch (e) { if ((e as Error)?.name === 'AbortError') throw e; failed.push(k); return null; } };
@@ -189,6 +192,6 @@ export async function lookupParcel(address: string, opts: LookupOpts = {}): Prom
   return { ok: true, fill: {
     matched: String(c.address ?? '').slice(0, 120), zip: cz, at: (opts.now ?? new Date()).toISOString(), lot, widthMm: w, depthMm: d,
     apn: fmtApn(attr.BPP ?? '').slice(0, 40), zone: String(zf?.ZONE_CMPLT ?? '').trim().slice(0, 40), jurisdiction, cityName: (inCity ? 'Los Angeles' : otherCity).slice(0, 60),
-    flags: { hillside: tri(hillside), vhfhsz: tri(vhfhsz), coastal, hpoz: tri(hpoz) }, failed: [...new Set(failed)], zimasPin: String(attr.PIND ?? '').slice(0, 40), multiPiece,
+    flags: { hillside: tri(hillside), vhfhsz: tri(vhfhsz), coastal, hpoz: tri(hpoz) }, failed: [...new Set(failed)], zimasPin: String(attr.PIND ?? '').slice(0, 40), multiPiece, noParcelMatch,
   } };
 }

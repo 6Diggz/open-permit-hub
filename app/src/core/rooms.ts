@@ -19,7 +19,26 @@ export function roomSize(r: Room): { w: number; d: number; taped: boolean } {
 }
 export function roomArea(r: Room): number { if (r.shape === 'rect') { const s = roomSize(r); return s.w * s.d; } return area(r.poly); }
 /** Smallest horizontal size (for the 7 ft minimum dimension rule). Polygons: the smaller bbox side, a fair first check. */
-export const roomMinDim = (r: Room) => { const s = roomSize(r); return Math.min(s.w, s.d); };
+/**
+ * Narrowest clear dimension (R304.2 "7 ft in any horizontal direction"). A rectangle is its short side; a shaped room
+ * (L, T) is scanned across and up at every band between its corners, so a 3 ft leg counts as 3 ft, not the bounding box.
+ */
+export const roomMinDim = (r: Room) => {
+  const s = roomSize(r); const box = Math.min(s.w, s.d);
+  if (r.shape === 'rect' || r.poly.length <= 4) return box;
+  const pl = r.poly; let best = Infinity;
+  const scan = (vert: boolean) => {
+    const cs = [...new Set(pl.map(q => (vert ? q.x : q.y)))].sort((a, b) => a - b);
+    for (let i = 0; i + 1 < cs.length; i++) {
+      const c = (cs[i] + cs[i + 1]) / 2; const hits: number[] = [];
+      pl.forEach((a, k) => { const b = pl[(k + 1) % pl.length]; const [a0, a1, b0, b1] = vert ? [a.x, a.y, b.x, b.y] : [a.y, a.x, b.y, b.x];
+        if ((a0 <= c) !== (b0 <= c)) hits.push(a1 + (c - a0) * (b1 - a1) / (b0 - a0)); });
+      hits.sort((a, b) => a - b); for (let h = 0; h + 1 < hits.length; h += 2) best = Math.min(best, hits[h + 1] - hits[h]);
+    }
+  };
+  scan(true); scan(false);
+  return Number.isFinite(best) ? Math.min(best, box) : box;
+};
 
 /** True when the room lies inside the footprint; touching the outline (sharing a wall) is fine. */
 export function roomFits(room: Poly, foot: Poly, tol = 3): boolean {
