@@ -3,7 +3,7 @@ All notable changes. Format: Keep a Changelog. Versions: the app follows semver;
 
 ## [Unreleased] - rounds 2 to 5
 ### App
-- Plan-set PDF pre-check: reads the text of an existing plan set on the device and maps it to the LADBS correction-sheet items. It says "Mentioned on page N", "Mentioned, not shown as provided" or "Conflicts with code", never that an item is approved.
+- Plan-set PDF pre-check: reads the text of an existing plan set on the device and maps it to the LADBS correction-sheet items. It only claims what text can prove: "Not found in the text", "Conflicts with code" (a number read fails the rule) or "Says not provided" (an absence phrase such as N/A, TBD, by others, future, no aplica). Anything else is "Found on page N. Confirm it is shown as provided." at medium confidence with the quote. It never says an item is provided or approved.
 - Inspector field mode (`#field`): site-visit checklist by trade and stage, one photo per item, visit PDF and site-visit `.permitpack`. A Pass over a check the app fails needs a reason and is printed as an override.
 - Parcel lookup, drawn rooms, sheet readiness score, plain answer ("Likely yes / Not as entered / Not sure"), review notes and correction responses, Spanish calendar file.
 - One shared verdict: the check card, PDF, HTML report and handoff README carry the same plain answer and counts. The handoff ZIP carries the site visit.

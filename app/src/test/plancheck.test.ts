@@ -50,7 +50,7 @@ describe('plan-set pre-check: fixtures', () => {
     expect(c.sheets[0].kinds).toContain('site'); expect(c.sheets[1].kinds).toContain('floor'); expect(c.sheets[0].scales.length).toBeGreaterThan(0);
     expect(c.title.apn?.text).toBe('0000-000-000'); expect(c.title.address?.text).toContain('123 Example St'); expect(c.title.owner?.text).toBe('Maria Lopez');
     expect(c.title.occupancy?.text).toMatch(/R-3/); expect(c.title.type?.text).toMatch(/Type V-B/i);
-    expect(item(c, 'I.C.2').state).toBe('addressed'); expect(item(c, 'I.C.2').confidence).toBe('high');
+    expect(item(c, 'I.C.2').state).toBe('addressed'); expect(item(c, 'I.C.2').confidence).toBe('medium') /* r8-01: never above medium */;
     expect(item(c, 'I.C.7').state).toBe('addressed'); expect(item(c, 'I.C.7').pages).toContain(1);
     expect(item(c, 'III.G.1').state).toBe('addressed'); expect(c.dims.ceilings[0].inches).toBe(96); expect(item(c, 'III.G.1').attention).toBeUndefined();
     expect(c.dims.setbacks.some(s => s.inches === 24)).toBe(true);
@@ -62,12 +62,12 @@ describe('plan-set pre-check: fixtures', () => {
     const c = await read(await planSet());
     expect(c.pages).toBe(4); expect(c.sheets.map(s => s.id)).toEqual(['A-0', 'A-1', 'A-2', 'A-3']);
     expect(c.title.apn?.text).toBe('5594-014-021'); expect(c.title.license?.text).toMatch(/C-12345/);
-    expect(item(c, 'I.C.8').state).toBe('addressed'); expect(item(c, 'I.C.8').confidence).toBe('high');
+    expect(item(c, 'I.C.8').state).toBe('addressed'); expect(item(c, 'I.C.8').confidence).toBe('medium') /* r8-01 */;
     expect(item(c, 'I.C.5').state).toBe('addressed'); expect(item(c, 'I.C.6').state).toBe('addressed');
-    expect(item(c, 'N.4').confidence).toBe('high');
+    expect(item(c, 'N.4').confidence).toBe('medium'); expect(c.items.every(i => i.confidence !== 'high')).toBe(true) /* r8-01 */;
     expect(item(c, 'III.E.2').confidence).toBe('medium') /* r5 claim model: a keyword alone is never high */; expect(item(c, 'III.E.3').pages).toEqual([1]);
     expect(item(c, 'III.F.1').state).toBe('addressed'); expect(item(c, 'III.F.1').pages).toContain(3); expect(item(c, 'III.F.1').attention).toBeUndefined();
-    expect(item(c, 'III.F.2').confidence).toBe('high'); expect(item(c, 'III.J.1').confidence).toBe('medium'); expect(item(c, 'III.J.18').pages).toEqual([4]);
+    expect(item(c, 'III.F.2').confidence).toBe('medium') /* r8-01: Found is never above medium */; expect(item(c, 'III.J.1').confidence).toBe('medium'); expect(item(c, 'III.J.18').pages).toEqual([4]);
     expect(item(c, 'I.C.1').confidence).toBe('low'); // stamps and signatures are pictures: never more than low
     expect(item(c, 'III.D.1').attention?.en).toMatch(/under 5 ft/); // 3'-6" side setback read
     expect(c.dims.setbacks.find(s => s.side === 'side')?.inches).toBe(42);

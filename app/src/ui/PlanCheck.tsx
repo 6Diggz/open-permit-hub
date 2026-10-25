@@ -6,7 +6,7 @@ import { L, uiLang } from './lang';
 
 type Phase = { k: 'idle' } | { k: 'reading'; page: number; of: number; name: string } | { k: 'error'; msg: string; name: string } | { k: 'done'; r: Result; name: string; total: number };
 type Show = 'all' | ItemState;
-const STATE_CLASS: Record<ItemState, string> = { addressed: 'PASS', negated: 'UNKNOWN', conflict: 'FAIL', partial: 'UNKNOWN', missing: 'FAIL' };
+const STATE_CLASS: Record<ItemState, string> = { addressed: 'UNKNOWN', negated: 'FAIL', conflict: 'FAIL', partial: 'UNKNOWN', missing: 'FAIL' } /* r8-01: Found is neutral, never a pass */;
 
 /**
  * Plan-set pre-check: the user picks the PDF of an existing plan set; its text is read on this device (pdf.js, loaded
@@ -16,9 +16,9 @@ export function PlanCheckPanel({ onNotes }: { /** Adds review notes for the item
   const es = uiLang() === 'es'; const lang = es ? 'es' : 'en';
   const [ph, setPh] = useState<Phase>({ k: 'idle' }); const [show, setShow] = useState<Show>('all'); const [note, setNote] = useState('');
   const sig = useRef({ cancelled: false }); const input = useRef<HTMLInputElement>(null);
-  const STATE: Record<ItemState, string> = { addressed: L('Mentioned'), negated: L('Mentioned, not shown as provided'), conflict: L('Conflicts with code'), partial: L('Partly found'), missing: L('Not found in the text') };
-  /** Text proves a mention, not compliance: say where it was mentioned. */
-  const stateLabel = (i: CheckItem) => i.state === 'addressed' && i.pages.length ? `${L('Mentioned on page')} ${i.pages.join(', ')}` : STATE[i.state];
+  const STATE: Record<ItemState, string> = { addressed: L('Found, confirm it'), negated: L('Says not provided'), conflict: L('Conflicts with code'), partial: L('Partly found'), missing: L('Not found in the text') };
+  /** r8-01: text never proves an item is provided. Found is a pointer: say where, and ask the reader to confirm. */
+  const stateLabel = (i: CheckItem) => i.state === 'addressed' && i.pages.length ? `${L('Found on page')} ${i.pages.join(', ')}. ${L('Confirm it is shown as provided.')}` : STATE[i.state];
   const CONF = { high: L('High'), medium: L('Medium'), low: L('Low') };
   const summary = (id: string) => CATALOG.find(c => c.id === id)?.summary[lang] ?? id;
 
@@ -70,7 +70,7 @@ export function PlanCheckPanel({ onNotes }: { /** Adds review notes for the item
     return <>
       <div className="banner" role="status" style={{ margin: 0 }}>
         <b>{name}</b> · {r.pages} {r.pages === 1 ? L('page read') : L('pages read')}{total > r.pages ? ` (${L('of')} ${total}; ${L('only the first')} ${r.pages} ${L('are read')})` : ''}.{' '}
-        {r.items.length} {L('sheet items')}: {n.addressed} {L('mentioned')}, {n.conflict} {L('conflict with code')}, {n.negated} {L('not shown as provided')}, {n.partial} {L('partly found')}, {n.missing} {L('not found in the text')}.
+        {r.items.length} {L('sheet items')}: {n.conflict} {L('conflict with code')}, {n.negated} {L('say not provided')}, {n.missing} {L('not found in the text')}, {n.partial} {L('partly found')}, {n.addressed} {L('found (confirm each one)')}.
       </div>
       {r.scanned && <div className="banner warn" role="alert" style={{ margin: 0 }}>{r.textPages === 0 ? L('No text was found in this PDF. It looks like a scan or a picture of the plans, so nothing could be read. Ask for a PDF exported from the drawing program.') : L('Most pages have no text (they look scanned). Items on those pages show as not found even if they are drawn.')}</div>}
       <div className="field"><label id="pc-show">{L('Show')}</label>
