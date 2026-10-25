@@ -5,7 +5,7 @@ import { bbox, clearanceToEdge, gap } from '../core/geom';
 import { PACK, PACK_ID, rulesLine } from '../rules/pack';
 import { streetName } from './dxf';
 import { safe, missingGlyphNote } from './glyphs';
-import { sheetFonts } from './pdffonts';
+import { sheetFonts, drawT } from './pdffonts';
 export { missingGlyphNote };
 import { toSqFt } from '../core/units';
 import { MM_PER_FT, fmtFtIn, fmtSqFt } from '../core/units';
@@ -42,30 +42,30 @@ async function sitePlanSheet(doc: PDFDocument, p: Project, kind: Kind, sheets: s
   const X = (x: number) => ox + (x - bb.minX) * k, Y = (y: number) => oy + (y - bb.minY) * k;
   const poly = (pl: { x: number; y: number }[], th: number, color = INK, dash?: number[]) => pl.forEach((a, i) => { const b = pl[(i + 1) % pl.length]; pg.drawLine({ start: { x: X(a.x), y: Y(a.y) }, end: { x: X(b.x), y: Y(b.y) }, thickness: th, color, dashArray: dash }); });
   poly(p.site.lot, 2.2, INK, [14, 4, 2, 4]); poly(p.site.primary, 1.4, MUTE); poly(p.adu.footprint, 2.6, INK);
-  const lab = (pl: { x: number; y: number }[], t: string) => { const b2 = bbox(pl); pg.drawText(safe(t), { x: X((b2.minX + b2.maxX) / 2) - f.widthOfTextAtSize(t, 11) / 2, y: Y((b2.minY + b2.maxY) / 2), size: 11, font: fb, color: INK }); };
+  const lab = (pl: { x: number; y: number }[], t: string) => { const b2 = bbox(pl); drawT(pg, safe(t), { x: X((b2.minX + b2.maxX) / 2) - f.widthOfTextAtSize(t, 11) / 2, y: Y((b2.minY + b2.maxY) / 2), size: 11, font: fb, color: INK }); };
   lab(p.site.primary, 'EXISTING HOUSE'); lab(p.adu.footprint, p.adu.mode === 'conversion' ? 'GARAGE CONVERSION (ADU)' : 'ADU');
-  p.site.lot.forEach((a, i) => { const b = p.site.lot[(i + 1) % p.site.lot.length]; const mx = (X(a.x) + X(b.x)) / 2, my = (Y(a.y) + Y(b.y)) / 2; const L = fmtFtIn(Math.hypot(b.x - a.x, b.y - a.y)); pg.drawText(L, { x: mx + 6, y: my + 6, size: 10, font: f, color: INK });
-    const d = clearanceToEdge(p.adu.footprint, p.site.lot, i); if (i !== p.site.streetEdge) pg.drawText(`ADU SETBACK ${fmtFtIn(d)}`, { x: mx + 6, y: my - 20, size: 11, font: fb, color: INK }); });
+  p.site.lot.forEach((a, i) => { const b = p.site.lot[(i + 1) % p.site.lot.length]; const mx = (X(a.x) + X(b.x)) / 2, my = (Y(a.y) + Y(b.y)) / 2; const L = fmtFtIn(Math.hypot(b.x - a.x, b.y - a.y)); drawT(pg, L, { x: mx + 6, y: my + 6, size: 10, font: f, color: INK });
+    const d = clearanceToEdge(p.adu.footprint, p.site.lot, i); if (i !== p.site.streetEdge) drawT(pg, `ADU SETBACK ${fmtFtIn(d)}`, { x: mx + 6, y: my - 20, size: 11, font: fb, color: INK }); });
   { const se = p.site.streetEdge, a = p.site.lot[se], b = p.site.lot[(se + 1) % p.site.lot.length]; const st = streetName(p.site.address);
-    const t = safe(st ? `STREET: ${st.toUpperCase()}` : 'STREET'); pg.drawText(t, { x: (X(a.x) + X(b.x)) / 2 - fb.widthOfTextAtSize(t, 14) / 2, y: (Y(a.y) + Y(b.y)) / 2 - 40, size: 14, font: fb, color: INK }); }
+    const t = safe(st ? `STREET: ${st.toUpperCase()}` : 'STREET'); drawT(pg, t, { x: (X(a.x) + X(b.x)) / 2 - fb.widthOfTextAtSize(t, 14) / 2, y: (Y(a.y) + Y(b.y)) / 2 - 40, size: 14, font: fb, color: INK }); }
   { const g = gap(p.adu.footprint, p.site.primary); const hb = bbox(p.site.primary), ab = bbox(p.adu.footprint);
     if (g > 0 && Number.isFinite(g)) { const x = (Math.max(hb.minX, ab.minX) + Math.min(hb.maxX, ab.maxX)) / 2; const [y1, y2] = hb.maxY <= ab.minY ? [hb.maxY, ab.minY] : ab.maxY <= hb.minY ? [ab.maxY, hb.minY] : [NaN, NaN];
       if (Number.isFinite(y1)) { pg.drawLine({ start: { x: X(x), y: Y(y1) }, end: { x: X(x), y: Y(y2) }, thickness: 1, color: INK }); [y1, y2].forEach(yy => pg.drawLine({ start: { x: X(x) - 5, y: Y(yy) }, end: { x: X(x) + 5, y: Y(yy) }, thickness: 1, color: INK }));
-        pg.drawText(`BUILDING SEPARATION ${fmtFtIn(g)}`, { x: X(x) + 8, y: (Y(y1) + Y(y2)) / 2, size: 11, font: fb, color: INK }); } } }
+        drawT(pg, `BUILDING SEPARATION ${fmtFtIn(g)}`, { x: X(x) + 8, y: (Y(y1) + Y(y2)) / 2, size: 11, font: fb, color: INK }); } } }
   // Enlarged ADU plan at 1/4" = 1'-0" in the free space (UX: sheet looked empty)
   { const ab = bbox(p.adu.footprint); const k2 = (0.25 * PT_PER_IN) / MM_PER_FT; const dw = (ab.maxX - ab.minX) * k2, dh = (ab.maxY - ab.minY) * k2;
     const room = tbX - 36 - (ox + wFt * s * PT_PER_IN) - 60;
     if (room > dw + 80) { const bx = tbX - 60 - dw, by = H / 2 - dh / 2;
       pg.drawRectangle({ x: bx, y: by, width: dw, height: dh, borderColor: INK, borderWidth: 3 });
-      pg.drawText(`${fmtFtIn(ab.maxX - ab.minX)}`, { x: bx + dw / 2 - 20, y: by + dh + 8, size: 11, font: f, color: INK });
-      pg.drawText(`${fmtFtIn(ab.maxY - ab.minY)}`, { x: bx + dw + 8, y: by + dh / 2, size: 11, font: f, color: INK });
-      pg.drawText('ADU FOOTPRINT', { x: bx, y: by - 22, size: 14, font: fb, color: INK });
-      pg.drawText(`Scale 1/4" = 1'-0"   ${fmtSqFt(area(p.adu.footprint))} outside   ${p.adu.interiorLivableSqFt ?? '-'} sq ft livable`, { x: bx, y: by - 38, size: 10, font: f, color: INK }); } }
+      drawT(pg, `${fmtFtIn(ab.maxX - ab.minX)}`, { x: bx + dw / 2 - 20, y: by + dh + 8, size: 11, font: f, color: INK });
+      drawT(pg, `${fmtFtIn(ab.maxY - ab.minY)}`, { x: bx + dw + 8, y: by + dh / 2, size: 11, font: f, color: INK });
+      drawT(pg, 'ADU FOOTPRINT', { x: bx, y: by - 22, size: 14, font: fb, color: INK });
+      drawT(pg, `Scale 1/4" = 1'-0"   ${fmtSqFt(area(p.adu.footprint))} outside   ${p.adu.interiorLivableSqFt ?? '-'} sq ft livable`, { x: bx, y: by - 38, size: 10, font: f, color: INK }); } }
   // scale bar (true size) + north arrow
   const sbY = 60, sbX = 72; const seg = s * PT_PER_IN * 10; for (let i = 0; i < 4; i++) pg.drawRectangle({ x: sbX + i * seg, y: sbY, width: seg, height: 6, color: i % 2 ? rgb(1, 1, 1) : INK, borderColor: INK, borderWidth: 0.6 });
   // Each number sits on its own tick (one string drifted: "40" printed at the 7 ft mark).
-  for (let i = 0; i <= 4; i++) { const t = String(i * 10); pg.drawText(t, { x: sbX + i * seg - f.widthOfTextAtSize(t, 9) / 2, y: sbY + 12, size: 9, font: f, color: INK }); }
-  pg.drawText(`FEET      Scale ${scaleName(s)} on 24x36 sheet`, { x: sbX + 4 * seg + 18, y: sbY + 12, size: 9, font: f, color: INK });
+  for (let i = 0; i <= 4; i++) { const t = String(i * 10); drawT(pg, t, { x: sbX + i * seg - f.widthOfTextAtSize(t, 9) / 2, y: sbY + 12, size: 9, font: f, color: INK }); }
+  drawT(pg, `FEET      Scale ${scaleName(s)} on 24x36 sheet`, { x: sbX + 4 * seg + 18, y: sbY + 12, size: 9, font: f, color: INK });
   northArrow(pg, tbX - 70, H - 125, p.site.northDeg, f, fb);
   // title block
   const rows: [string, string][] = [
@@ -80,8 +80,8 @@ async function sitePlanSheet(doc: PDFDocument, p: Project, kind: Kind, sheets: s
     ['Stories', p.adu.mode === 'conversion' ? '1 (existing garage)' : 'Preparer to state'], ['ADU height', p.adu.heightMm ? fmtFtIn(p.adu.heightMm) : '-'],
     ['Very High Fire Hazard Severity Zone', yn(p.site.flags.vhfhsz)], ['Sprinklers', yn(p.adu.sprinklered)], ['Vicinity map', 'Not drawn by this app. The preparer adds one (a ZIMAS map works).'], ['Sheet index', sheets.join('; ')]);
   titleBlock(pg, p, 'SITE PLAN', 'A-1 Site plan', rows, f, fb);
-  if (kind === 'draft') pg.drawText('DRAFT - NOT FOR SUBMITTAL', { x: W * 0.2, y: H * 0.25, size: 96, font: fb, color: rgb(0.85, 0.2, 0.15), opacity: 0.13, rotate: degrees(28) });
-  if (kind === 'precheck') pg.drawText('Pre-check copy - not a submittal', { x: 44, y: H - 50, size: 10, font: fb, color: RED });
+  if (kind === 'draft') drawT(pg, 'DRAFT - NOT FOR SUBMITTAL', { x: W * 0.2, y: H * 0.25, size: 96, font: fb, color: rgb(0.85, 0.2, 0.15), opacity: 0.13, rotate: degrees(28) });
+  if (kind === 'precheck') drawT(pg, 'Pre-check copy - not a submittal', { x: 44, y: H - 50, size: 10, font: fb, color: RED });
   exampleBanner(pg, p, fb, H);
   return pg;
 }
@@ -95,11 +95,11 @@ function titleBlock(pg: PDFPage, p: Project, title: string, sheet: string, extra
   const rows: [string, string][] = extra ?? [['Project', p.name], ['Address', p.site.address || '-'], ['APN', p.site.apn || '-'], ['Owner', p.people.ownerName || '-'],
     ['Prepared by', `${p.people.preparerName || '-'} (${p.people.preparerRole})`], ['License', p.people.preparerLicense || 'n/a'], ['Rule pack', `${PACK_ID} (checked ${PACK.verifiedOn})`]];
   rows.push(['Sheet', sheet], ['Date', today()]);
-  let ty = H - 72; pg.drawText(title, { x: tbX + 14, y: ty, size: 20, font: fb, color: INK }); ty -= 34;
-  for (const [a, b] of rows) { pg.drawText(a, { x: tbX + 14, y: ty, size: 9, font: f, color: MUTE }); ty -= 13; for (const l of wrap(safe(b), f, 11, tbW - 28)) { pg.drawText(l, { x: tbX + 14, y: ty, size: 11, font: fb, color: INK }); ty -= 14; } ty -= 7; }
+  let ty = H - 72; drawT(pg, title, { x: tbX + 14, y: ty, size: 20, font: fb, color: INK }); ty -= 34;
+  for (const [a, b] of rows) { drawT(pg, a, { x: tbX + 14, y: ty, size: 9, font: f, color: MUTE }); ty -= 13; for (const l of wrap(safe(b), f, 11, tbW - 28)) { drawT(pg, l, { x: tbX + 14, y: ty, size: 11, font: fb, color: INK }); ty -= 14; } ty -= 7; }
   const note = `Prepared by the person named above using Open Permit Hub software. The software is not the preparer. Not reviewed or approved by any agency. Verify all dimensions in the field.${missingGlyphNote(p, false, true) ? ' ' + missingGlyphNote(p, false, true) : ''}`;
   sigBlock(pg, tbX + 14, 210, tbW - 28, f, p);
-  ty = 150; for (const l of wrap(note, f, 9, tbW - 28)) { pg.drawText(l, { x: tbX + 14, y: ty, size: 9, font: f, color: INK }); ty -= 12; }
+  ty = 150; for (const l of wrap(note, f, 9, tbW - 28)) { drawT(pg, l, { x: tbX + 14, y: ty, size: 9, font: f, color: INK }); ty -= 12; }
   return tbX;
 }
 /** North arrow with an arrowhead, turned to the project's true north (degrees clockwise from sheet-up). Unknown north is said, not guessed. */
@@ -110,8 +110,8 @@ export function northArrow(pg: PDFPage, cx: number, cy: number, deg: number | nu
   pg.drawLine({ start: tail, end: tip, thickness: 2, color: INK });
   const hx = -uy, hy = ux; // arrowhead: two short strokes back from the tip
   for (const sgn of [1, -1]) pg.drawLine({ start: tip, end: { x: tip.x - ux * 12 + hx * 6 * sgn, y: tip.y - uy * 12 + hy * 6 * sgn }, thickness: 2, color: INK });
-  pg.drawText('N', { x: cx + ux * (r + 16) - 5, y: cy + uy * (r + 16) - 5, size: 14, font: fb, color: INK });
-  if (deg == null) pg.drawText('North not set: check before submittal', { x: cx - 80, y: cy - r - 24, size: 9, font: f, color: RED });
+  drawT(pg, 'N', { x: cx + ux * (r + 16) - 5, y: cy + uy * (r + 16) - 5, size: 14, font: fb, color: INK });
+  if (deg == null) drawT(pg, 'North not set: check before submittal', { x: cx - 80, y: cy - r - 24, size: 9, font: f, color: RED });
 }
 
 /** Signature and date lines for the person who prepared the plans (B&P §5536.2 asks the preparer to sign plans made for others). Layout only. */
@@ -122,8 +122,8 @@ function sigBlock(pg: PDFPage, x: number, y: number, w: number, f: PDFFont, p: P
   const dw = 90;
   pg.drawLine({ start: { x, y }, end: { x: x + w - dw - 12, y }, thickness: 0.8, color: INK });
   pg.drawLine({ start: { x: x + w - dw, y }, end: { x: x + w, y }, thickness: 0.8, color: INK });
-  let ly = y - 12; for (const l of wrap(safe(sigLabel(p)), f, 9, w - dw - 12)) { pg.drawText(l, { x, y: ly, size: 9, font: f, color: MUTE }); ly -= 11; }
-  pg.drawText('Date', { x: x + w - dw, y: y - 12, size: 9, font: f, color: MUTE });
+  let ly = y - 12; for (const l of wrap(safe(sigLabel(p)), f, 9, w - dw - 12)) { drawT(pg, l, { x, y: ly, size: 9, font: f, color: MUTE }); ly -= 11; }
+  drawT(pg, 'Date', { x: x + w - dw, y: y - 12, size: 9, font: f, color: MUTE });
 }
 
 /** Sheet A-2: floor plan data from the Rooms step (ADU outline at 1/4" = 1'-0", window schedule with escape tags, alarms, areas). */
@@ -141,49 +141,49 @@ async function floorPlanSheet(doc: PDFDocument, p: Project, kind: Kind) {
       if (o.kind === 'window') { pg.drawLine({ start: { x: a.x + nx, y: a.y + ny }, end: { x: b.x + nx, y: b.y + ny }, thickness: 0.8, color: INK }); pg.drawLine({ start: { x: a.x - nx, y: a.y - ny }, end: { x: b.x - nx, y: b.y - ny }, thickness: 0.8, color: INK }); }
       else { const L = o.widthMm * k; pg.drawLine({ start: a, end: { x: a.x + (-w.uy) * L, y: a.y + w.ux * L }, thickness: 0.8, color: INK }); } }
     const bb = bbox(r.poly); const c = P({ x: (bb.minX + bb.maxX) / 2, y: (bb.minY + bb.maxY) / 2 }); const z = roomSize(r);
-    const nm = safe((r.name || 'ROOM').toUpperCase()).slice(0, 24); pg.drawText(nm, { x: c.x - fb.widthOfTextAtSize(nm, 10) / 2, y: c.y + 4, size: 10, font: fb, color: INK });
-    const dm = `${fmtFtIn(z.w)} x ${fmtFtIn(z.d)}`; pg.drawText(dm, { x: c.x - f.widthOfTextAtSize(dm, 9) / 2, y: c.y - 9, size: 9, font: f, color: INK });
-    const ar = fmtSqFt(roomArea(r)) + (z.taped ? ' (tape)' : ''); pg.drawText(ar, { x: c.x - f.widthOfTextAtSize(ar, 9) / 2, y: c.y - 20, size: 9, font: f, color: MUTE });
+    const nm = safe((r.name || 'ROOM').toUpperCase()).slice(0, 24); drawT(pg, nm, { x: c.x - fb.widthOfTextAtSize(nm, 10) / 2, y: c.y + 4, size: 10, font: fb, color: INK });
+    const dm = `${fmtFtIn(z.w)} x ${fmtFtIn(z.d)}`; drawT(pg, dm, { x: c.x - f.widthOfTextAtSize(dm, 9) / 2, y: c.y - 9, size: 9, font: f, color: INK });
+    const ar = fmtSqFt(roomArea(r)) + (z.taped ? ' (tape)' : ''); drawT(pg, ar, { x: c.x - f.widthOfTextAtSize(ar, 9) / 2, y: c.y - 20, size: 9, font: f, color: MUTE });
   }
-  pg.drawText(p.adu.rooms.length ? 'FLOOR PLAN' : 'FLOOR PLAN (OUTLINE)', { x: ox, y: oy - 30, size: 16, font: fb, color: INK });
-  pg.drawText(`Scale 1/4" = 1'-0"   Outside ${fmtFtIn(ab.maxX - ab.minX)} x ${fmtFtIn(ab.maxY - ab.minY)} (${fmtSqFt(area(p.adu.footprint))})   Livable ${p.adu.interiorLivableSqFt ?? '-'} sq ft   Ceiling ${p.adu.ceilingHeightMm != null ? fmtFtIn(p.adu.ceilingHeightMm) : '-'}`, { x: ox, y: oy - 48, size: 11, font: f, color: INK });
-  pg.drawText(p.adu.rooms.length ? 'Rooms, doors and windows as drawn in the app. Tape sizes marked (tape). Verify all sizes in the field.' : 'Room layout, doors and wall locations: drawn by your preparer. This sheet lists what you entered.', { x: ox, y: oy - 64, size: 10, font: f, color: MUTE });
+  drawT(pg, p.adu.rooms.length ? 'FLOOR PLAN' : 'FLOOR PLAN (OUTLINE)', { x: ox, y: oy - 30, size: 16, font: fb, color: INK });
+  drawT(pg, `Scale 1/4" = 1'-0"   Outside ${fmtFtIn(ab.maxX - ab.minX)} x ${fmtFtIn(ab.maxY - ab.minY)} (${fmtSqFt(area(p.adu.footprint))})   Livable ${p.adu.interiorLivableSqFt ?? '-'} sq ft   Ceiling ${p.adu.ceilingHeightMm != null ? fmtFtIn(p.adu.ceilingHeightMm) : '-'}`, { x: ox, y: oy - 48, size: 11, font: f, color: INK });
+  drawT(pg, p.adu.rooms.length ? 'Rooms, doors and windows as drawn in the app. Tape sizes marked (tape). Verify all sizes in the field.' : 'Room layout, doors and wall locations: drawn by your preparer. This sheet lists what you entered.', { x: ox, y: oy - 64, size: 10, font: f, color: MUTE });
   let y = H - 90; const x0 = W * 0.55; const q = withRooms(p);
   // Long schedules continue on the next sheet instead of running off the page.
   const need = (h: number) => { if (y - h >= 110) return; pg = doc.addPage([W, H]); pg.drawRectangle({ x: 36, y: 36, width: W - 72, height: H - 72, borderColor: INK, borderWidth: 1.5 });
-    pg.drawText(safe(`A-2 Floor plan data (continued)   ${p.site.address || p.name}`), { x: 60, y: 54, size: 10, font: f, color: INK });
+    drawT(pg, safe(`A-2 Floor plan data (continued)   ${p.site.address || p.name}`), { x: 60, y: 54, size: 10, font: f, color: INK });
     titleBlock(pg, p, 'FLOOR PLAN', 'A-2 Floor plan data (continued)', null, f, fb);
-    if (kind === 'draft') pg.drawText('DRAFT - NOT FOR SUBMITTAL', { x: W * 0.2, y: H * 0.25, size: 96, font: fb, color: rgb(0.85, 0.2, 0.15), opacity: 0.13, rotate: degrees(28) });
+    if (kind === 'draft') drawT(pg, 'DRAFT - NOT FOR SUBMITTAL', { x: W * 0.2, y: H * 0.25, size: 96, font: fb, color: rgb(0.85, 0.2, 0.15), opacity: 0.13, rotate: degrees(28) });
     y = H - 90; };
   if (p.adu.rooms.length) {
-    pg.drawText('ROOM SCHEDULE', { x: x0, y, size: 16, font: fb, color: INK }); y -= 24;
-    const rc = [0, 170, 250, 390, 470, 540]; ['Room', 'Use', 'Size', 'Area', 'Ceiling', 'Doors/Win'].forEach((h, i) => pg.drawText(h, { x: x0 + rc[i], y, size: 10, font: fb, color: INK })); y -= 16;
+    drawT(pg, 'ROOM SCHEDULE', { x: x0, y, size: 16, font: fb, color: INK }); y -= 24;
+    const rc = [0, 170, 250, 390, 470, 540]; ['Room', 'Use', 'Size', 'Area', 'Ceiling', 'Doors/Win'].forEach((h, i) => drawT(pg, h, { x: x0 + rc[i], y, size: 10, font: fb, color: INK })); y -= 16;
     for (const r of p.adu.rooms) { need(16); const z = roomSize(r); const c = roomCeiling(p, r);
-      [safe(r.name || '-').slice(0, 26), r.use, `${fmtFtIn(z.w)} x ${fmtFtIn(z.d)}`, fmtSqFt(roomArea(r)), c != null ? fmtFtIn(c) : '-', `${r.openings.filter(o => o.kind === 'door').length}/${r.openings.filter(o => o.kind === 'window').length}`].forEach((t, j) => pg.drawText(t, { x: x0 + rc[j], y, size: 10, font: f, color: INK })); y -= 14; if (y < 330) break; }
+      [safe(r.name || '-').slice(0, 26), r.use, `${fmtFtIn(z.w)} x ${fmtFtIn(z.d)}`, fmtSqFt(roomArea(r)), c != null ? fmtFtIn(c) : '-', `${r.openings.filter(o => o.kind === 'door').length}/${r.openings.filter(o => o.kind === 'window').length}`].forEach((t, j) => drawT(pg, t, { x: x0 + rc[j], y, size: 10, font: f, color: INK })); y -= 14; if (y < 330) break; }
     y -= 20;
   }
-  need(60); pg.drawText('WINDOW SCHEDULE', { x: x0, y, size: 16, font: fb, color: INK }); y -= 24;
+  need(60); drawT(pg, 'WINDOW SCHEDULE', { x: x0, y, size: 16, font: fb, color: INK }); y -= 24;
   const head = ['#', 'Room', 'Clear W', 'Clear H', 'Sill', 'Escape', 'Net sq ft'];
-  const cols = [0, 30, 210, 290, 370, 440, 520]; head.forEach((h, i) => pg.drawText(h, { x: x0 + cols[i], y, size: 10, font: fb, color: INK })); y -= 16;
+  const cols = [0, 30, 210, 290, 370, 440, 520]; head.forEach((h, i) => drawT(pg, h, { x: x0 + cols[i], y, size: 10, font: fb, color: INK })); y -= 16;
   q.adu.windows.forEach((w, i) => { need(16); const sq = w.clearWidthMm != null && w.clearHeightMm != null ? toSqFt(w.clearWidthMm * w.clearHeightMm).toFixed(1) : '-';
-    [String(i + 1), safe(w.room || '-').slice(0, 28), w.clearWidthMm != null ? fmtFtIn(w.clearWidthMm) : '-', w.clearHeightMm != null ? fmtFtIn(w.clearHeightMm) : '-', w.sillMm != null ? fmtFtIn(w.sillMm) : '-', w.sleeping ? 'EGRESS' : '-', sq].forEach((c, j) => pg.drawText(c, { x: x0 + cols[j], y, size: 10, font: f, color: INK })); y -= 14; });
-  if (!q.adu.windows.length) { pg.drawText('No windows entered yet.', { x: x0, y, size: 10, font: f, color: MUTE }); y -= 14; }
-  y -= 20; need(60); pg.drawText('ROOMS AND SAFETY', { x: x0, y, size: 16, font: fb, color: INK }); y -= 20;
+    [String(i + 1), safe(w.room || '-').slice(0, 28), w.clearWidthMm != null ? fmtFtIn(w.clearWidthMm) : '-', w.clearHeightMm != null ? fmtFtIn(w.clearHeightMm) : '-', w.sillMm != null ? fmtFtIn(w.sillMm) : '-', w.sleeping ? 'EGRESS' : '-', sq].forEach((c, j) => drawT(pg, c, { x: x0 + cols[j], y, size: 10, font: f, color: INK })); y -= 14; });
+  if (!q.adu.windows.length) { drawT(pg, 'No windows entered yet.', { x: x0, y, size: 10, font: f, color: MUTE }); y -= 14; }
+  y -= 20; need(60); drawT(pg, 'ROOMS AND SAFETY', { x: x0, y, size: 16, font: fb, color: INK }); y -= 20;
   const tri = (v: string) => v === 'yes' ? 'Yes' : v === 'no' ? 'No' : 'Not answered';
   const rows: [string, string][] = [['Bedrooms', q.adu.bedrooms === 0 ? 'Studio (main room counts as a sleeping room unless stated)' : String(q.adu.bedrooms)], ['Smoke and CO alarms on plan', tri(p.adu.smokeCoPlanned)], ['Smoke alarms hardwired with battery backup', tri(p.adu.smokeHardwired)], ['Sprinklers', tri(p.adu.sprinklered)], ['All-electric', tri(p.adu.allElectric)], ['Slab vapor barrier or epoxy coating', tri(p.adu.slabVaporBarrier)]];
-  for (const [a, b] of rows) { need(15); pg.drawText(a, { x: x0, y, size: 10, font: f, color: MUTE }); pg.drawText(b, { x: x0 + 250, y, size: 10, font: fb, color: INK }); y -= 15; }
-  first.drawText(safe(`A-2 Floor plan data   ${p.site.address || p.name}   ${PACK_ID}`), { x: 60, y: 54, size: 10, font: f, color: INK });
+  for (const [a, b] of rows) { need(15); drawT(pg, a, { x: x0, y, size: 10, font: f, color: MUTE }); drawT(pg, b, { x: x0 + 250, y, size: 10, font: fb, color: INK }); y -= 15; }
+  drawT(first, safe(`A-2 Floor plan data   ${p.site.address || p.name}   ${PACK_ID}`), { x: 60, y: 54, size: 10, font: f, color: INK });
   exampleBanner(first, p, fb, H);
   titleBlock(first, p, 'FLOOR PLAN', 'A-2 Floor plan data', null, f, fb);
-  if (kind === 'draft') first.drawText('DRAFT - NOT FOR SUBMITTAL', { x: W * 0.2, y: H * 0.25, size: 96, font: fb, color: rgb(0.85, 0.2, 0.15), opacity: 0.13, rotate: degrees(28) });
+  if (kind === 'draft') drawT(first, 'DRAFT - NOT FOR SUBMITTAL', { x: W * 0.2, y: H * 0.25, size: 96, font: fb, color: rgb(0.85, 0.2, 0.15), opacity: 0.13, rotate: degrees(28) });
 }
 
 /** Sheet G-2: review markup. Numbered pins drawn on a small site plan, the pin list, and correction-letter responses. */
 async function markupSheet(doc: PDFDocument, p: Project) {
   const W = 36 * PT_PER_IN, H = 24 * PT_PER_IN; const { f, fb } = await sheetFonts(doc);
   const newPage = (cont: boolean) => { const pg = doc.addPage([W, H]); pg.drawRectangle({ x: 36, y: 36, width: W - 72, height: H - 72, borderColor: INK, borderWidth: 1.5 });
-    pg.drawText(cont ? 'REVIEW MARKUP (CONTINUED)' : 'REVIEW MARKUP', { x: 60, y: H - 80, size: 20, font: fb, color: INK });
-    pg.drawText(safe(`G-2 Review markup   ${p.site.address || p.name}   APN ${p.site.apn || '-'}   Notes travel in the .permitpack file.`), { x: 60, y: 54, size: 10, font: f, color: INK });
+    drawT(pg, cont ? 'REVIEW MARKUP (CONTINUED)' : 'REVIEW MARKUP', { x: 60, y: H - 80, size: 20, font: fb, color: INK });
+    drawT(pg, safe(`G-2 Review markup   ${p.site.address || p.name}   APN ${p.site.apn || '-'}   Notes travel in the .permitpack file.`), { x: 60, y: 54, size: 10, font: f, color: INK });
     titleBlock(pg, p, 'REVIEW MARKUP', cont ? 'G-2 Review markup (continued)' : 'G-2 Review markup', null, f, fb); return pg; };
   let pg = newPage(false);
   // Plan with pins, fitted into the left 40%.
@@ -191,25 +191,25 @@ async function markupSheet(doc: PDFDocument, p: Project) {
   const X = (x: number) => ox + (x - bb.minX) * k, Yp = (y: number) => oy + (y - bb.minY) * k;
   const poly = (pl: { x: number; y: number }[], th: number, color = INK) => pl.forEach((a, i) => { const b = pl[(i + 1) % pl.length]; pg.drawLine({ start: { x: X(a.x), y: Yp(a.y) }, end: { x: X(b.x), y: Yp(b.y) }, thickness: th, color }); });
   poly(p.site.lot, 1.6); poly(p.site.primary, 1, MUTE); poly(p.adu.footprint, 2);
-  for (const x of p.markup.pins) { const c = x.status === 'open' ? RED : GREEN; pg.drawCircle({ x: X(x.x), y: Yp(x.y), size: 9, color: c, borderColor: rgb(1, 1, 1), borderWidth: 1 }); const t = String(x.n); pg.drawText(t, { x: X(x.x) - fb.widthOfTextAtSize(t, 9) / 2, y: Yp(x.y) - 3, size: 9, font: fb, color: rgb(1, 1, 1) }); }
+  for (const x of p.markup.pins) { const c = x.status === 'open' ? RED : GREEN; pg.drawCircle({ x: X(x.x), y: Yp(x.y), size: 9, color: c, borderColor: rgb(1, 1, 1), borderWidth: 1 }); const t = String(x.n); drawT(pg, t, { x: X(x.x) - fb.widthOfTextAtSize(t, 9) / 2, y: Yp(x.y) - 3, size: 9, font: fb, color: rgb(1, 1, 1) }); }
   const open = p.markup.pins.filter(x => x.status === 'open').length;
-  pg.drawText(`${p.markup.pins.length} notes: ${open} open, ${p.markup.pins.length - open} resolved`, { x: ox, y: oy - 30, size: 11, font: fb, color: INK });
+  drawT(pg, `${p.markup.pins.length} notes: ${open} open, ${p.markup.pins.length - open} resolved`, { x: ox, y: oy - 30, size: 11, font: fb, color: INK });
   const tbX = W - 36 - TB_W; let x0 = W * 0.47, y = H - 120; let colW = tbX - x0 - 24;
   const ensure = (need: number) => { if (y - need < 80) { pg = newPage(true); x0 = 60; y = H - 120; colW = tbX - x0 - 24; } };
-  pg.drawText('NOTES', { x: x0, y, size: 14, font: fb, color: INK }); y -= 20;
+  drawT(pg, 'NOTES', { x: x0, y, size: 14, font: fb, color: INK }); y -= 20;
   for (const x of [...p.markup.pins].sort((a, b) => a.n - b.n)) {
     const lines = wrap(safe(x.comment || '(no text)'), f, 10, colW - 60); ensure(16 + lines.length * 13);
-    pg.drawText(`${x.n}`, { x: x0, y, size: 11, font: fb, color: x.status === 'open' ? RED : GREEN }); pg.drawText(`${x.status === 'open' ? 'OPEN' : 'RESOLVED'}  ${safe(x.author || '-')}  ${x.at}${x.ref ? '  letter item ' + safe(x.ref) : ''}`, { x: x0 + 40, y, size: 9, font: fb, color: MUTE }); y -= 13;
-    for (const l of lines) { pg.drawText(l, { x: x0 + 40, y, size: 10, font: f, color: INK }); y -= 13; } y -= 6;
+    drawT(pg, `${x.n}`, { x: x0, y, size: 11, font: fb, color: x.status === 'open' ? RED : GREEN }); drawT(pg, `${x.status === 'open' ? 'OPEN' : 'RESOLVED'}  ${safe(x.author || '-')}  ${x.at}${x.ref ? '  letter item ' + safe(x.ref) : ''}`, { x: x0 + 40, y, size: 9, font: fb, color: MUTE }); y -= 13;
+    for (const l of lines) { drawT(pg, l, { x: x0 + 40, y, size: 10, font: f, color: INK }); y -= 13; } y -= 6;
   }
   if (p.markup.responses.length) {
-    ensure(40); y -= 10; pg.drawText('CORRECTION RESPONSES', { x: x0, y, size: 14, font: fb, color: INK }); y -= 20;
+    ensure(40); y -= 10; drawT(pg, 'CORRECTION RESPONSES', { x: x0, y, size: 14, font: fb, color: INK }); y -= 20;
     for (const r of p.markup.responses) {
       const pin = r.pinId ? p.markup.pins.find(q => q.id === r.pinId) : undefined;
       const a = wrap(safe(`${r.ref}. ${r.text}`), f, 10, colW - 20), b = wrap(safe(`Response: ${r.response || '(no response yet)'}${r.sheet ? '  Sheet ' + r.sheet : ''}${pin ? '  Note ' + pin.n : ''}  ${r.done ? 'DONE' : 'OPEN'}`), fb, 10, colW - 20);
       ensure((a.length + b.length) * 13 + 8);
-      for (const l of a) { pg.drawText(l, { x: x0, y, size: 10, font: f, color: INK }); y -= 13; }
-      for (const l of b) { pg.drawText(l, { x: x0 + 12, y, size: 10, font: fb, color: r.done ? GREEN : INK }); y -= 13; } y -= 6;
+      for (const l of a) { drawT(pg, l, { x: x0, y, size: 10, font: f, color: INK }); y -= 13; }
+      for (const l of b) { drawT(pg, l, { x: x0 + 12, y, size: 10, font: fb, color: r.done ? GREEN : INK }); y -= 13; } y -= 6;
     }
   }
 }
@@ -217,7 +217,7 @@ async function markupSheet(doc: PDFDocument, p: Project) {
 /** Sizes the user never entered are the app's example numbers: say so on the sheet, in red, so nobody reads them as measured. */
 function exampleBanner(pg: PDFPage, p: Project, fb: PDFFont, H: number) {
   const miss = [!p.confirmed?.lot && 'LOT SIZE', !p.confirmed?.house && 'HOUSE SIZE AND POSITION', !p.confirmed?.adu && 'GARAGE SIZE AND POSITION'].filter(Boolean);
-  if (miss.length) pg.drawText(safe(`EXAMPLE SIZES - NOT MEASURED: ${miss.join(', ')}`), { x: 44, y: H - 66, size: 12, font: fb, color: RED });
+  if (miss.length) drawT(pg, safe(`EXAMPLE SIZES - NOT MEASURED: ${miss.join(', ')}`), { x: 44, y: H - 66, size: 12, font: fb, color: RED });
 }
 export async function sheetsPDF(p: Project, kind: Kind) { const d = await PDFDocument.create(); d.setTitle(`${p.name} - site plan`); setLang(d, p.people.language === 'es' ? 'es-US' : 'en-US'); const g2 = p.markup.pins.length > 0 || p.markup.responses.length > 0;
   await sitePlanSheet(d, p, kind, sheetList(p)); await floorPlanSheet(d, p, kind); if (g2) await markupSheet(d, p); return d.save(); }
@@ -231,7 +231,7 @@ export async function reportPDF(p: Project, rep: Report, lang: 'en' | 'es' = p.p
   const doc = await PDFDocument.create(); doc.setTitle(`${p.name} - check report`); setLang(doc, lang === 'es' ? 'es-US' : 'en-US');
   const { f, fb } = await sheetFonts(doc);
   let pg: PDFPage = doc.addPage([612, 792]); let y = 740; const L = 54, Wd = 504;
-  const line = (t: string, size = 10, font = f, color = INK, indent = 0) => { for (const l of wrap(safe(t), font, size, Wd - indent)) { if (y < 60) { pg = doc.addPage([612, 792]); y = 740; } pg.drawText(l, { x: L + indent, y, size, font, color }); y -= size + 4; } };
+  const line = (t: string, size = 10, font = f, color = INK, indent = 0) => { for (const l of wrap(safe(t), font, size, Wd - indent)) { if (y < 60) { pg = doc.addPage([612, 792]); y = 740; } drawT(pg, l, { x: L + indent, y, size, font, color }); y -= size + 4; } };
   const es = lang === 'es';
   line(es ? 'Revisión por software, no una revisión de la ciudad' : 'Software check, not a city review', 9, f, MUTE); y -= 14;
   line(p.name, 20, fb); line(`${p.site.address || '-'}   APN ${p.site.apn || '-'}`, 10, f, MUTE); y -= 6;

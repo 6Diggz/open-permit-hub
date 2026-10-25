@@ -221,7 +221,7 @@ for (const width of [390, 1440]) {
     const file = join(tmp, `visit-${width}.permitpack`); await pk.saveAs(file); const pj = JSON.parse(readFileSync(file, 'utf8'));
     ok(pj.inspection?.items?.egress?.s === 'fail' && Object.values(pj.inspectionPhotos ?? {}).length === 1, `field: .permitpack carries results and photo ${W}`);
     // another device opens the pack: results and photo are there
-    const c2 = await ctx(width); const r = await c2.newPage(); await r.goto(BASE); await r.locator('input[type=file][accept=".permitpack,.json"]').first().setInputFiles(file);
+    const c2 = await ctx(width); const r = await c2.newPage(); await r.goto(BASE); await r.locator('input[type=file][accept^=".permitpack"]').first().setInputFiles(file);
     await r.getByRole('heading', { level: 2 }).first().waitFor(); await step(r, 'review'); await r.getByRole('button', { name: 'Open field mode' }).click();
     const eg3 = r.locator('li.fm-item').filter({ hasText: 'Bedroom escape window' });
     ok(await eg3.locator('img.fm-thumb').waitFor({ timeout: 8000 }).then(() => true, () => false) && (await eg3.getByLabel('Note').inputValue()).includes('Sill at 46'), `field: visit opens on another device with its photo ${W}`);
