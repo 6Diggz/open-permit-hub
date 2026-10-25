@@ -1,6 +1,16 @@
 # Changelog
 All notable changes. Format: Keep a Changelog. Versions: the app follows semver; the rule pack version is in `app/src/rules/pack.ts`.
 
+## [Unreleased] - rounds 2 to 5
+### App
+- Plan-set PDF pre-check: reads the text of an existing plan set on the device and maps it to the LADBS correction-sheet items. It says "Mentioned on page N", "Mentioned, not shown as provided" or "Conflicts with code", never that an item is approved.
+- Inspector field mode (`#field`): site-visit checklist by trade and stage, one photo per item, visit PDF and site-visit `.permitpack`. A Pass over a check the app fails needs a reason and is printed as an override.
+- Parcel lookup, drawn rooms, sheet readiness score, plain answer ("Likely yes / Not as entered / Not sure"), review notes and correction responses, Spanish calendar file.
+- One shared verdict: the check card, PDF, HTML report and handoff README carry the same plain answer and counts. The handoff ZIP carries the site visit.
+### Rules
+- Plain answer is deny-by-default: any open check blocks "Likely yes" unless it is on a reviewed list of preparer details.
+- Unit mix is checked on the new detached ADU path too; the house wall rating is asked for 5 to 8 ft gaps when the ADU wall has openings.
+
 ## [0.2.0] - 2026-10-24 (rule pack la-city@2026.10.2)
 Fixes from stress-test round 1 (full list with tests: `docs/` and the commit log).
 ### Rules

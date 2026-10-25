@@ -104,10 +104,11 @@ export default function App() {
     const k = (e: KeyboardEvent) => { if (e.key === 'Escape' && placing) { setPlacing(false); return; } if (inField(e.target)) return; if ((e.metaKey || e.ctrlKey) && e.key.toLowerCase() === 'z') { e.preventDefault(); if (e.shiftKey) redo(); else undo(); } };
     window.addEventListener('keydown', k); return () => window.removeEventListener('keydown', k);
   });
-  const show = (x: Project, s = 0) => { flushSave(); setNotice(openNotes(x)); const y = { ...x, repairNotes: undefined }; hist.current = new History(y); setP(y); setStep(s); };
+  // r5field-04: a project opened from the #field link stays in field mode, and the URL keeps saying so.
+  const show = (x: Project, s = 0) => { flushSave(); setNotice(openNotes(x)); const y = { ...x, repairNotes: undefined }; hist.current = new History(y); setP(y); if (tool === 'field') { setStepRaw(s); if (location.hash !== '#field') history.replaceState(null, '', '#field'); } else setStep(s); };
 
   if (tool === 'clean') return <><CleanFix onBack={() => openTool('adu')} /><AskHost /></>;
-  if (!p || !report) return <><AskHost /><Welcome onPick={id => { try { show(store.open(id)); } catch (e) { loadError = (e as Error).message; loadErrorId = id; setP(null); } }} onClean={() => openTool('clean')} lang={lang} setLang={setLang}
+  if (!p || !report) return <><AskHost /><Welcome onPick={id => { try { show(store.open(id)); } catch (e) { loadError = (e as Error).message; loadErrorId = id; setP(null); } }} onClean={() => openTool('clean')} lang={lang} setLang={setLang} field={tool === 'field'}
     onStart={(d) => { const x = d ? demoProject() : blankProject(); x.people.language = lang; if (lang === 'es') x.name = d ? 'Lote de ejemplo (no es una dirección real)' : 'Mi conversión de garaje'; show(x); }} onOpen={x => show(x, 3)} /></>;
 
   if (tool === 'field') return <><AskHost /><FieldMode p={p} update={update} onBack={() => openTool('adu')} download={download} /></>;
@@ -145,6 +146,8 @@ export default function App() {
             <option value="en">{L("English")}</option><option value="es">{L("Español")}</option>
           </select>
         </div>
+        {/* r5whole-06: on a phone the check card is far below the form; the plain answer is shown at the top too. */}
+        {verdict && <p className="banner mobile-only" style={{ margin: '8px 16px 0' }}>{verdict.plain[lang === 'es' ? 'es' : 'en']}</p>}
         {saveState === 'blocked' && <div className="banner warn" role="alert">{L("Not saved: storage is blocked. Export a backup.")}</div>}
         {saveState === 'conflict' && <div className="banner warn" role="alert">{L("This project changed in another tab. Pick which copy to keep.")}{' '}
           <button className="btn quiet" onClick={() => { try { show(store.open(p.id), step); setSaveState('ok'); } catch { /* gone */ } }}>{L("Load the newer copy")}</button>{' '}
@@ -196,7 +199,7 @@ function openNotes(x: Project): string[] {
   return n;
 }
 
-function Welcome({ lang, setLang, onStart, onOpen, onClean, onPick }: { onPick: (id: string) => void; onClean: () => void; lang: Lang; setLang: (l: Lang) => void; onStart: (demo: boolean) => void; onOpen: (p: Project) => void }) {
+function Welcome({ lang, setLang, onStart, onOpen, onClean, onPick, field }: { field?: boolean; onPick: (id: string) => void; onClean: () => void; lang: Lang; setLang: (l: Lang) => void; onStart: (demo: boolean) => void; onOpen: (p: Project) => void }) {
   const [err, setErr] = useState(''); const [tick, setTick] = useState(0);
   const sample = evaluate(demoProject(), RULES, PACK_ID); const es = lang === 'es';
   const openFile = async (f: File) => {
@@ -234,6 +237,7 @@ function Welcome({ lang, setLang, onStart, onOpen, onClean, onPick }: { onPick: 
   return (
     <main className="welcome-grid" id="main"><div className="welcome">
       <button className="btn quiet" style={{ marginBottom: 28 }} onClick={() => setLang(lang === 'en' ? 'es' : 'en')}>{lang === 'en' ? 'Español' : 'English'}</button>
+      {field && <div className="banner" role="status">{es ? 'Visita a la obra (modo de inspector): elija un proyecto abajo, o abra un archivo .permitpack de la visita, para empezar.' : 'Site visit (inspector field mode): pick a project below, or open a site-visit .permitpack, to start the visit.'}</div>}
       <h1>{es ? 'Su garaje, revisado contra las reglas de LA.' : 'Your garage, checked against LA\'s rules.'}</h1>
       <p>{tr(lang, 'tagline')}</p>
       <p>{es ? 'Gratis. Funciona en su dispositivo. No necesita cuenta. No es una aprobación de la ciudad.' : 'Free. Runs on your device. No account. Not a city approval.'}</p>

@@ -13,7 +13,7 @@ Every result names the code section behind it. Unknown answers never show as a p
 ## What's in here
 | Folder | What it is |
 |---|---|
-| `app/` | The web app (PWA). Lot, garage, rooms, checks, export. English + Spanish. |
+| `app/` | The web app (PWA). Lot, garage, rooms, checks, export, review (numbered review notes and correction responses), a plan-set PDF pre-check, and an inspector field mode for the site visit (checklist, one photo per item, visit PDF). English + Spanish. |
 | `app/src/rules/la-city.ts` | The LA City rule pack. Every rule cites its source and says if the citation is verified. |
 | `mcp/` | Connects Claude (Desktop or Code) to your project files. Preview-then-apply edits, never overwrites. |
 | `clean/` | "Clean and Fix" for daily CAD users: inspect any DWG/DXF and write a clean copy. Rust, runs in the browser as WASM. |
@@ -27,7 +27,7 @@ npm run build && node e2e/e2e.mjs           # browser tests (phone + desktop, of
 ```
 
 ## Use it with Claude (MCP)
-An AI agent can do everything the app does through the MCP server in `mcp/`: start or import a project, fill it in, draw rooms, run the checks, answer plan-check corrections and export the plan set. It runs over stdio only (no network port) and only touches files inside `OPA_ROOT`.
+An AI agent can do most of what the app does through the MCP server in `mcp/`: start or import a project, fill it in, draw rooms, run the checks, answer plan-check corrections and export the plan set. The plan-set PDF pre-check and the inspector field mode (camera photos) are in the app only. It runs over stdio only (no network port) and only touches files inside `OPA_ROOT`.
 ```bash
 cd app && npm install && cd ../mcp && npm install && npm test   # builds dist/, runs the self-test and the end-to-end test
 ```

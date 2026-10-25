@@ -102,7 +102,7 @@ export function FieldMode({ p, update, onBack, download }: { p: Project; update:
           return <li key={x.id} className={'res fm-item ' + (r.s === 'pass' ? 'PASS' : r.s === 'fail' ? 'FAIL' : r.s === 'na' ? 'NOT_CHECKED' : 'UNKNOWN')}>
             {g && <p className="fm-group">{g}</p>}
             <h3 className="title" id={hid}>{x[lang]}</h3>
-            <p className="cite">{es ? 'Hoja LADBS' : 'LADBS sheet'} {x.sheet.join(', ')}{x.code ? ` · ${x.code}` : ''}</p>
+            <p className="cite">{[x.sheet.length ? `${es ? 'Lista de correcciones LADBS, punto' : 'LADBS correction list item'} ${x.sheet.join(', ')}` : '', x.code].filter(Boolean).join(' · ')}</p>
             {appFails(p, rep, x.id, lang).length > 0 && <p className="pending">{L("The app's checks fail this item")}: {appFails(p, rep, x.id, lang).join(' ')}</p>}
             <div className="tri fm-tri fm-result" role="group" aria-labelledby={hid}>
               {(['pass', 'fail', 'na'] as InspStatus[]).map(s => <button key={s} type="button" data-s={s} aria-pressed={r.s === s} onClick={() => { void pick(x.id, s); }}>{s === 'pass' ? L('Pass') : s === 'fail' ? L('Fail') : L('N/A')}</button>)}

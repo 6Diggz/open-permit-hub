@@ -39,7 +39,7 @@ export async function inspectionPDF(p: Project, photos: Record<string, Uint8Arra
     const [lab, col] = r.s === 'pass' ? [es ? 'CUMPLE' : 'PASS', GREEN] : r.s === 'fail' ? [es ? 'NO CUMPLE' : 'FAIL', RED] : r.s === 'na' ? [es ? 'NO APLICA' : 'N/A', GREY] : [es ? 'SIN REVISAR' : 'NOT CHECKED', MUTE];
     need(34); pg.drawText(lab, { x: X, y, size: 9, font: fb, color: col });
     const txt = wrap(safe(it[lang]), fb, 10, W - 80); txt.forEach((l, i) => { if (i) need(14); pg.drawText(l, { x: X + 80, y, size: 10, font: fb, color: INK }); y -= 14; });
-    line([es ? `Hoja LADBS ${it.sheet.join(', ')}` : `LADBS sheet ${it.sheet.join(', ')}`, it.code].filter(Boolean).join('  ·  ') + (r.at ? `  ·  ${r.at.slice(0, 16).replace('T', ' ')}` : ''), 8, f, MUTE, 80);
+    line([it.sheet.length ? (es ? `Lista de correcciones LADBS, punto ${it.sheet.join(', ')}` : `LADBS correction list item ${it.sheet.join(', ')}`) : '', it.code].filter(Boolean).join('  ·  ') + (r.at ? `  ·  ${r.at.slice(0, 16).replace('T', ' ')}` : ''), 8, f, MUTE, 80);
     const af = appFails(p, rep, it.id, lang);
     if (af.length) line((es ? 'Las revisiones de la app no cumplen este punto: ' : "The app's checks fail this item: ") + af.join(' '), 8, fb, RED, 80);
     if (conf.has(it.id)) line(es ? `Cumple en campo anula la revisión de la app. Motivo: ${r.note || '(sin motivo)'}` : `Field Pass overrides the app's failing check. Reason: ${r.note || '(none given)'}`, 9, fb, RED, 80);
