@@ -2,11 +2,11 @@ import { useState } from 'react';
 import { cleanfix, plainWasmError } from '../out/wasm';
 
 type Report = { version: string; bytes: number; units: string; units_code: number; entities: number; by_type: Record<string, number>; layers: string[]; fonts: { style: string; font: string; standard: boolean }[]; xrefs: { name: string; path: string; absolute: boolean; fix: string }[]; warnings: string[]; blocking?: string | null; recovered?: boolean };
-type LossRow = { group: 'object' | 'data'; type: string; before: number; after: number; status: 'kept' | 'reduced' | 'dropped' | 'added' | 'converted' | 'approximated' | 'changed' | 'dropped_on_read'; changed?: number };
+type LossRow = { group: 'object' | 'data'; type: string; before: number; after: number; status: 'kept' | 'reduced' | 'dropped' | 'added' | 'converted' | 'approximated' | 'changed' | 'dropped_on_read' | 'cleaned'; changed?: number };
 type Loss = { ok: true; rows: LossRow[]; lost: number; hidden_lost?: number; changed?: number; incomplete?: boolean; best_format?: boolean; converted: boolean; bytes: number } | { ok: false; error: string };
 const UNIT_OPTS: [number, string][] = [[-1, 'Keep as is'], [1, 'Inches'], [2, 'Feet'], [4, 'Millimeters'], [5, 'Centimeters'], [6, 'Meters']];
 const TARGETS: [string, string][] = [['r2018', 'DXF 2018 (most CAD apps)'], ['r2000', 'DXF 2000 (older CAD apps)'], ['cnc', 'DXF R12 for laser / CNC'], ['dwg', 'DWG 2018 (beta)']];
-const STATUS: Record<LossRow['status'], string> = { kept: 'Kept', reduced: 'Some lost', dropped: 'Lost', added: 'New in the copy (converted)', converted: 'Kept, written in an older form', approximated: 'Kept as a polyline through the curve (close, not exact)', changed: 'Changed: shape, place or text differs', dropped_on_read: 'Lost: this tool could not read it' };
+const STATUS: Record<LossRow['status'], string> = { kept: 'Kept', reduced: 'Some lost', dropped: 'Lost', added: 'New in the copy (converted)', converted: 'Kept, written in an older form', approximated: 'Kept as a polyline through the curve (close, not exact)', changed: 'Changed: shape, place or text differs', dropped_on_read: 'Lost: this tool could not read it', cleaned: 'Removed by cleaning (zero-length or exact duplicate)' };
 /** The loss headline: only things you can see count; a cut-off file has an unknown loss; the format hint shows only when another format keeps more. */
 export function lossHeadline(l: Extract<Loss, { ok: true }>): { text: string; mustAccept: boolean } {
   const changed = l.changed ?? 0; const parts: string[] = [];
@@ -81,7 +81,7 @@ export function CleanFix({ onBack }: { onBack: () => void }) {
         </>}
       </section>}
       <p><button className="btn primary" disabled={!canSave} onClick={save}>Save clean copy</button>{!loss && !rep.blocking && <span className="help"> Check what will be lost first.</span>}</p>
-      <p className="help" style={{ color: 'var(--pencil)' }}>Clean copy: reference paths made relative, units label set, saved in the format you picked. Uses acadrust (MPL-2.0, <a href="./THIRD_PARTY_NOTICES.txt">notices and source</a>). Check the copy in your CAD app before you send it.</p>
+      <p className="help" style={{ color: 'var(--pencil)' }}>Clean copy: zero-length and exact duplicate lines, circles and points removed, reference paths made relative, units label set, saved in the format you picked. Uses acadrust (MPL-2.0, <a href="./THIRD_PARTY_NOTICES.txt">notices and source</a>). Check the copy in your CAD app before you send it.</p>
     </section>}
   </main>;
 }

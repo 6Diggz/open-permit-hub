@@ -297,4 +297,15 @@ describe('rules watch', () => {
     const cited = [...new Set(RULES.flatMap(r => r.cites.map(c => c.url).filter(Boolean)))] as string[];
     expect(cited.filter(u => !watched.has(u))).toEqual([]);
   });
+  it('R2-new Gov. Code links point at the official leginfo text (public.law 404s for 66314 and up)', () => {
+    const urls = RULES.flatMap(r => r.cites.map(c => c.url ?? '')); expect(urls.some(u => u.includes('public.law'))).toBe(false);
+    expect(urls.filter(u => u.includes('leginfo')).every(u => /sectionNum=\d+(\.\d+)?\.$/.test(u))).toBe(true);
+  });
+});
+
+import appSource from '../ui/App.tsx?raw';
+describe('export labels', () => {
+  it('parity2-10 the pre-check button says it downloads a file, not that it copies', () => {
+    expect(appSource).not.toContain("Copy for the city's AI pre-check"); expect(appSource).toContain("Download for the city's AI pre-check (PDF)");
+  });
 });

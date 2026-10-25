@@ -140,6 +140,26 @@ pub fn approximate_curves(doc: &mut CadDocument) -> usize {
     n
 }
 
+/// Cleaning passes (like AutoCAD OVERKILL for the simple cases): zero-length lines and exact duplicate lines, circles
+/// and points on the same layer with the same color are removed. Returns how many of each type were removed.
+pub fn tidy(doc: &mut CadDocument) -> BTreeMap<String, usize> {
+    let r = |v: f64| format!("{:.9}", v); let mut seen = std::collections::HashSet::new(); let mut drop = vec![];
+    for e in doc.entities() {
+        let c = e.common(); let base = format!("{}|{:?}|{:?}", c.layer, c.color, c.linetype);
+        let key = match e {
+            EntityType::Line(l) => { let (a, b) = ((r(l.start.x), r(l.start.y), r(l.start.z)), (r(l.end.x), r(l.end.y), r(l.end.z)));
+                if a == b { drop.push((c.handle, "Line".to_string())); continue; } let (p, q) = if a <= b { (a, b) } else { (b, a) }; Some(format!("L|{base}|{p:?}|{q:?}|{}", r(l.thickness))) }
+            EntityType::Circle(k) => Some(format!("C|{base}|{} {} {} {}", r(k.center.x), r(k.center.y), r(k.center.z), r(k.radius))),
+            EntityType::Point(p) => Some(format!("P|{base}|{} {} {}", r(p.location.x), r(p.location.y), r(p.location.z))),
+            _ => None,
+        };
+        if let Some(k) = key { if !seen.insert(k) { drop.push((c.handle, kind(e))); } }
+    }
+    let mut out: BTreeMap<String, usize> = BTreeMap::new();
+    for (h, k) in drop { if doc.remove_entity(h).is_some() { *out.entry(k).or_default() += 1; } }
+    out
+}
+
 /// Geometry fingerprint per entity: type, layer, rounded extents and text. Compared before/after to catch moved points or blanked text.
 fn fingerprints(doc: &CadDocument) -> BTreeMap<String, BTreeMap<String, usize>> {
     let mut m: BTreeMap<String, BTreeMap<String, usize>> = BTreeMap::new();
@@ -282,6 +302,7 @@ pub fn clean_doc(mut doc: CadDocument, target: &str, units: i16) -> Result<Vec<u
     }
     if units >= 0 { doc.header.insertion_units = units; }
     if matches!(target, "r12" | "cnc") { approximate_curves(&mut doc); }
+    tidy(&mut doc);
     let ver = match target { "r12" | "cnc" => DxfVersion::AC1009, "r14" => DxfVersion::AC1014, "r2000" => DxfVersion::AC1015, _ => DxfVersion::AC1032 };
     if target == "dwg" {
         doc.version = DxfVersion::AC1032;
@@ -312,6 +333,7 @@ pub fn loss_report(bytes: &[u8], target: &str, units: i16) -> Value {
     let skipped = dropped_on_read(bytes, &before);
     let r12 = matches!(target, "r12" | "cnc");
     let approx = if r12 { approximate_curves(&mut doc) } else { 0 };
+    let cleaned = tidy(&mut doc);
     let fp_before = fingerprints(&doc);
     let out = match clean_doc(doc, target, units) { Ok(o) => o, Err(e) => return json!({ "ok": false, "error": e }) };
     let back = match read(&out) { Ok(d) => d, Err(e) => return json!({ "ok": false, "error": format!("The clean copy could not be read back to check it: {e}") }) };
@@ -329,7 +351,8 @@ pub fn loss_report(bytes: &[u8], target: &str, units: i16) -> Value {
         let (b, a) = (*before.get(k).unwrap_or(&0), *after.get(k).unwrap_or(&0));
         let curve = r12 && (k == "Spline" || k == "Ellipse") && approx > 0;
         let conv = poly_converted && (k == "LwPolyline" || k == "Polyline2D");
-        let status = if curve { "approximated" } else if conv { "converted" } else if b > 0 && a == 0 { "dropped" } else if a < b { "reduced" } else if b == 0 && a > 0 { "added" } else { "kept" };
+        let tidied = *cleaned.get(k).unwrap_or(&0);
+        let status = if curve { "approximated" } else if conv { "converted" } else if tidied > 0 && b >= a && b - a <= tidied { "cleaned" } else if b > 0 && a == 0 { "dropped" } else if a < b { "reduced" } else if b == 0 && a > 0 { "added" } else { "kept" };
         if status == "dropped" || status == "reduced" { lost += b - a; }
         // Same count but different geometry or text: "changed".
         let mut ch = 0; if status == "kept" { if let (Some(x), Some(y)) = (fp_before.get(k), fp_after.get(k)) { for (key, n) in x { ch += n.saturating_sub(*y.get(key).unwrap_or(&0)); } } }
@@ -345,7 +368,7 @@ pub fn loss_report(bytes: &[u8], target: &str, units: i16) -> Value {
     }
     let best = if lost + changed == 0 { true } else { target == "r2018" };
     json!({ "ok": true, "target": target, "bytes": out.len(), "rows": rows, "lost": lost, "hidden_lost": hidden_lost, "changed": changed,
-        "approximated": approx, "incomplete": incomplete, "notes": notes, "best_format": best,
+        "approximated": approx, "cleaned": cleaned, "incomplete": incomplete, "notes": notes, "best_format": best,
         "converted": rows.iter().any(|r| r["status"] == "added" || r["status"] == "converted" || r["status"] == "approximated") })
 }
 

@@ -13,6 +13,20 @@ Today one pack exists: LA City (`app/src/rules/la-city.ts`, metadata in `app/src
 | Sources | URLs + SHA-256 of each source document | `docs/sources.lock.json` (watched weekly by `rules-watch.yml`) |
 | Maintainers | At least one named reviewer per pack; two for rule changes | `CODEOWNERS` |
 
+## Axes a pack must model (neighbors differ on each)
+A city name is not enough. One parcel answers to several authorities, and they change independently:
+
+| Axis | Examples in LA County | Why it matters |
+|---|---|---|
+| Boundary | Parcel geometry from the County GIS parcel layer (not mailing-city names) | "Los Angeles, CA" addresses include unincorporated county areas and other cities |
+| Building authority | LADBS, LA County Public Works (Title 26), Long Beach, Pasadena, Glendale | Correction sheet, preparer rules (Long Beach information bulletins), plan-check forms |
+| Zoning authority | LA City Planning (LAMC), LA County Regional Planning (Title 22) | Setback, height and design standards; hillside and overlay rules |
+| Fire authority | LAFD, LA County Fire (LACoFD), city fire departments | Hose pull limits, sprinkler triggers, fire-zone (VHFHSZ) rules |
+| Utility | LADWP, SCE, local water districts | Panel and meter rules, easement approvals (LADBS sheet I-B.8 is LADWP-only) |
+| Overlays and emergency orders | Coastal zone, HPOZ, methane zone, 2025 burn areas (Altadena, Palisades) | Each can add steps or suspend automatic passes |
+
+Each axis is its own small module the pack composes. A rule names the axis it belongs to, so a parcel in Altadena gets the County building and zoning rules, LACoFD fire rules, SCE utility rules and the Eaton rebuild orders, without copying LA City rules.
+
 ## Rules for every pack
 1. Every rule cites a source and an edition; unverified cites are labeled in the UI and exports.
 2. Unknown never shows as PASS; health-and-safety items can't be dismissed.

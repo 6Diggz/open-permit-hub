@@ -1,5 +1,6 @@
 //! Regression tests for Clean and Fix (stress test round 1). Fixtures are generated (no third-party corpus files).
 use cleanfix::*;
+use acadrust::DxfWriter;
 
 const MIXED: &[u8] = include_bytes!("fixtures/mixed_r2018.dxf");
 
@@ -158,4 +159,17 @@ fn appsec_r2_06_negative_ltype_count_is_a_plain_error_not_a_panic() {
 fn qa2_01_raw_scan_matches_reader_names() {
     // Every entity type in these generated files is matched to the reader's name (no false "dropped on read").
     for (f, b) in [("mixed", MIXED), ("full", FULL)] { let r = loss_report(b, "r2018", -1); assert!(!r["rows"].as_array().unwrap().iter().any(|x| x["status"] == "dropped_on_read"), "{f}: {r}"); }
+}
+
+#[test]
+fn out2_13_clean_removes_zero_length_and_duplicate_lines_and_says_so() {
+    let mut d = read(MIXED).unwrap();
+    let line = d.entities().find_map(|e| if let acadrust::entities::EntityType::Line(l) = e { Some(l.clone()) } else { None }).unwrap();
+    let mut dup = line.clone(); dup.common.handle = acadrust::types::Handle::NULL; d.add_entity(acadrust::entities::EntityType::Line(dup)).unwrap();
+    let mut zero = line.clone(); zero.common.handle = acadrust::types::Handle::NULL; zero.end = zero.start; d.add_entity(acadrust::entities::EntityType::Line(zero)).unwrap();
+    let bytes = DxfWriter::new(&d).write_to_vec().unwrap();
+    let before = type_counts(&read(&bytes).unwrap())["Line"];
+    let r = loss_report(&bytes, "r2018", -1); eprintln!("{}", r["cleaned"]);
+    assert_eq!(r["cleaned"]["Line"], 2, "{r}"); assert_eq!(row(&r, "Line")["status"], "cleaned"); assert_eq!(r["lost"], 0, "{r}");
+    let out = clean_doc(read(&bytes).unwrap(), "r2018", -1).unwrap(); assert_eq!(type_counts(&read(&out).unwrap())["Line"], before - 2);
 }
