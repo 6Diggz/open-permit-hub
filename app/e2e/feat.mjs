@@ -163,8 +163,11 @@ for (const width of [390, 1440]) {
     await page.getByRole('button', { name: /^Not found in the text \(\d+\)$/ }).click(); const pc = page.locator('section[aria-labelledby=pc-h]'); const nMiss = await pc.locator('li.res.FAIL').count();
     ok(nMiss > 0 && await pc.locator('li.res.PASS').count() === 0 && await pc.locator('li.res.UNKNOWN').count() === 0, `precheck: filter to not-found items ${W}`);
     const pins0 = await page.locator('.drawing svg g[role=button]').count();
-    await page.getByRole('button', { name: 'Add the not-found items as review notes' }).click();
-    ok(await page.locator('.drawing svg g[role=button]').count() === pins0 + nMiss, `precheck: not-found items become review notes ${W}`, `${pins0} -> ${await page.locator('.drawing svg g[role=button]').count()} (${nMiss})`);
+    const nOf = async re => Number((await page.getByRole('button', { name: re }).textContent()).match(/\((\d+)\)/)[1]);
+    const nProb = nMiss + await nOf(/^Conflicts with code \(\d+\)$/) + await nOf(/^Says not provided \(\d+\)$/);
+    await page.getByRole('button', { name: 'Add the problem items as review notes' }).click();
+    ok(await page.locator('.drawing svg g[role=button]').count() === pins0 + nProb, `precheck: not-found, conflict and not-provided items become review notes ${W}`, `${pins0} -> ${await page.locator('.drawing svg g[role=button]').count()} (${nProb})`);
+    ok(/Conflicts with code\. “.+” \(Page \d+\)/.test(await page.locator('body').textContent()), `precheck: conflict note carries quote and page ${W}`);
     const v = await axe(page, RULES); ok(v.length === 0, `precheck: axe ${W}`, v.join(' | '));
     if (width === 390) ok(await page.evaluate(() => document.documentElement.scrollWidth <= 390), `precheck: no sideways scroll at 390`);
     await page.locator('#pc-h').scrollIntoViewIfNeeded(); await shot(page, `precheck-drafter-${width}.png`); await fullShot(page, `precheck-full-${width}.png`);

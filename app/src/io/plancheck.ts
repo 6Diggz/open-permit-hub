@@ -135,7 +135,7 @@ const ADDRESS = /\b\d{2,6}\s+(?:[NSEW]\.?\s+)?[A-Za-z0-9.' ]{2,30}?\s(?:st|stree
  * ambiguous = a bare "not" or a hedge we can't read ("where required", "verify") -> Found (confirm), check the wording. */
 export type NoteIntent = 'provided' | 'not' | 'ambiguous';
 // Compliant constructions: code minimums and double negatives. Removed before anything else is read.
-const COMPLIANT = /(?<=\d\s*(?:cfm|mil)\b[^,;]*?)\bno\b|\bnot\s+(?:less|more|greater|smaller|larger|exceed(?:ing)?|to exceed|over|under|non[- ]rated|na)\b|\bshall not be\s+(?:less|more|greater|smaller|larger|battery|located|installed (?:within|closer|more|less))\b|\bnone (?:removed|omitted|deferred)\b|\bno gas\b/gi;
+const COMPLIANT = /(?<=\d\s*(?:cfm|mil)\b[^,;]*?)\bno\b|\bnot\s+(?:less|more|greater|smaller|larger|exceed(?:ing)?|to exceed|over|under|non[- ]rated|na)\b|\bshall not be\s+(?:less|more|greater|smaller|larger|battery|located|installed (?:within|closer|more|less))\b|\bnone (?:removed|omitted|deferred)\b|\bno gas\b|\bno (?:more|less|greater|fewer|smaller|larger) than\b|\b(?:with )?no exceptions?\b|\bwithout exceptions?\b|\bsin excepci[oó]n(?:es)?\b|\bno [a-z-]+(?: [a-z-]+)? (?:allowed|permitted)\b|\bshall not (?!be\b|include|apply|require|need|use|have|provide|install|show|exist)[a-z]+\b/gi;
 // Absence phrases (read only inside the item's own clause).
 const ABSENT = /\bnot (?:needed|specified|in scope|prov(?:ided)?|req(?:uired)?)\b|\b(?:future|deleted|removed|eliminated|absent|unknown|never|tbc|np|out of scope|in lieu|to follow|to be determined|under (?:separate|deferred) (?:permit|cover|submittal)|(?:by|see) struct\w*|by (?:gc|ec|contractor|owner\/contractor)|sin|ningun[oa]|pendiente|por (?:otros|el due[ñn]o|el propietario)|no (?:se )?(?:incluye[n]?|incluid[oa]s?|aplica|requiere))\b|(?:^|[\s:])-{3,}(?=\s|$)|\bnot (?:be )?(?:provided|shown|included|installed|applicable|required|used|proposed|available|part of|yet|in contract|designed)\b|\b(?:do|does|did|will|shall) not\b|\bnot\s*$|^\s*(?:note\s*:\s*)?not\s|\bna\b|\bnic\b|\bnone\b|\btbd\b|\bpending\b|\bomit(?:ted)?\b|\bexclud(?:ed|e)\b|\bdeferred\b|\bto be (?:provided|determined|added|installed) later\b|\blater\b|\bby (?:owner|others)\b|\bwithout\b|\bsee (?:structural |the )?(?:engineer|engineering|structural|s-sheets)\b|\bnon[- ]rated\b|\bno\b(?!\s*\.?\s*\d)/i;
 const POSITIVE = /\d|\b(?:provided|installed|yes|s[ií]|per|hardwired|interconnected|each|every|at|in|with|new|nuevos?|en)\b/i;
@@ -160,7 +160,9 @@ export function noteIntent(text: string, item?: RegExp, notRequiredOk = false): 
     else if (!POSITIVE.test(cl[i].includes(':') ? cl[i].slice(cl[i].lastIndexOf(':') + 1) : rest)) { const sent = t.split(/;|\.(?=\s|$)/).find(x => re!.test(x)) ?? ''; const parts = sent.split(',').map(c => c.trim()); const k = parts.findIndex(c => re!.test(c)); if (k >= 0) scope.push(...parts.slice(k + 1)); }
   }
   const s = scope.join(' : ');
-  if (ABSENT.test(s)) return 'not';
+  // r9-02: a clause that also says the item is provided/installed (not "not provided", "provided later/by owner") is affirmative.
+  const affirm = /\b(?:provided|installed|incluid[oa]s?)\b/i.test(s.replace(/\b(?:not|no|never) (?:be |se )?(?:provided|installed|incluid[oa]s?)\b|\b(?:provided|installed) (?:later|by (?:owner|others|gc|ec|contractor)|in (?:the )?future)\b|\bto be (?:provided|installed) later\b|\bwithout\b.*$/gi, ' '));
+  if (ABSENT.test(s) && !affirm) return 'not';
   if (HEDGE.test(s)) return 'ambiguous';
   return 'provided';
 }
@@ -175,11 +177,15 @@ function sizeCtx(line: string, at: number, len: number): string {
   const nx = line.slice(at + len).search(/[.;](?:\s|$)/); const b = nx < 0 ? line.length : at + len + nx;
   return line.slice(a, b).replace(/\([^)]{4,}\)/g, ' ');
 }
-/** r8-02: the words that qualify one size token itself: up to 2 words before it and 3 after, never past , ; or a sentence end. */
+/** r9-01: the marks bound to one size token. A mark is the size's own only when it sits directly before it ("(E) 36x48",
+ * "EXISTING 36x48", "R.O. 20x22") or directly after it as its own tag ("36x48 (E)", "36x48 EXIST."). Words further away
+ * ("REPLACES (E) ...", "AT (E) WALL", "IN EXISTING OPENING") belong to something else and never drop the size. */
+const MARK_BEFORE = /(?:\(e\)|\bexist(?:ing|\.)?|\bremov(?:ed|e)|\bdemo(?:lish(?:ed)?)?|rough opening|\br\.?\s?o\.?)(?:\s+(?:window|wdw|opening|sash|unit|w\d+))?\s*:?\s*$/i;
+const MARK_AFTER = /^\s*(?:\((?:e|exist(?:ing|\.)?|remov(?:ed|e)|demo(?:lish(?:ed)?)?|r\.?\s?o\.?)\)|exist\.(?=\s|$)|r\.?\s?o\.?(?=\s|$))/i;
 function ownWords(line: string, at: number, len: number): string {
-  const pre = line.slice(0, at).split(/[,;]|(?<!\b[a-z]\.[a-z])\.\s/i).pop()!.trim().split(/\s+/).slice(-2).join(' ');
-  const post = line.slice(at + len).split(/[,;]|(?<!\b[a-z]\.[a-z])\.\s/i)[0].trim().split(/\s+/).slice(0, 3).join(' ');
-  return `${pre} | ${post}`;
+  const pre = line.slice(0, at).split(/[,;]|(?<!\b[a-z]\.[a-z])\.\s/i).pop()!;
+  const post = line.slice(at + len);
+  return `${MARK_BEFORE.test(pre) ? 'OWN' : ''} | ${MARK_AFTER.test(post) ? 'OWN' : ''}`;
 }
 export function analyze(pagesIn: PageText[], totalPages = pagesIn.length): PlanCheck {
   const pages = pagesIn.map(p => ({ page: p.page, lines: p.lines.map(normalize).filter(Boolean) }));
@@ -324,7 +330,7 @@ export function analyze(pagesIn: PageText[], totalPages = pagesIn.length): PlanC
     const NOT_ESCAPE = /\bbath|obscure|\(e\)|\bexist(?:ing|\.)|remov|demo(?:lish|\b)|rough opening|\br\.?\s?o\.?(?=\s|\)|$)/i;
     // r8-02: an egress-tagged size is dropped only when its OWN size token is marked (E), existing, removed or rough opening;
     // words elsewhere in the sentence (bath, replaces, adjacent, demo) describe something else.
-    const OWN_MARK = /\(e\)|\bexist(?:ing|\.)?(?=\s|$|\))|\bremov(?:ed|e)\b|\bdemo(?:lish(?:ed)?)?\b(?=\s*\|)|rough opening|\br\.?\s?o\.?(?=\s|\)|$)/i;
+    const OWN_MARK = /\bOWN\b/;
     const ew = tagged.length ? tagged.filter(w => !OWN_MARK.test(w.own)) : windows.filter(w => h.some(x => x.page === w.page)).filter(w => !NOT_ESCAPE.test(w.ctx));
     const E = PARAMS.egress; const bad = (w: WindowSize) => w.w < E.minWidthIn || w.h < E.minHeightIn || (w.w * w.h) / 144 < E.gradeSqFt;
     const small = ew.filter(bad); // every bedroom needs its own escape opening (CRC R310.1): any proposed size that fails conflicts

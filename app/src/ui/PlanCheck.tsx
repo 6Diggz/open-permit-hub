@@ -66,7 +66,7 @@ export function PlanCheckPanel({ onNotes }: { /** Adds review notes for the item
     if (ph.k !== 'done') return null; const { r, name, total } = ph;
     const n = counts(r);
     const list = r.items.filter(i => show === 'all' || i.state === show);
-    const missing = r.items.filter(i => i.state === 'missing');
+    const toNote = r.items.filter(i => i.state === 'missing' || i.state === 'conflict' || i.state === 'negated'); // r9-03: the real problems become notes too
     return <>
       <div className="banner" role="status" style={{ margin: 0 }}>
         <b>{name}</b> · {r.pages} {r.pages === 1 ? L('page read') : L('pages read')}{total > r.pages ? ` (${L('of')} ${total}; ${L('only the first')} ${r.pages} ${L('are read')})` : ''}.{' '}
@@ -92,7 +92,7 @@ export function PlanCheckPanel({ onNotes }: { /** Adds review notes for the item
           <thead><tr><th scope="col">{L('Page')}</th><th scope="col">{L('Sheet')}</th><th scope="col">{L('Looks like')}</th><th scope="col">{L('Scale')}</th></tr></thead>
           <tbody>{r.sheets.map(s => <tr key={s.page}><td>{s.page}</td><td>{s.id ?? '-'}</td><td>{s.kinds.length ? s.kinds.map(k => KIND[k][lang]).join(', ') : (s.chars < 40 ? L('no text') : '-')}</td><td>{s.scales.join('; ') || '-'}</td></tr>)}</tbody></table></div>
       <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap', alignItems: 'center' }}>
-        <button type="button" className="btn" disabled={missing.length === 0} onClick={() => { const k = onNotes(missing.map(i => ({ ref: i.id, text: `${L('Plan set pre-check')}: ${i.id} ${summary(i.id)} ${L('Not found in the text')}.` }))); setNote(k ? `${k} ${L('review notes added. They are in the notes list above.')}` : L('No room for more notes in this project.')); }}>{L('Add the not-found items as review notes')}</button>
+        <button type="button" className="btn" disabled={toNote.length === 0} onClick={() => { const k = onNotes(toNote.map(i => { const ev = i.evidence[0]; return { ref: i.id, text: `${L('Plan set pre-check')}: ${i.id} ${summary(i.id)} ${STATE[i.state]}.${i.state !== 'missing' && ev ? ` “${ev.text}” (${L('Page')} ${ev.page})` : ''}` }; })); setNote(k ? `${k} ${L('review notes added. They are in the notes list above.')}` : L('No room for more notes in this project.')); }}>{L('Add the problem items as review notes')}</button>
         <span className="help" role="status">{note}</span>
       </div>
     </>;
