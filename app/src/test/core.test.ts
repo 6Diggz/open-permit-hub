@@ -64,8 +64,8 @@ describe('rules (golden cases)', () => {
     p.site.flags.primarySprinklered = 'yes'; p.adu.sprinklered = 'no';
     expect(byId(evaluate(p, RULES, PACK_ID), 'SPK-01').status).toBe('FAIL');
   });
-  it('hillside + VHFHSZ is a contested FAIL', () => {
-    const p = demoProject(); p.site.flags.hillside = 'yes'; p.site.flags.vhfhsz = 'yes';
+  it('hillside + VHFHSZ is a contested FAIL for a new ADU', () => {
+    const p = demoProject(); p.adu.mode = 'youadu'; p.site.flags.hillside = 'yes'; p.site.flags.vhfhsz = 'yes';
     expect(byId(evaluate(p, RULES, PACK_ID), 'HAZ-01').status).toBe('FAIL');
   });
   it('fee line uses interior livable sq ft and flags the 750 band', () => {

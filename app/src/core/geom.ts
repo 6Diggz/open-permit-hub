@@ -14,10 +14,23 @@ export function bbox(p: Poly) {
   const xs = p.map(q => q.x), ys = p.map(q => q.y);
   return { minX: Math.min(...xs), minY: Math.min(...ys), maxX: Math.max(...xs), maxY: Math.max(...ys) };
 }
+const edges = (p: Poly) => p.map((a, i) => [a, p[(i + 1) % p.length]] as const);
 function segDist(p: Pt, a: Pt, b: Pt): number {
   const dx = b.x - a.x, dy = b.y - a.y; const L = dx * dx + dy * dy;
   let t = L ? ((p.x - a.x) * dx + (p.y - a.y) * dy) / L : 0; t = Math.max(0, Math.min(1, t));
   return Math.hypot(p.x - (a.x + t * dx), p.y - (a.y + t * dy));
+}
+const cross = (o: Pt, a: Pt, b: Pt) => (a.x - o.x) * (b.y - o.y) - (a.y - o.y) * (b.x - o.x);
+/** True when segments ab and cd properly cross (touching at an end or overlapping collinear counts as crossing). */
+export function segmentsCross(a: Pt, b: Pt, c: Pt, d: Pt): boolean {
+  const d1 = cross(c, d, a), d2 = cross(c, d, b), d3 = cross(a, b, c), d4 = cross(a, b, d);
+  if (((d1 > 0 && d2 < 0) || (d1 < 0 && d2 > 0)) && ((d3 > 0 && d4 < 0) || (d3 < 0 && d4 > 0))) return true;
+  return false;
+}
+/** Shortest distance between two segments (0 when they cross). */
+export function segSegDist(a: Pt, b: Pt, c: Pt, d: Pt): number {
+  if (segmentsCross(a, b, c, d)) return 0;
+  return Math.min(segDist(a, c, d), segDist(b, c, d), segDist(c, a, b), segDist(d, a, b));
 }
 export function inside(p: Pt, poly: Poly): boolean {
   let c = false;
@@ -27,22 +40,27 @@ export function inside(p: Pt, poly: Poly): boolean {
   }
   return c;
 }
-/** Min distance from any vertex/edge of `inner` to the edges of `outer` (inner assumed inside). */
-export function minClearance(inner: Poly, outer: Poly): number {
+/** Min distance between the outlines of two polygons, edge to edge (not just vertices). */
+export function minClearance(a: Poly, b: Poly): number {
   let d = Infinity;
-  for (const p of inner) for (let i = 0; i < outer.length; i++) d = Math.min(d, segDist(p, outer[i], outer[(i + 1) % outer.length]));
-  for (const p of outer) for (let i = 0; i < inner.length; i++) d = Math.min(d, segDist(p, inner[i], inner[(i + 1) % inner.length]));
+  for (const [p, q] of edges(a)) for (const [r, s] of edges(b)) d = Math.min(d, segSegDist(p, q, r, s));
   return d;
 }
-/** Distance from polygon to one lot edge (index i -> i+1). */
+/** Distance from polygon `inner` to one lot edge (index i -> i+1), edge to edge. */
 export function clearanceToEdge(inner: Poly, outer: Poly, edge: number): number {
   const a = outer[edge], b = outer[(edge + 1) % outer.length];
-  return Math.min(...inner.map(p => segDist(p, a, b)));
+  return Math.min(...edges(inner).map(([p, q]) => segSegDist(p, q, a, b)));
 }
-export function polyInside(inner: Poly, outer: Poly) { return inner.every(p => inside(p, outer)); }
+/** Every vertex inside and no edge of `inner` crosses an edge of `outer` (catches a lot corner cutting through). */
+export function polyInside(inner: Poly, outer: Poly) {
+  if (!inner.every(p => inside(p, outer))) return false;
+  for (const [p, q] of edges(inner)) for (const [r, s] of edges(outer)) if (segmentsCross(p, q, r, s)) return false;
+  return !outer.some(p => inside(p, inner));
+}
+/** True when the two shapes share any area (edge crossing, or one inside the other). */
 export function overlaps(a: Poly, b: Poly): boolean {
-  const A = bbox(a), B = bbox(b);
-  return A.minX < B.maxX && A.maxX > B.minX && A.minY < B.maxY && A.maxY > B.minY;
+  for (const [p, q] of edges(a)) for (const [r, s] of edges(b)) if (segmentsCross(p, q, r, s)) return true;
+  return a.some(p => inside(p, b)) || b.some(p => inside(p, a));
 }
 export function gap(a: Poly, b: Poly): number { return overlaps(a, b) ? 0 : minClearance(a, b); }
 export const translate = (p: Poly, dx: number, dy: number) => p.map(q => ({ x: q.x + dx, y: q.y + dy }));

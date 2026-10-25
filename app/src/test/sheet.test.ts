@@ -77,7 +77,7 @@ describe('fees (2026) and AB 2533', () => {
     p.adu.interiorLivableSqFt = null; expect(feeEstimate(p).outcome.status).toBe('UNKNOWN');
   });
   it('legalization keeps safety rules, turns zoning into notes', () => {
-    const p = demo(); p.adu.existingStructurePermitted = 'no'; p.adu.builtBefore2020 = 'yes'; p.adu.staysInsideWalls = 'no'; p.adu.slabVaporBarrier = 'no';
+    const p = demo(); p.adu.existingStructurePermitted = 'no'; p.adu.builtBefore2020 = 'yes'; p.adu.usedAsHomeBefore2020 = 'yes'; p.adu.staysInsideWalls = 'no'; p.adu.slabVaporBarrier = 'no';
     expect(st(p, 'GAR-01')).toBe('FAIL'); p.adu.legalization = true;
     expect(st(p, 'GAR-01')).toBe('INFO'); expect(st(p, 'VAP-01')).toBe('FAIL'); expect(st(p, 'LEG-01')).toBe('INFO');
     p.adu.builtBefore2020 = 'no'; expect(st(p, 'LEG-01')).toBe('FAIL');
@@ -89,6 +89,8 @@ describe('Spanish strings', () => {
   it('every L("...") label in the app has a Spanish entry', () => {
     const src: string = appSrc;
     const keys = [...src.matchAll(/\bL\("((?:[^"\\]|\\.)*)"\)/g)].map(m => JSON.parse(`"${m[1]}"`));
+    // single-quoted L('...') too (round 1: these were not checked, so Spanish mode leaked English)
+    keys.push(...[...src.matchAll(/\bL\('((?:[^'\\]|\\.)*)'\)/g)].map(m => m[1].replace(/\\'/g, "'")));
     const missing = keys.filter(k => !(k in ES)); expect(missing).toEqual([]);
   });
 });

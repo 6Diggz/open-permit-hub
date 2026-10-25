@@ -1,11 +1,14 @@
 import type { Rule, Outcome, L } from './engine';
 import type { Project, Tri } from '../core/model';
 import { area, clearanceToEdge, gap, polyInside } from '../core/geom';
-import { ft, fmtFtIn, inch, toSqFt } from '../core/units';
+import { ft, fmtFtIn, inch, isNum, toSqFt } from '../core/units';
+import { PACK, PACK_ID, LA_ED } from './pack';
 
-export const PACK_ID = 'la-city@2026.10.1';
-const SHEET_URL = 'https://dbs.lacity.gov/sites/default/files/efs/forms/pc17/PC.STR.Corr.Lst.20A.pdf';
-const EFF = '2026-01-01'; // 2025 California codes effective 2026-01-01 (confirmed)
+export { PACK_ID };
+const SHEET_URL = PACK.sheet.url;
+const EFF = PACK.effectiveFrom; // single source: rules/pack.ts
+/** Edition label for LA code sections, as printed on the LADBS sheet (rules/pack.ts). */
+const LAED = `${LA_ED} LA codes (as cited by the LADBS sheet)`;
 const t = (en: string, es: string): L => ({ en, es });
 const pass = (en: string, es: string, values?: Outcome['values']): Outcome => ({ status: 'PASS', msg: t(en, es), values });
 const fail = (en: string, es: string, nextEn: string, nextEs: string, values?: Outcome['values']): Outcome => ({ status: 'FAIL', msg: t(en, es), next: t(nextEn, nextEs), values });
@@ -18,6 +21,28 @@ const GOV = 'https://california.public.law/codes/ca_gov_code_section_';
 
 const safeName = (s: string) => s.replace(/[<>\r\n`]/g, ' ').slice(0, 40);
 const sane = (v: number | null, lo: number, hi: number) => v != null && Number.isFinite(v) && v >= lo && v <= hi;
+/** A usable measurement: finite and above zero. Anything else is "not entered", never a silent PASS. */
+const fin = (v: number | null | undefined): v is number => isNum(v) && v > 0;
+const norm = (s: string) => s.trim().toLowerCase().replace(/\s+/g, ' ');
+const winOk = (x: { clearWidthMm: number | null; clearHeightMm: number | null; sillMm: number | null; gradeFloor: boolean }) => {
+  const sq = toSqFt(x.clearWidthMm! * x.clearHeightMm!), need = x.gradeFloor ? 5.0 : 5.7;
+  return [sq < need && `net clear ${sq.toFixed(1)} sq ft < ${need}`, x.clearHeightMm! < inch(24) && 'clear height under 24"', x.clearWidthMm! < inch(20) && 'clear width under 20"', x.sillMm! > inch(44) && 'sill over 44"'].filter(Boolean) as string[];
+};
+
+/**
+ * Fire separation lines for the ADU (LADBS sheet III-D.1: "less than 5' from property line or assumed property line").
+ * Measured to every lot line, to the assumed line halfway to every other building on the lot, and to the added entry area.
+ */
+export function fireSeparation(p: Project): { dist: number; line: L } {
+  const fp = p.adu.footprint, lot = p.site.lot; let best = { dist: Infinity, line: t('the property line', 'del lindero') };
+  lot.forEach((_, i) => { const d = clearanceToEdge(fp, lot, i); if (d < best.dist) best = { dist: d, line: t('the property line', 'del lindero') }; });
+  // An attached garage converted inside the house is separated by a fire partition between units (III-D.5), not by an exterior wall.
+  const attachedInside = p.adu.mode === 'conversion' && p.adu.garageAttachment === 'attached';
+  const g = attachedInside ? Infinity : gap(fp, p.site.primary) / 2;
+  if (g < best.dist) best = { dist: g, line: t('the assumed line halfway to the main house', 'de la línea supuesta a medio camino de la casa') };
+  if (p.adu.addedAreaSqFt > 0 && isNum(p.adu.addedSetbackMm) && p.adu.addedSetbackMm < best.dist) best = { dist: p.adu.addedSetbackMm, line: t('the property line (added entry area)', 'del lindero (área de entrada agregada)') };
+  return best;
+}
 
 export const RULES: Rule[] = [
   { id: 'GEO-01', version: '1', module: 'core', severity: 'critical', kind: 'city', effectiveFrom: EFF, applies: all,
@@ -34,6 +59,9 @@ export const RULES: Rule[] = [
       if (a.interiorLivableSqFt != null && !sane(a.interiorLivableSqFt, 50, 5000)) bad.push('livable area');
       if (!sane(a.addedAreaSqFt, 0, 5000)) bad.push('added area');
       if (a.windows.some(w => [w.clearWidthMm, w.clearHeightMm, w.sillMm].some(v => v != null && !sane(v, 0, ft(20))))) bad.push('a window size');
+      if (a.eaveDepthMm != null && !sane(a.eaveDepthMm, 0, ft(6))) bad.push('eave depth');
+      if (a.addedSetbackMm != null && !sane(a.addedSetbackMm, 0, ft(500))) bad.push('added area setback');
+      if (!Number.isInteger(a.bedrooms) || a.bedrooms < 0 || a.bedrooms > 6) bad.push('bedrooms');
       if (bad.length) return unk(`Check these numbers: ${bad.join(', ')}.`, `Revise estos números: ${bad.join(', ')}.`, 'They look out of range for a garage ADU.', 'Parecen fuera de rango.');
       return pass('Drawing and numbers look valid.', 'El dibujo y los números son válidos.');
     } },
@@ -60,6 +88,19 @@ export const RULES: Rule[] = [
       return a.garageAttachment === 'detached' ? pass('Detached garage converted inside its walls: sheet II-C path.', 'Garaje separado convertido dentro de sus muros: camino de la hoja II-C.') : pass('Attached garage converted inside the house: sheet II-G path.', 'Garaje adjunto convertido dentro de la casa: camino de la hoja II-G.');
     } },
 
+  { id: 'MIX-01', version: '1', module: 'core', severity: 'critical', kind: 'city', effectiveFrom: EFF, applies: conv,
+    title: t('Main house and units already on the lot', 'Casa principal y unidades que ya hay en el lote'),
+    cites: [{ code: 'LADBS sheet II-C (conversion per Gov. Code §66323(a)(1) for an existing single-family dwelling only); II-C.1, II-C.5 (unit mix)', url: SHEET_URL, verified: true }, { code: 'Gov. Code §66323(a)(1) (one ADU and one JADU per single-family lot)', url: GOV + '66323', verified: true }],
+    check: p => {
+      const s = p.site;
+      if (s.mainBuilding === 'unknown') return unk('We don\'t know what the main building is.', 'No sabemos qué es el edificio principal.', 'Pick single-family house, duplex or apartments. The garage path (sheet II-C) is only for a lot with one existing single-family house.', 'Elija casa unifamiliar, dúplex o apartamentos. El camino del garaje (hoja II-C) es solo para un lote con una casa unifamiliar existente.');
+      if (s.mainBuilding !== 'sfd') return { status: 'FAIL', unsupported: true, msg: t('This lot has a duplex or apartments. The city uses a different checklist (sheet II-E or II-I) that this app does not check yet.', 'Este lote tiene un dúplex o apartamentos. La ciudad usa otra lista (hoja II-E o II-I) que esta app aún no revisa.'), next: t('Ask a preparer who handles multifamily ADUs.', 'Consulte a un preparador que haga ADU en multifamiliares.') };
+      if (s.existingAdus == null || s.existingJadus == null) return unk('We don\'t know if the lot already has an ADU or a junior ADU.', 'No sabemos si el lote ya tiene un ADU o un ADU junior.', 'Enter how many ADUs and junior ADUs are already on the lot (0 if none).', 'Indique cuántos ADU y ADU junior ya hay en el lote (0 si no hay).');
+      if (s.existingAdus >= 1) return fail(`The lot already has ${s.existingAdus} ADU. A single-family lot gets one ADU plus one junior ADU on this path.`, `El lote ya tiene ${s.existingAdus} ADU. Un lote unifamiliar tiene un ADU más un ADU junior en este camino.`, 'Ask your preparer about another path (sheet II-A or II-F), or legalize the existing unit instead.', 'Pregunte a su preparador por otro camino (hoja II-A o II-F), o legalice la unidad existente.');
+      if (s.existingJadus > 1) return fail(`The lot has ${s.existingJadus} junior ADUs. Only one is allowed.`, `El lote tiene ${s.existingJadus} ADU junior. Solo se permite uno.`, 'Check the permit records with your preparer.', 'Revise los permisos con su preparador.');
+      return pass('One single-family house and no other ADU: the garage path applies.', 'Una casa unifamiliar y ningún otro ADU: aplica el camino del garaje.');
+    } },
+
   { id: 'SCP-01', version: '2', module: 'zoning', severity: 'critical', kind: 'city', effectiveFrom: EFF, applies: conv,
     title: t('Added area: 150 sq ft max, only for getting in and out', 'Área agregada: máximo 150 pies², solo para entrar y salir'),
     cites: [{ code: 'Gov. Code §66323(a)(1)(A) (150 sq ft expansion for ingress and egress); LADBS sheet II-C.3, II-C.4', url: GOV + '66323', verified: true }],
@@ -76,13 +117,23 @@ export const RULES: Rule[] = [
 
   { id: 'SET-01', version: '2', module: 'zoning', severity: 'critical', kind: 'city', effectiveFrom: EFF, applies: conv,
     title: t('Setbacks for a converted existing structure', 'Retiros para una estructura existente convertida'),
-    cites: [{ code: 'Gov. Code §66314(d)(7) (4 ft side/rear applies only to ADUs not converted from an existing structure)', url: GOV + '66314', verified: true }, { code: 'Gov. Code §66332 / AB 2533 (unpermitted units built before 2020)', url: GOV + '66332', verified: true }],
+    cites: [{ code: 'Gov. Code §66314(d)(7) (4 ft side/rear applies only to ADUs not converted from an existing structure)', url: GOV + '66314', verified: true }, { code: 'Gov. Code §66332 / AB 2533 (unpermitted ADUs built before 2020)', url: GOV + '66332', verified: true }],
     check: p => {
       const a = p.adu;
       if (yes(a.existingStructurePermitted)) return pass('The garage was built with a permit. Converting it in place needs no extra setback.', 'El garaje tiene permiso. Convertirlo no requiere retiro adicional.');
-      if (no(a.existingStructurePermitted) && yes(a.builtBefore2020)) return info('Unpermitted but built before 2020. The city generally can\'t deny it over setbacks, only health and safety issues (HSC §17920.3).', 'Sin permiso pero construido antes de 2020.', 'Gather proof of build date: old photos, aerial images, utility bills. Confirm with LADBS.', 'Reúna pruebas de la fecha de construcción.');
-      if (no(a.existingStructurePermitted)) return unk('Unpermitted and built 2020 or later (or date unknown). It may not get the existing-structure setback.', 'Sin permiso y construido en 2020 o después.', 'Use the legalization path (AB 2533) or treat it as new construction with 4 ft side and rear setbacks. Confirm with LADBS.', 'Use el camino de legalización o trátelo como construcción nueva.');
+      if (no(a.existingStructurePermitted) && yes(a.builtBefore2020) && yes(a.usedAsHomeBefore2020)) return info('Unpermitted, and already used as a separate home before 2020. Under AB 2533 the city generally can\'t deny it over setbacks, only health and safety issues (HSC §17920.3).', 'Sin permiso, y ya usado como vivienda separada antes de 2020. Bajo AB 2533 la ciudad generalmente no puede negarlo por retiros, solo por salud y seguridad (HSC §17920.3).', 'Gather proof it was lived in before 2020: old photos, aerial images, utility bills, leases. Confirm with LADBS.', 'Reúna pruebas de que se habitó antes de 2020: fotos, imágenes aéreas, facturas, contratos. Confirme con LADBS.');
+      if (no(a.existingStructurePermitted)) return unk('The garage has no permit. AB 2533 protects only units already used as a home before 2020, not a garage converted now, so it may not keep the existing-structure setback.', 'El garaje no tiene permiso. AB 2533 protege solo unidades ya usadas como vivienda antes de 2020, no un garaje que se convierte ahora, así que puede no conservar el retiro existente.', 'Legalize the garage first, or treat it as new construction with 4 ft side and rear setbacks. Confirm with LADBS.', 'Legalice primero el garaje, o trátelo como construcción nueva con retiros de 4 pies. Confirme con LADBS.');
       return unk('We don\'t know if the garage had a permit.', 'No sabemos si el garaje tenía permiso.', 'Look up the address in LADBS permit records (dbs.lacity.gov), then answer "Was the garage built with a permit?".', 'Busque la dirección en los registros de LADBS.');
+    } },
+
+  { id: 'ADD-01', version: '1', module: 'zoning', severity: 'critical', kind: 'city', effectiveFrom: EFF, applies: p => conv(p) && p.adu.addedAreaSqFt > 0,
+    title: t('Setbacks for the added entry area', 'Retiros del área de entrada agregada'),
+    cites: [{ code: 'Gov. Code §66323(a)(1)(A) (entry expansion must keep side and rear setbacks sufficient for fire and safety)', url: GOV + '66323', verified: true }, { code: 'LADBS sheet II-D.4 (4 ft side and rear setback for addition portions of a new detached State ADU; applied to a II-C entry addition here as the likely plan-check standard)', url: SHEET_URL, verified: false }],
+    check: p => {
+      const d = p.adu.addedSetbackMm;
+      if (!isNum(d)) return unk(`Adds ${p.adu.addedAreaSqFt} sq ft, but we don't know how close the added part is to a side or rear line.`, `Agrega ${p.adu.addedAreaSqFt} pies², pero no sabemos qué tan cerca está la parte agregada de un lindero lateral o trasero.`, 'Measure from the added part to the closest side or rear line and enter it on the Garage step.', 'Mida desde la parte agregada al lindero lateral o trasero más cercano e ingréselo en el paso Garaje.');
+      return d >= ft(4) ? pass(`Added part is ${fmtFtIn(d)} from the closest side or rear line (need 4' 0").`, `La parte agregada está a ${fmtFtIn(d)} del lindero más cercano (se necesitan 4' 0").`)
+        : unk(`Added part is ${fmtFtIn(d)} from a side or rear line. LADBS asks 4' 0" for addition portions, and state law asks for setbacks sufficient for fire and safety.`, `La parte agregada está a ${fmtFtIn(d)} de un lindero. LADBS pide 4' 0" para adiciones, y la ley estatal pide retiros suficientes para incendio y seguridad.`, 'Keep the entry addition 4 ft from side and rear lines, or confirm with LADBS before you design it closer.', 'Mantenga la adición a 4 pies de los linderos, o confirme con LADBS antes de diseñarla más cerca.');
     } },
 
   { id: 'SET-02', version: '2', module: 'zoning', severity: 'critical', kind: 'city', effectiveFrom: EFF, applies: p => !conv(p),
@@ -101,14 +152,14 @@ export const RULES: Rule[] = [
     } },
 
   { id: 'SEP-01', version: '1', module: 'zoning', severity: 'major', kind: 'city', effectiveFrom: EFF, applies: p => !conv(p),
-    title: t('Space between the ADU and the main house', 'Espacio entre el ADU y la casa'), cites: [{ code: 'CRC R302.1 (fire separation depends on distance)', verified: true }],
+    title: t('Space between the ADU and the main house', 'Espacio entre el ADU y la casa'), cites: [{ code: 'LARC R302.1 (fire separation depends on distance; LADBS sheet III-D.1 assumed property line)', verified: true, edition: LAED }],
     check: p => { const g = gap(p.adu.footprint, p.site.primary); return g === 0 ? fail('The ADU overlaps the main house on the plan.', 'El ADU se superpone con la casa.', 'Move the ADU so it does not touch the house, or design it as attached.', 'Mueva el ADU.') : info(`Gap to the main house: ${fmtFtIn(g)}.`, `Espacio a la casa: ${fmtFtIn(g)}.`, g < ft(10) ? 'Close buildings may need fire-rated walls facing each other. Your preparer confirms.' : undefined, 'Edificios cercanos pueden requerir muros resistentes al fuego.'); } },
 
   { id: 'HGT-01', version: '2', module: 'zoning', severity: 'major', kind: 'city', effectiveFrom: EFF, applies: p => !conv(p),
-    title: t('Height of a detached ADU', 'Altura de un ADU separado'), cites: [{ code: 'Gov. Code §66321(b)(4) (16 ft; 18 ft near transit, +2 ft to match roof pitch)', url: GOV + '66321', verified: true }],
+    title: t('Height of a detached ADU', 'Altura de un ADU separado'), cites: [{ code: 'Gov. Code §66321(b)(4) (16 ft; 18 ft within a half-mile walk of a major transit stop or a high-quality transit corridor, (b)(4)(B); +2 ft to match roof pitch)', url: GOV + '66321', verified: true }],
     check: p => {
       const tr = p.site.flags.transitHalfMile;
-      if (tr === 'unknown') return unk('We need to know if the lot is within a half mile walk of major transit.', 'Necesitamos saber si el lote está a media milla de transporte.', 'Check walking distance (not straight-line) to the nearest major transit stop.', 'Revise la distancia caminando.');
+      if (tr === 'unknown') return unk('We need to know if the lot is within a half-mile walk of a major transit stop or a high-quality transit corridor.', 'Necesitamos saber si el lote está a media milla caminando de una parada de transporte principal o de un corredor de transporte de alta calidad.', 'Check walking distance (not straight-line) to the nearest major transit stop or frequent bus corridor.', 'Revise la distancia caminando a la parada principal o corredor de autobús frecuente más cercano.');
       const pitch = p.adu.roofPitchMatches; const h = p.adu.heightMm;
       const max = yes(tr) ? (yes(pitch) ? ft(20) : ft(18)) : ft(16);
       if (yes(tr) && h > ft(18) && h <= ft(20) && pitch === 'unknown') return unk(`Height ${fmtFtIn(h)}: over 18 ft is allowed only if the roof pitch matches the house.`, `Altura ${fmtFtIn(h)}: más de 18 pies solo si la pendiente coincide con la casa.`, 'Say whether the ADU roof pitch matches the main house.', 'Indique si la pendiente coincide.');
@@ -116,56 +167,74 @@ export const RULES: Rule[] = [
     } },
 
   { id: 'CEI-01', version: '1', module: 'egress', severity: 'major', kind: 'city', hs: true, effectiveFrom: EFF, applies: all,
-    title: t('Ceiling height in living areas', 'Altura del techo en áreas habitables'), cites: [{ code: 'LARC R305.1 (7\'-0" minimum; LADBS sheet III-G.1)', url: SHEET_URL, verified: true }],
-    check: p => p.adu.ceilingHeightMm == null ? unk('Ceiling height not entered.', 'Altura del techo no ingresada.', 'Measure floor to ceiling in the main room.', 'Mida del piso al techo.')
+    title: t('Ceiling height in living areas', 'Altura del techo en áreas habitables'), cites: [{ code: 'LARC R305.1 (7\'-0" minimum; LADBS sheet III-G.1)', url: SHEET_URL, verified: true, edition: LAED }],
+    check: p => !fin(p.adu.ceilingHeightMm) ? unk('Ceiling height not entered.', 'Altura del techo no ingresada.', 'Measure floor to ceiling in the main room.', 'Mida del piso al techo.')
       : p.adu.ceilingHeightMm >= inch(84) ? pass(`Ceiling ${fmtFtIn(p.adu.ceilingHeightMm)} (need 7' 0").`, `Techo ${fmtFtIn(p.adu.ceilingHeightMm)}.`)
       : fail(`Ceiling ${fmtFtIn(p.adu.ceilingHeightMm)} is under 7' 0".`, `El techo mide menos de 7 pies.`, 'Garages often fail here once insulation and drywall go in. Plan for the finished height.', 'Planifique la altura terminada.') },
 
-  { id: 'EGR-01', version: '2', module: 'egress', severity: 'critical', kind: 'city', hs: true, effectiveFrom: EFF, applies: p => p.adu.bedrooms > 0,
-    title: t('Escape window in each bedroom', 'Ventana de escape en cada dormitorio'), cites: [{ code: 'LARC R310.2 (5.7 sq ft net clear; 5.0 at grade; 24" high; 20" wide; 44" max to bottom; LADBS sheet III-F.1)', url: SHEET_URL, verified: true }],
+  { id: 'EGR-01', version: '3', module: 'egress', severity: 'critical', kind: 'city', hs: true, effectiveFrom: EFF, applies: all,
+    title: t('Escape window in each sleeping room', 'Ventana de escape en cada cuarto para dormir'), cites: [{ code: 'LARC R310.1, R310.2 (every sleeping room; 5.7 sq ft net clear; 5.0 at grade; 24" high; 20" wide; 44" max to bottom; LADBS sheet III-F.1)', url: SHEET_URL, verified: true, edition: LAED }],
     check: p => {
-      const w = p.adu.windows.filter(x => x.sleeping);
-      if (w.length < p.adu.bedrooms) return unk(`${p.adu.bedrooms} bedroom(s) but ${w.length} escape window(s) entered.`, 'Faltan ventanas de escape.', 'Add each bedroom\'s window. Measure the clear opening, not the window\'s label size.', 'Mida la abertura libre, no el tamaño nominal.');
-      for (const x of w) {
-        if (x.clearWidthMm == null || x.clearHeightMm == null || x.sillMm == null) return unk(`Window in ${safeName(x.room)}: measurements missing.`, 'Faltan medidas.', 'Enter clear width, clear height and sill height.', 'Ingrese ancho, alto y altura del alféizar.');
-        const sq = toSqFt(x.clearWidthMm * x.clearHeightMm), need = x.gradeFloor ? 5.0 : 5.7;
-        const bad = [sq < need && `net clear ${sq.toFixed(1)} sq ft < ${need}`, x.clearHeightMm < inch(24) && 'clear height under 24"', x.clearWidthMm < inch(20) && 'clear width under 20"', x.sillMm > inch(44) && 'sill over 44"'].filter(Boolean);
-        if (bad.length) return fail(`Window in ${safeName(x.room)}: ${bad.join(', ')}.`, `Ventana en ${safeName(x.room)}: ${bad.join(', ')}.`, 'Common sliders often fail. Pick a casement or a larger slider.', 'Elija una ventana abatible o más grande.');
+      const a = p.adu; const studio = a.bedrooms === 0;
+      if (studio && no(a.mainRoomSleeping)) return info('Studio where nobody sleeps in the main room: no escape window counted.', 'Estudio donde nadie duerme en el cuarto principal: no se cuenta ventana de escape.', 'Plan checkers usually treat a studio\'s main room as a sleeping room. Your preparer confirms.', 'Los revisores suelen tratar el cuarto principal de un estudio como cuarto para dormir. Su preparador confirma.');
+      const need = studio ? 1 : a.bedrooms;
+      // Group escape windows by room; a room passes if ANY of its windows passes (extra small windows don't matter).
+      const rooms = new Map<string, { label: string; wins: typeof a.windows }>();
+      a.windows.filter(x => x.sleeping).forEach((x, i) => { const k = norm(x.room) || `#${i + 1}`; const r = rooms.get(k) ?? { label: safeName(x.room) || `window ${i + 1}`, wins: [] }; r.wins.push(x); rooms.set(k, r); });
+      const failing: string[] = [], missing: string[] = []; let good = 0;
+      for (const r of rooms.values()) {
+        const measured = r.wins.filter(x => fin(x.clearWidthMm) && fin(x.clearHeightMm) && isNum(x.sillMm) && x.sillMm >= 0);
+        if (measured.some(x => winOk(x).length === 0)) { good++; continue; }
+        if (measured.length < r.wins.length) { missing.push(r.label); continue; }
+        failing.push(`${r.label}: ${winOk(measured[0]).join(', ')}`);
       }
-      return pass('Every bedroom has an escape window that meets size rules.', 'Cada dormitorio tiene ventana de escape.');
+      if (failing.length) return fail(`No escape window that meets the rules in ${failing.join('; ')}.`, `Sin ventana de escape que cumpla en ${failing.join('; ')}.`, 'Common sliders often fail. Pick a casement or a larger slider.', 'Elija una ventana abatible o más grande.');
+      if (missing.length) return unk(`Window measurements missing for ${missing.join(', ')}.`, `Faltan medidas de ventana en ${missing.join(', ')}.`, 'Enter clear width, clear height and sill height.', 'Ingrese ancho, alto y altura del alféizar.');
+      if (rooms.size < need) return unk(studio ? 'Studio: the main room counts as a sleeping room and needs an escape window.' : `${a.bedrooms} bedroom(s), but escape windows are entered for ${rooms.size} room(s).`, studio ? 'Estudio: el cuarto principal cuenta como cuarto para dormir y necesita ventana de escape.' : `${a.bedrooms} dormitorio(s), pero hay ventanas de escape para ${rooms.size} cuarto(s).`,
+        studio ? 'Add the main room\'s window, or say nobody sleeps there.' : 'Add a window for each bedroom, and give each bedroom its own room name (Bedroom 1, Bedroom 2).', studio ? 'Agregue la ventana del cuarto principal, o indique que nadie duerme allí.' : 'Agregue una ventana por dormitorio, con su propio nombre (Dormitorio 1, Dormitorio 2).');
+      return good >= need ? pass(studio ? 'The studio\'s main room has an escape window that meets size rules.' : 'Every bedroom has an escape window that meets size rules.', studio ? 'El cuarto principal del estudio tiene ventana de escape.' : 'Cada dormitorio tiene ventana de escape.') : unk('Not every sleeping room has a measured escape window.', 'No todos los cuartos para dormir tienen ventana medida.', 'Enter each bedroom\'s window.', 'Ingrese la ventana de cada dormitorio.');
     } },
 
   { id: 'ALM-01', version: '1', module: 'egress', severity: 'major', kind: 'city', hs: true, effectiveFrom: EFF, applies: all,
-    title: t('Smoke and carbon monoxide alarms', 'Alarmas de humo y monóxido de carbono'), cites: [{ code: 'LARC R314.2, R315 (LADBS sheet III-E.1, III-E.3)', url: SHEET_URL, verified: true }],
+    title: t('Smoke and carbon monoxide alarms', 'Alarmas de humo y monóxido de carbono'), cites: [{ code: 'LARC R314.2, R315 (LADBS sheet III-E.1, III-E.3)', url: SHEET_URL, verified: true, edition: LAED }],
     check: p => yes(p.adu.smokeCoPlanned) ? pass('Alarms are shown on the plan.', 'Alarmas en el plano.') : unk('Alarms are not confirmed on the plan.', 'Alarmas no confirmadas.', 'Show smoke alarms in each bedroom and hall, and CO alarms if there is gas or an attached garage.', 'Muestre alarmas en cada dormitorio.') },
 
-  { id: 'FIR-01', version: '2', module: 'fire', severity: 'critical', kind: 'city', hs: true, effectiveFrom: EFF, applies: all,
-    title: t('Fire-rated walls near the property line', 'Muros resistentes al fuego cerca del lindero'), cites: [{ code: 'CRC R302.1 (walls under 5 ft from the line, or under 3 ft if sprinklered, need 1-hour rating)', verified: true }],
+  { id: 'FIR-01', version: '3', module: 'fire', severity: 'critical', kind: 'city', hs: true, effectiveFrom: EFF, applies: all,
+    title: t('Fire-rated walls near the property line or the house', 'Muros resistentes al fuego cerca del lindero o de la casa'),
+    cites: [{ code: 'LADBS sheet III-D.1 (1-hour exterior walls under 5 ft from the property line or assumed property line; LABC 706.1.1, LARC R302.1)', url: SHEET_URL, verified: true, edition: LAED },
+      { code: 'LADBS sheet III-D.2 (projections such as eaves limited by fire separation distance; LARC Table R302.1(1), R302.1(2))', url: SHEET_URL, verified: true, edition: LAED }],
     check: p => {
       if (!polyInside(p.adu.footprint, p.site.lot)) return unk('The ADU is not fully inside the lot, so distances can\'t be measured.', 'El ADU no está dentro del lote.', 'Fix the drawing first.', 'Corrija el dibujo primero.');
-      let worst = Infinity; p.site.lot.forEach((_, i) => { worst = Math.min(worst, clearanceToEdge(p.adu.footprint, p.site.lot, i)); });
+      const { dist: worst, line } = fireSeparation(p);
       if (!Number.isFinite(worst)) return unk('Distances could not be measured.', 'No se pudo medir.', 'Fix the drawing first.', 'Corrija el dibujo primero.');
       const sprk = yes(p.adu.sprinklered); const lim = sprk ? ft(3) : ft(5);
-      if (worst >= lim) return pass(`Closest wall is ${fmtFtIn(worst)} from the line. No rated wall needed.`, `El muro más cercano está a ${fmtFtIn(worst)}.`);
-      if (yes(p.adu.ratedWallPlanned)) return pass(`Closest wall is ${fmtFtIn(worst)}. A 1-hour wall is planned.`, 'Se planea un muro de 1 hora.');
-      return fail(`Closest wall is ${fmtFtIn(worst)} from the line. It needs a 1-hour fire-rated wall.`, `El muro más cercano está a ${fmtFtIn(worst)} del lindero. Necesita un muro resistente al fuego de 1 hora.`, 'Plan a 1-hour wall on that side, and limit windows there. Escape windows can clash with this on narrow lots.', 'Planifique un muro de 1 hora.');
+      const eave = p.adu.eaveDepthMm; const proj = isNum(eave) && eave > 0 ? worst - eave : null;
+      if (proj != null && proj < ft(2)) return fail(`The eave reaches ${fmtFtIn(Math.max(0, proj))} from ${line.en}. Projections can't come closer than 2 ft.`, `El alero llega a ${fmtFtIn(Math.max(0, proj))} ${line.es}. Las salientes no pueden acercarse a menos de 2 pies.`, 'Cut the eave back on that side.', 'Recorte el alero de ese lado.');
+      const projNote = proj != null && proj < ft(5) ? t(' The eave on that side needs a 1-hour rated underside.', ' El alero de ese lado necesita una parte inferior con resistencia de 1 hora.') : t('', '');
+      if (eave == null && worst < lim + ft(3)) return unk(`Closest wall is ${fmtFtIn(worst)} from ${line.en}. An eave on that side could come too close, and walls this close may need a rating.`, `El muro más cercano está a ${fmtFtIn(worst)} ${line.es}. Un alero de ese lado podría quedar demasiado cerca.`, 'Enter the eave depth (roof overhang) on the Garage step. Enter 0 if there is none.', 'Ingrese la profundidad del alero en el paso Garaje. Ingrese 0 si no hay.');
+      if (worst >= lim) {
+        if (projNote.en && !yes(p.adu.ratedWallPlanned)) return unk(`Closest wall is ${fmtFtIn(worst)} from ${line.en}.${projNote.en}`, `El muro más cercano está a ${fmtFtIn(worst)} ${line.es}.${projNote.es}`, 'Plan a 1-hour rated eave underside, or cut the eave back.', 'Planee un alero con parte inferior de 1 hora, o recórtelo.');
+        return pass(`Closest wall is ${fmtFtIn(worst)} from ${line.en}. No rated wall needed.`, `El muro más cercano está a ${fmtFtIn(worst)} ${line.es}. No se necesita muro resistente.`);
+      }
+      if (yes(p.adu.ratedWallPlanned)) return pass(`Closest wall is ${fmtFtIn(worst)} from ${line.en}. A 1-hour wall is planned.${projNote.en}`, `El muro más cercano está a ${fmtFtIn(worst)} ${line.es}. Se planea un muro de 1 hora.${projNote.es}`);
+      return fail(`Closest wall is ${fmtFtIn(worst)} from ${line.en}. It needs a 1-hour fire-rated wall.`, `El muro más cercano está a ${fmtFtIn(worst)} ${line.es}. Necesita un muro resistente al fuego de 1 hora.`, 'Plan a 1-hour wall on that side, and limit windows there. Escape windows can clash with this on narrow lots.', 'Planifique un muro de 1 hora.');
     } },
 
   { id: 'SPK-01', version: '2', module: 'fire', severity: 'major', kind: 'city', hs: true, effectiveFrom: EFF, applies: all,
-    title: t('Fire sprinklers', 'Rociadores contra incendios'), cites: [{ code: 'Gov. Code §66314(d)(12) (required only if the main house has them)', url: GOV + '66314', verified: true }],
-    check: p => { const f = p.site.flags.primarySprinklered; return f === 'unknown' ? unk('We don\'t know if the main house has sprinklers.', 'No sabemos si la casa tiene rociadores.', 'Check the main house for sprinkler heads.', 'Revise si la casa tiene rociadores.') : yes(f) ? (yes(p.adu.sprinklered) ? pass('Main house has sprinklers and so does the ADU.', 'Ambos tienen rociadores.') : fail('The main house has sprinklers, so the ADU needs them too.', 'La casa tiene rociadores; el ADU también los necesita.', 'Add sprinklers to the ADU plan. A bigger water meter may be needed.', 'Agregue rociadores.')) : pass('Not required: the main house has no sprinklers. Adding them is optional and can help with fire access.', 'No requerido.'); } },
+    title: t('Fire sprinklers', 'Rociadores contra incendios'), cites: [{ code: 'LADBS sheet III-E.4 (sprinklers required for the ADU if the existing dwelling has them)', url: SHEET_URL, verified: true }, { code: 'Gov. Code §66314(d)(12) (not required when the main house does not need them)', url: GOV + '66314', verified: true }],
+    check: p => { const f = p.site.flags.primarySprinklered; return f === 'unknown' ? unk('We don\'t know if the main house has sprinklers.', 'No sabemos si la casa tiene rociadores.', 'Check the main house for sprinkler heads.', 'Revise si la casa tiene rociadores.') : yes(f) ? (yes(p.adu.sprinklered) ? pass('Main house has sprinklers and so does the ADU.', 'Ambos tienen rociadores.') : fail('The main house has sprinklers, so the ADU needs them too (LADBS sheet III-E.4).', 'La casa tiene rociadores; el ADU también los necesita (hoja III-E.4).', 'Add sprinklers to the ADU plan. A bigger water meter may be needed.', 'Agregue rociadores.')) : pass('Not required: the main house has no sprinklers (Gov. Code §66314(d)(12)). Adding them is optional and can help with fire access.', 'No requerido: la casa no tiene rociadores (Código de Gobierno §66314(d)(12)).'); } },
 
   { id: 'ACC-01', version: '2', module: 'fire', severity: 'major', kind: 'city', hs: true, effectiveFrom: EFF, applies: all,
     title: t('Fire department access (hose pull)', 'Acceso de bomberos'), cites: [{ code: 'Fire access review (LA County guideline: 150 ft, 300 ft if sprinklered detached ADU). LAFD verifies in LA City.', verified: true }],
-    check: p => { const h = p.adu.hosePullFt; if (h == null) return unk('Hose pull distance not measured.', 'Distancia no medida.', 'Measure the walking path from the street curb to the farthest point of the ADU. LAFD checks this.', 'Mida el camino desde la calle.'); const lim = yes(p.adu.sprinklered) ? 300 : 150; return h <= lim ? pass(`About ${h} ft from the street (limit ${lim} ft).`, `Aprox. ${h} pies.`) : unk(`About ${h} ft from the street, over ${lim} ft.`, 'Supera el límite.', 'This is an access review, not an automatic no. Sprinklers or other fixes may solve it. LAFD decides.', 'LAFD decide.'); } },
+    check: p => { const h = p.adu.hosePullFt; if (!fin(h)) return unk('Hose pull distance not measured.', 'Distancia no medida.', 'Measure the walking path from the street curb to the farthest point of the ADU. LAFD checks this.', 'Mida el camino desde la calle.'); const lim = yes(p.adu.sprinklered) ? 300 : 150; return h <= lim ? pass(`About ${h} ft from the street (limit ${lim} ft).`, `Aprox. ${h} pies.`) : unk(`About ${h} ft from the street, over ${lim} ft.`, 'Supera el límite.', 'This is an access review, not an automatic no. Sprinklers or other fixes may solve it. LAFD decides.', 'LAFD decide.'); } },
 
   { id: 'ENG-01', version: '2', module: 'structural', severity: 'critical', kind: 'city', hs: true, effectiveFrom: EFF, applies: conv,
     title: t('When an engineer is needed', 'Cuándo se necesita un ingeniero'), cites: [{ code: 'B&P §6737.1 and §5537 (conventional wood framing is exempt; non-conventional parts need a licensed engineer)', verified: true }],
     check: p => yes(p.adu.removesGarageDoorWall) ? info('Filling or changing the garage door opening changes how the wall holds the building up.', 'Cambiar la puerta del garaje afecta la estructura.', 'Ask a licensed engineer for that wall only (header and bracing). The rest can be owner-prepared.', 'Pida a un ingeniero solo ese muro.') : p.adu.removesGarageDoorWall === 'unknown' ? unk('We don\'t know the plan for the garage door opening.', 'No sabemos el plan para la puerta.', 'Say if the garage door opening will be filled in or changed.', 'Indique el plan.') : pass('No structural change planned to the garage door wall.', 'Sin cambios estructurales.') },
 
   { id: 'HAZ-01', version: '2', module: 'hazards', severity: 'critical', kind: 'city', hs: true, effectiveFrom: EFF, applies: all,
-    title: t('Hillside and very high fire zone', 'Ladera y zona de muy alto riesgo de incendio'), cites: [{ code: 'LAMC 12.22 A.33 (HCD found parts noncompliant, 11/19/2024: contested)', verified: true }],
-    check: p => { const { hillside, vhfhsz, slopeOver10 } = p.site.flags; if ([hillside, vhfhsz, slopeOver10].includes('unknown')) return unk('Hillside, fire zone or slope not confirmed.', 'No confirmado.', 'Check ZIMAS for "Hillside Area" and "Very High Fire Hazard Severity Zone".', 'Revise ZIMAS.'); if (yes(hillside) && yes(vhfhsz)) return fail('Lot is in both Hillside and Very High Fire zones. LA limits ADUs here, though the state says parts of that limit don\'t comply (contested).', 'Zona de ladera y fuego muy alto: limitado (disputado).', 'Talk to LADBS or a land-use attorney before designing.', 'Hable con LADBS.'); if (yes(slopeOver10) || yes(hillside)) return info('Hillside lot: engineering needed. Automatic fitting is off.', 'Lote en ladera: se necesita ingeniería.', 'Get a soils report and an engineer. Draft sheets still work.', 'Obtenga un informe de suelos.'); return pass('Not in Hillside + Very High Fire zones.', 'Fuera de esas zonas.'); } },
+    title: t('Hillside and very high fire zone', 'Ladera y zona de muy alto riesgo de incendio'), cites: [{ code: 'LAMC 12.22 A.33 (HCD found parts noncompliant, 11/19/2024: contested)', verified: true }, { code: 'Gov. Code §66323(a) (conversions inside an existing accessory structure: ministerial approval)', url: GOV + '66323', verified: true }],
+    check: p => { const { hillside, vhfhsz, slopeOver10 } = p.site.flags; if ([hillside, vhfhsz, slopeOver10].includes('unknown')) return unk('Hillside, fire zone or slope not confirmed.', 'No confirmado.', 'Check ZIMAS for "Hillside Area" and "Very High Fire Hazard Severity Zone".', 'Revise ZIMAS.'); if (yes(hillside) && yes(vhfhsz) && conv(p)) return info('Lot is in both Hillside and Very High Fire zones. A conversion inside an existing garage must be approved ministerially by state law (Gov. Code §66323(a)); LA\'s hillside limit targets new ADUs.', 'Lote en ladera y zona de fuego muy alto. El estado exige aprobar en forma ministerial una conversión dentro de un garaje existente (Código de Gobierno §66323(a)); el límite de LA apunta a ADU nuevos.', 'Expect fire-access and hazard review notes (hose pull, sprinklers, brush clearance). Your preparer confirms.', 'Espere notas de acceso de bomberos y riesgos (manguera, rociadores, limpieza de maleza). Su preparador confirma.'); if (yes(hillside) && yes(vhfhsz)) return fail('Lot is in both Hillside and Very High Fire zones. LA limits ADUs here, though the state says parts of that limit don\'t comply (contested).', 'Zona de ladera y fuego muy alto: limitado (disputado).', 'Talk to LADBS or a land-use attorney before designing.', 'Hable con LADBS.'); if (yes(slopeOver10) || yes(hillside)) return info('Hillside lot: engineering needed. Automatic fitting is off.', 'Lote en ladera: se necesita ingeniería.', 'Get a soils report and an engineer. Draft sheets still work.', 'Obtenga un informe de suelos.'); return pass('Not in Hillside + Very High Fire zones.', 'Fuera de esas zonas.'); } },
 
   { id: 'HAZ-02', version: '1', module: 'hazards', severity: 'major', kind: 'city', effectiveFrom: EFF, applies: all,
     title: t('Historic district (HPOZ)', 'Distrito histórico (HPOZ)'), cites: [{ code: 'LA HPOZ review; draft ADU design standards (6/22/2026)', verified: true }],
@@ -176,7 +245,7 @@ export const RULES: Rule[] = [
     check: p => p.site.flags.coastal === 'yes' ? info('Coastal zone: a coastal permit step applies. Small lots (under 3 units) are usually exempt from Mello Act replacement rules.', 'Zona costera.', 'Ask City Planning for the Mello exemption check first.', 'Pida a Planificación la revisión de exención.') : p.site.flags.coastal === 'unknown' ? unk('Not known if the lot is in the coastal zone.', 'No se sabe.', 'Check ZIMAS for "Coastal Zone".', 'Revise ZIMAS.') : pass('Not in the coastal zone.', 'Fuera de la zona costera.') },
 
   { id: 'HAZ-04', version: '2', module: 'hazards', severity: 'major', kind: 'city', hs: true, effectiveFrom: EFF, applies: all,
-    title: t('Methane zone', 'Zona de metano'), cites: [{ code: 'LABC Ch. 71 (91.7104-91.7105); no automatic exemption for an existing slab', verified: true }],
+    title: t('Methane zone', 'Zona de metano'), cites: [{ code: 'LABC Ch. 71 (91.7104-91.7105); no automatic exemption for an existing slab', verified: true, edition: LAED }],
     check: p => p.site.flags.methane === 'yes' ? info('Methane zone: new trenches or footings may require gas mitigation (a membrane and vents).', 'Zona de metano: puede requerir mitigación.', 'Budget for mitigation and ask LADBS if your scope triggers it.', 'Presupueste mitigación.') : p.site.flags.methane === 'unknown' ? unk('Not known if the lot is in a methane zone.', 'No se sabe.', 'Check ZIMAS for "Methane Hazard Site".', 'Revise ZIMAS.') : pass('Not in a methane zone.', 'Fuera de zona de metano.') },
 
   { id: 'HAZ-05', version: '1', module: 'hazards', severity: 'critical', kind: 'city', hs: true, effectiveFrom: EFF, applies: all,
@@ -191,7 +260,8 @@ export const RULES: Rule[] = [
   { id: 'FEE-01', version: '3', module: 'fees', severity: 'minor', kind: 'info', effectiveFrom: EFF, applies: all,
     title: t('Fee estimate (2026 rules)', 'Estimado de tarifas (reglas 2026)'),
     cites: [{ code: 'Gov. Code §66311.5 (formerly §66324), SB 543: no impact fees under 750 sq ft interior livable space', url: 'https://www.aalrr.com/newsroom-alerts-4196', verified: true },
-      { code: 'SB 543 / Ed. Code §17620(a)(1)(C): no school fees under 500 sq ft interior livable space', url: 'https://www.aalrr.com/newsroom-alerts-4196', verified: true }],
+      { code: 'SB 543 / Ed. Code §17620(a)(1)(C): no school fees under 500 sq ft interior livable space', url: 'https://www.aalrr.com/newsroom-alerts-4196', verified: true },
+      { code: 'Former Gov. Code §66324(d)(1): a §66323(a)(1)(A) conversion needs no new utility connection, connection fee or capacity charge (section number after SB 543 renumbering not yet confirmed)', verified: false }],
     check: p => feeEstimate(p).outcome },
 
   { id: 'NRG-01', version: '2', module: 'energy', severity: 'major', kind: 'city', effectiveFrom: EFF, applies: all,
@@ -207,20 +277,20 @@ export const RULES: Rule[] = [
 
   { id: 'VAP-01', version: '1', module: 'egress', severity: 'major', kind: 'city', hs: true, effectiveFrom: EFF, applies: all,
     title: t('Vapor barrier under the garage slab', 'Barrera de vapor bajo la losa del garaje'),
-    cites: [{ code: 'LABC 1907.1, LARC R506.2.3 (vapor retarder below slab, or approved epoxy coating on top; LADBS sheet III-J.1)', url: SHEET_URL, verified: true }],
+    cites: [{ code: 'LABC 1907.1, LARC R506.2.3 (vapor retarder below slab, or approved epoxy coating on top; LADBS sheet III-J.1)', url: SHEET_URL, verified: true, edition: LAED }],
     check: p => { const v = p.adu.slabVaporBarrier; return v === 'unknown' ? unk('We don\'t know if the slab has a vapor barrier.', 'No sabemos si la losa tiene barrera de vapor.', 'Old garage slabs often have none. Answer the slab question, or plan an approved epoxy coating on top.', 'Las losas viejas a menudo no tienen. Responda la pregunta, o planee un recubrimiento epóxico aprobado.')
       : yes(v) ? pass('Slab has a vapor barrier, or an approved epoxy coating is planned.', 'La losa tiene barrera de vapor, o se planea un recubrimiento epóxico aprobado.')
       : fail('No vapor barrier and no coating planned.', 'Sin barrera de vapor ni recubrimiento planeado.', 'Add an approved epoxy slab coating on top, and show it on the plans.', 'Agregue un recubrimiento epóxico aprobado y muéstrelo en los planos.'); } },
 
   { id: 'FIR-02', version: '1', module: 'fire', severity: 'critical', kind: 'city', hs: true, effectiveFrom: EFF, applies: all,
-    title: t('Windows and doors in walls near the property line', 'Ventanas y puertas en muros cerca del lindero'),
-    cites: [{ code: 'LADBS sheet III-A.5 (detached garage under 5 ft: 1-hour, no openings) and III-D.4 (opening analysis per LABC 705.8 / LARC R302.1)', url: SHEET_URL, verified: true }],
+    title: t('Windows and doors in walls near the property line or the house', 'Ventanas y puertas en muros cerca del lindero o de la casa'),
+    cites: [{ code: 'LADBS sheet III-A.5 (detached garage under 5 ft: 1-hour, no openings) and III-D.4 (opening analysis per LABC 705.8 / LARC R302.1; distance to the property line or assumed property line, III-D.1)', url: SHEET_URL, verified: true, edition: LAED }],
     check: p => {
       if (!polyInside(p.adu.footprint, p.site.lot)) return unk('The ADU is not fully inside the lot, so distances can\'t be measured.', 'El ADU no está dentro del lote.', 'Fix the drawing first.', 'Corrija el dibujo primero.');
-      let worst = Infinity; p.site.lot.forEach((_, i) => { worst = Math.min(worst, clearanceToEdge(p.adu.footprint, p.site.lot, i)); });
-      if (worst >= ft(5)) return pass(`Closest wall is ${fmtFtIn(worst)} from the line. No opening limit there.`, `El muro más cercano está a ${fmtFtIn(worst)}. Sin límite de aberturas.`);
+      const { dist: worst, line } = fireSeparation(p);
+      if (worst >= ft(5)) return pass(`Closest wall is ${fmtFtIn(worst)} from ${line.en}. No opening limit there.`, `El muro más cercano está a ${fmtFtIn(worst)} ${line.es}. Sin límite de aberturas.`);
       const o = p.adu.openingsNearLine;
-      if (o === 'unknown') return unk(`A wall is ${fmtFtIn(worst)} from the line. Openings there are limited.`, `Un muro está a ${fmtFtIn(worst)} del lindero. Las aberturas allí son limitadas.`, 'Say if that wall has any windows, doors or vents.', 'Indique si ese muro tiene ventanas, puertas o rejillas.');
+      if (o === 'unknown') return unk(`A wall is ${fmtFtIn(worst)} from ${line.en}. Openings there are limited.`, `Un muro está a ${fmtFtIn(worst)} ${line.es}. Las aberturas allí son limitadas.`, 'Say if that wall has any windows, doors or vents.', 'Indique si ese muro tiene ventanas, puertas o rejillas.');
       if (no(o)) return pass(`No openings in the wall ${fmtFtIn(worst)} from the line.`, `Sin aberturas en el muro a ${fmtFtIn(worst)} del lindero.`);
       if (worst < ft(3)) return fail(`Openings in a wall only ${fmtFtIn(worst)} from the line.`, `Aberturas en un muro a solo ${fmtFtIn(worst)} del lindero.`, 'Remove them. Walls this close generally can\'t have openings. Move the escape window to another wall.', 'Quítelas. Muros tan cercanos generalmente no pueden tener aberturas. Mueva la ventana de escape a otro muro.');
       return unk(`Openings in a wall ${fmtFtIn(worst)} from the line (3 to 5 ft).`, `Aberturas en un muro a ${fmtFtIn(worst)} del lindero (3 a 5 pies).`, 'Some openings may be allowed here up to a share of the wall area. Your preparer runs the opening analysis (sheet III-D.4).', 'Algunas aberturas pueden permitirse hasta una parte del muro. Su preparador hace el análisis (hoja III-D.4).');
@@ -228,7 +298,7 @@ export const RULES: Rule[] = [
 
   { id: 'ALM-02', version: '1', module: 'egress', severity: 'major', kind: 'city', hs: true, effectiveFrom: EFF, applies: all,
     title: t('Smoke alarm power source', 'Energía de las alarmas de humo'),
-    cites: [{ code: 'LABC 907.2.11.5 / LARC R314.4 (new construction: building wiring with battery backup; LADBS sheet III-E.2)', url: SHEET_URL, verified: true }],
+    cites: [{ code: 'LABC 907.2.11.5 / LARC R314.4 (new construction: building wiring with battery backup; LADBS sheet III-E.2)', url: SHEET_URL, verified: true, edition: LAED }],
     check: p => { const h = p.adu.smokeHardwired; return yes(h) ? pass('Smoke alarms are hardwired with battery backup.', 'Alarmas cableadas con batería de respaldo.')
       : h === 'unknown' ? unk('We don\'t know how the smoke alarms are powered.', 'No sabemos cómo se alimentan las alarmas.', 'Plan hardwired alarms with battery backup. That is what new work needs.', 'Planee alarmas cableadas con batería de respaldo.')
       : conv(p) ? unk('Battery-only alarms planned. Battery-only is allowed in an existing house, but this is a new unit.', 'Alarmas solo con batería. Se permite en casa existente, pero esta es una unidad nueva.', 'Ask your preparer, or plan hardwired alarms with battery backup to be safe.', 'Pregunte a su preparador, o planee alarmas cableadas.')
@@ -259,7 +329,8 @@ export const RULES: Rule[] = [
     check: p => { const a = p.adu;
       if (yes(a.existingStructurePermitted)) return fail('Legalization mode is on, but the garage has a permit.', 'El modo de legalización está activo, pero el garaje tiene permiso.', 'Turn legalization mode off. It is for unpermitted units.', 'Apague el modo de legalización. Es para unidades sin permiso.');
       if (no(a.builtBefore2020)) return fail('AB 2533 covers units built before 2020 only.', 'AB 2533 cubre solo unidades construidas antes de 2020.', 'Turn legalization mode off and use the regular path.', 'Apague el modo y use el camino normal.');
-      if (!yes(a.builtBefore2020) || !no(a.existingStructurePermitted)) return unk('Confirm the unit is unpermitted and was built before 2020.', 'Confirme que la unidad no tiene permiso y se construyó antes de 2020.', 'Answer the permit and build-date questions. Gather proof: photos, aerial images, utility bills.', 'Responda las preguntas de permiso y fecha. Reúna pruebas.');
+      if (no(a.usedAsHomeBefore2020)) return fail('AB 2533 covers units already used as a home before 2020. A garage converted now does not qualify.', 'AB 2533 cubre unidades ya usadas como vivienda antes de 2020. Un garaje que se convierte ahora no califica.', 'Turn legalization mode off and use the regular path.', 'Apague el modo y use el camino normal.');
+      if (!yes(a.builtBefore2020) || !no(a.existingStructurePermitted) || !yes(a.usedAsHomeBefore2020)) return unk('Confirm the unit is unpermitted, was built before 2020, and was already used as a separate home before 2020.', 'Confirme que la unidad no tiene permiso y se construyó antes de 2020.', 'Answer the permit and build-date questions. Gather proof: photos, aerial images, utility bills.', 'Responda las preguntas de permiso y fecha. Reúna pruebas.');
       return info('Legalization mode: only health-and-safety items are enforced. Zoning items show as notes.', 'Modo de legalización: solo se exigen puntos de salud y seguridad. Los de zonificación aparecen como notas.', 'The city still inspects for health and safety. Fix those before the permit issues.', 'La ciudad aún inspecciona salud y seguridad. Corríjalos antes del permiso.'); } },
 
   { id: 'DWP-01', version: '1', module: 'hazards', severity: 'major', kind: 'city', hs: true, effectiveFrom: EFF, applies: all,
@@ -290,8 +361,8 @@ export const RULES: Rule[] = [
     check: () => info('A unit on this lot is rented. The ADU may fall under LA rent rules.', 'Una unidad está rentada.', 'Check with the LA Housing Department (LAHD) before you rent the ADU.', 'Consulte con LAHD.') },
 
   { id: 'CLK-01', version: '2', module: 'clocks', severity: 'minor', kind: 'info', effectiveFrom: EFF, applies: all,
-    title: t('Permit deadlines', 'Plazos del permiso'), cites: [{ code: 'LAMC 98.0603 (plan check expires 18 months after filing)', verified: true }, { code: 'LAMC 98.0602 (permit expires if work doesn\'t start within 12 months or stops for 12 months)', verified: true }],
-    check: () => info('Plan check: 18 months after filing. Permit: 12 months to start work, and no 12-month stop.', 'Revisión: 18 meses. Permiso: 12 meses para empezar.', 'Add these deadlines to your calendar from the export screen.', 'Agregue los plazos a su calendario.') },
+    title: t('Permit deadlines', 'Plazos del permiso'), cites: [{ code: 'LAMC 98.0603 (plan check expires 18 months after filing)', verified: true }, { code: 'LAMC 98.0602 (permit expires if work doesn\'t start within 12 months or stops for 12 months; permit valid 2 years unless extended)', verified: true }, { code: 'LAMC 98.0605 (extensions)', verified: false }],
+    check: () => info('Plan check: 18 months after filing. Permit: 12 months to start work, no 12-month stop, and valid 2 years unless extended.', 'Revisión: 18 meses. Permiso: 12 meses para empezar, sin pausas de 12 meses, y vale 2 años salvo extensión.', 'Add these deadlines to your calendar from the export screen.', 'Agregue los plazos a su calendario.') },
 ];
 
 /** Site-plan side and rear clearances (lot edge after the street edge = side; opposite = rear on 4-sided lots). */
@@ -312,8 +383,9 @@ export function feeEstimate(p: Project): { school: L; impact: L; outcome: Outcom
   const impact = s < 750 ? t('$0 (under 750 sq ft)', '$0 (menos de 750 pies²)') : verify;
   const edge = (s >= 490 && s <= 510) || (s >= 740 && s <= 760);
   const leg = p.adu.legalization ? t(' Legalization (AB 2533) limits impact and connection fees too.', ' La legalización (AB 2533) también limita tarifas.') : t('', '');
-  return { school, impact, outcome: info(`${s} sq ft livable. School fee: ${school.en}. Impact fee: ${impact.en}. Plan check, permit and connection fees still apply: estimate, verify with LADBS.${leg.en}`,
-    `${s} pies² habitables. Tarifa escolar: ${school.es}. Tarifa de impacto: ${impact.es}. Las de revisión, permiso y conexión aún aplican: estimado, verifique con LADBS.${leg.es}`,
+  const conn = p.adu.mode === 'conversion' ? t(' Connection or capacity fee: $0 (state conversion: no new utility connection may be required).', ' Tarifa de conexión o capacidad: $0 (conversión estatal: no se puede exigir conexión nueva).') : t(' Connection fees may apply: estimate, verify with LADBS.', ' Pueden aplicar tarifas de conexión: estimado, verifique con LADBS.');
+  return { school, impact, outcome: info(`${s} sq ft livable. School fee: ${school.en}. Impact fee: ${impact.en}.${conn.en} Plan check and permit fees still apply: estimate, verify with LADBS.${leg.en}`,
+    `${s} pies² habitables. Tarifa escolar: ${school.es}. Tarifa de impacto: ${impact.es}.${conn.es} Las de revisión y permiso aún aplican: estimado, verifique con LADBS.${leg.es}`,
     edge ? 'You are near a fee line (500 or 750 sq ft). A few feet changes the fees. Exactly on the line: verify with LADBS.' : undefined, 'Está cerca de un límite (500 o 750 pies²). Exactamente en el límite: verifique con LADBS.', { sqft: s }) };
 }
 

@@ -2,8 +2,9 @@ import type { Project } from '../core/model';
 import type { Report } from './engine';
 import { CATALOG, RULE_ITEMS, type Route, type SheetItem } from './ladbs-adu-2025';
 
-export type ItemState = 'covered' | 'autoPassed' | 'failing' | 'needsAnswer' | 'docsMissing';
-export interface Readiness { total: number; checked: number; covered: number; autoPassed: number; failing: number; needsAnswer: number; docsMissing: number; items: { item: SheetItem; state: ItemState; why: string }[] }
+/** mayApply: a document whose trigger (grading, shared driveway, vehicle lift...) the app does not ask about; the preparer decides. */
+export type ItemState = 'covered' | 'autoPassed' | 'failing' | 'needsAnswer' | 'docsMissing' | 'mayApply';
+export interface Readiness { total: number; checked: number; covered: number; autoPassed: number; failing: number; needsAnswer: number; docsMissing: number; mayApply: number; items: { item: SheetItem; state: ItemState; why: string }[] }
 
 export function projectRoute(p: Project): Route | 'unknown' {
   if (p.adu.mode !== 'conversion') return 'new';
@@ -31,16 +32,16 @@ export function readiness(p: Project, rep: Report): Readiness {
       if (rs.some(r => r.status === 'UNKNOWN' || r.status === 'NOT_CHECKED')) return { item, state: (item.mode === 'doc' ? 'docsMissing' : 'needsAnswer') as ItemState, why: 'needs an answer' };
       return { item, state: (item.mode === 'auto' ? 'autoPassed' : 'covered') as ItemState, why: 'checked' };
     }
-    if (item.mode === 'doc') return { item, state: (p.docs[item.id] ? 'covered' : 'docsMissing') as ItemState, why: p.docs[item.id] ? 'attached' : 'not attached' };
+    if (item.mode === 'doc') return { item, state: (p.docs[item.id] ? 'covered' : item.garageRelevant ? 'docsMissing' : 'mayApply') as ItemState, why: p.docs[item.id] ? 'attached' : item.garageRelevant ? 'not attached' : 'may apply: ask your preparer' };
     const a = p.sheet[item.id];
     if (a === 'yes' || a === 'na') return { item, state: 'covered' as ItemState, why: a === 'na' ? 'does not apply' : 'shown on plans' };
     return { item, state: (a === 'no' ? 'failing' : 'needsAnswer') as ItemState, why: a === 'no' ? 'not on plans yet' : 'not answered' };
   });
   const n = (s: ItemState) => items.filter(x => x.state === s).length;
   const covered = n('covered'), autoPassed = n('autoPassed');
-  return { total: items.length, checked: covered + autoPassed, covered, autoPassed, failing: n('failing'), needsAnswer: n('needsAnswer'), docsMissing: n('docsMissing'), items };
+  return { total: items.length, checked: covered + autoPassed, covered, autoPassed, failing: n('failing'), needsAnswer: n('needsAnswer'), docsMissing: n('docsMissing'), mayApply: n('mayApply'), items };
 }
 
 export const scoreLine = (r: Readiness, es = false) => es
-  ? `${r.checked} de ${r.total} puntos de la hoja revisados (${r.autoPassed} automáticos, ${r.covered} cubiertos, ${r.needsAnswer} sin respuesta, ${r.docsMissing} documentos faltan, ${r.failing} por corregir)`
-  : `${r.checked} of ${r.total} sheet items checked (${r.autoPassed} auto-passed, ${r.covered} covered, ${r.needsAnswer} need an answer, ${r.docsMissing} docs missing, ${r.failing} to fix)`;
+  ? `${r.checked} de ${r.total} puntos de la hoja revisados (${r.autoPassed} automáticos, ${r.covered} cubiertos, ${r.needsAnswer} sin respuesta, ${r.docsMissing} documentos faltan, ${r.mayApply} pueden aplicar, ${r.failing} por corregir)`
+  : `${r.checked} of ${r.total} sheet items checked (${r.autoPassed} auto-passed, ${r.covered} covered, ${r.needsAnswer} need an answer, ${r.docsMissing} docs missing, ${r.mayApply} may apply, ${r.failing} to fix)`;
