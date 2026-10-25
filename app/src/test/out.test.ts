@@ -40,8 +40,10 @@ import appPkg from '../../package.json';
 function pdfText(bytes: Uint8Array): string {
   const bin = (u: Uint8Array) => { let r = ''; for (let i = 0; i < u.length; i += 0x8000) r += String.fromCharCode(...u.subarray(i, i + 0x8000)); return r; };
   const s = bin(bytes); let out = '';
-  for (const m of s.matchAll(/stream\r?\n([\s\S]*?)\r?\nendstream/g)) {
-    let body = m[1]; try { const raw = Uint8Array.from(body, c => c.charCodeAt(0)); body = bin(unzlibSync(raw)); } catch { /* not compressed */ }
+  // Read each stream by its /Length (a compressed stream can itself contain the bytes "\nendstream", which made the old
+  // regex cut pages short depending on the date printed on the sheet).
+  for (const m of s.matchAll(/\/Length (\d+)\b[^]*?>>\s*stream\r?\n/g)) {
+    let body = s.slice(m.index! + m[0].length, m.index! + m[0].length + Number(m[1])); try { const raw = Uint8Array.from(body, c => c.charCodeAt(0)); body = bin(unzlibSync(raw)); } catch { /* not compressed */ }
     for (const t of body.matchAll(/<([0-9A-Fa-f]+)>\s*Tj/g)) out += t[1].match(/../g)!.map(h => String.fromCharCode(parseInt(h, 16))).join('') + '\n';
   }
   return out;
