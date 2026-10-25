@@ -3,15 +3,19 @@ import type { Project } from '../core/model';
 import { bbox, clearanceToEdge, translate } from '../core/geom';
 import { fmtFtIn, ft, inch } from '../core/units';
 
-export function Plan({ p, onMove, es = false }: { p: Project; es?: boolean; onMove: (dx: number, dy: number, commit: boolean) => void }) {
+export interface PinView { sel: string | null; onSelect: (id: string | null) => void; placing: string | false; onPlace: (x: number, y: number) => void; zoom: boolean }
+export function Plan({ p, onMove, es = false, pins }: { p: Project; es?: boolean; onMove: (dx: number, dy: number, commit: boolean) => void; pins?: PinView }) {
   const svg = useRef<SVGSVGElement>(null); const drag = useRef<{ x: number; y: number } | null>(null);
   const [live, setLive] = useState('');
   const lot = p.site.lot; const b = bbox(lot); const pad = ft(14);
-  const vb = { x: b.minX - pad, y: b.minY - pad, w: b.maxX - b.minX + pad * 2, h: b.maxY - b.minY + pad * 2 };
+  const full = { x: b.minX - pad, y: b.minY - pad, w: b.maxX - b.minX + pad * 2, h: b.maxY - b.minY + pad * 2 };
   // y up in model -> flip for SVG
   const Y = (y: number) => b.maxY + b.minY - y;
+  // Zoom to the selected review pin (a 30 ft window), so a long comment list maps back to one spot.
+  const zp = pins?.zoom && pins.sel ? p.markup.pins.find(x => x.id === pins.sel) : undefined;
+  const vb = zp ? { x: zp.x - ft(15), y: Y(zp.y) - ft(15), w: ft(30), h: ft(30) } : full;
   const pts = (pl: { x: number; y: number }[]) => pl.map(q => `${q.x},${Y(q.y)}`).join(' ');
-  const s = Math.max(vb.w, vb.h) / 520; // stroke/text unit tuned to on-screen size
+  const s = Math.max(full.w, full.h) / 520; const ps = Math.max(vb.w, vb.h) / 520; // stroke/text unit tuned to on-screen size
   const toModel = (e: React.PointerEvent) => { const m = svg.current!.getScreenCTM()!.inverse(); const pt = new DOMPoint(e.clientX, e.clientY).matrixTransform(m); return { x: pt.x, y: Y(pt.y) }; };
   const fp = p.adu.footprint; const fb = bbox(fp); const fs = Math.min(s * 13, (fb.maxX - fb.minX) / 8);
   const dims = lot.map((a, i) => ({ i, d: clearanceToEdge(fp, lot, i), a, b: lot[(i + 1) % lot.length] }));
@@ -21,7 +25,9 @@ export function Plan({ p, onMove, es = false }: { p: Project; es?: boolean; onMo
     if (m[e.key]) { e.preventDefault(); onMove(m[e.key][0], m[e.key][1], true); say(); }
   };
   return (
-    <svg ref={svg} viewBox={`${vb.x} ${vb.y} ${vb.w} ${vb.h}`} role="group" aria-label={es ? 'Plano del lote. El ADU se puede mover con las flechas cuando está seleccionado.' : 'Site plan. The ADU can be moved with arrow keys when focused.'}>
+    <svg ref={svg} viewBox={`${vb.x} ${vb.y} ${vb.w} ${vb.h}`} role="group" aria-label={es ? 'Plano del lote. El ADU se puede mover con las flechas cuando está seleccionado.' : 'Site plan. The ADU can be moved with arrow keys when focused.'}
+      style={pins?.placing ? { cursor: 'crosshair' } : undefined}
+      onPointerDown={e => { if (!pins?.placing) return; e.preventDefault(); const m = toModel(e); pins.onPlace(m.x, m.y); }}>
       <defs><pattern id="hatch" width={ft(1.2)} height={ft(1.2)} patternUnits="userSpaceOnUse" patternTransform="rotate(45)"><line x1="0" y1="0" x2="0" y2={ft(1.2)} stroke="currentColor" strokeWidth={s * 0.8} opacity=".35" /></pattern></defs>
       <g color="var(--ink)">
         {/* setback band 4 ft inside side/rear lines */}
@@ -43,6 +49,12 @@ export function Plan({ p, onMove, es = false }: { p: Project; es?: boolean; onMo
           onPointerUp={() => { if (drag.current) { onMove(0, 0, true); say(); } drag.current = null; }} />
         <text x={(fb.minX + fb.maxX) / 2} y={Y((fb.minY + fb.maxY) / 2)} fontSize={fs} textAnchor="middle" fontWeight="800" fill="var(--ink)" pointerEvents="none">ADU</text>
         <text x={(fb.minX + fb.maxX) / 2} y={Y((fb.minY + fb.maxY) / 2) + fs * 1.3} fontSize={fs * 0.8} textAnchor="middle" fill="var(--ink)" pointerEvents="none">{fmtFtIn(fb.maxX - fb.minX)} x {fmtFtIn(fb.maxY - fb.minY)}</text>
+        {p.adu.rooms.map(r => { const ob = bbox(fp); return <polygon key={r.id} points={pts(translate(r.poly, ob.minX, ob.minY))} fill="none" stroke="var(--pencil)" strokeWidth={s * 0.9} pointerEvents="none" />; })}
+        {pins && p.markup.pins.map(x => { const sel = x.id === pins.sel; const r = ps * (sel ? 13 : 10);
+          return <g key={x.id} role="button" tabIndex={0} aria-pressed={sel} aria-label={`${es ? 'Nota' : 'Note'} ${x.n}, ${x.status === 'open' ? (es ? 'abierta' : 'open') : (es ? 'resuelta' : 'resolved')}: ${x.comment || (es ? 'sin texto' : 'no text')}`}
+            style={{ cursor: 'pointer' }} onPointerDown={e => { if (pins.placing) return; e.stopPropagation(); pins.onSelect(sel ? null : x.id); }} onKeyDown={e => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); pins.onSelect(sel ? null : x.id); } }}>
+            <circle cx={x.x} cy={Y(x.y)} r={r} fill={x.status === 'open' ? 'var(--fix)' : 'var(--pass)'} stroke={sel ? 'var(--focus)' : 'var(--sheet)'} strokeWidth={ps * (sel ? 4 : 2)} />
+            <text x={x.x} y={Y(x.y) + r * 0.38} fontSize={r * 1.1} textAnchor="middle" fill="#fff" fontWeight="800" pointerEvents="none">{x.n}</text></g>; })}
       </g>
       <desc aria-live="polite">{live}</desc>
     </svg>

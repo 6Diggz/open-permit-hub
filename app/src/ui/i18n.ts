@@ -2,7 +2,7 @@ export type Lang = 'en' | 'es';
 const D = {
   app: ['Garage to ADU check', 'Revisión de garaje a ADU'],
   tagline: ['Check an LA garage conversion against the rules before you pay for drawings.', 'Revise una conversión de garaje en LA antes de pagar por planos.'],
-  steps: [['Lot', 'Garage', 'Rooms', 'Checks', 'Export'], ['Lote', 'Garaje', 'Cuartos', 'Revisión', 'Exportar']],
+  steps: [['Lot', 'Garage', 'Rooms', 'Checks', 'Export', 'Review'], ['Lote', 'Garaje', 'Cuartos', 'Revisión', 'Exportar', 'Notas']],
   demo: ['Try the demo lot', 'Probar el lote de ejemplo'],
   start: ['Start my project', 'Empezar mi proyecto'],
   undo: ['Undo', 'Deshacer'], redo: ['Redo', 'Rehacer'],

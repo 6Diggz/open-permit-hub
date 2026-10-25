@@ -4,6 +4,8 @@ import { MM_PER_IN, fmtFtIn } from '../core/units';
 import { bbox, clearanceToEdge, gap } from '../core/geom';
 import { PACK_ID } from '../rules/pack';
 import { cleanfix } from './wasm';
+import { roomAbs, roomArea, roomSize, wallPoint } from '../core/rooms';
+import { fmtSqFt } from '../core/units';
 
 const IN = (mm: number) => +(mm / MM_PER_IN).toFixed(4);
 const pt = (q: { x: number; y: number }) => [IN(q.x), IN(q.y)];
@@ -34,12 +36,22 @@ export function sitePlanSpec(p: Project): SitePlanSpec {
     const [y1, y2] = hb.maxY <= ab.minY ? [hb.maxY, ab.minY] : ab.maxY <= hb.minY ? [ab.maxY, hb.minY] : [NaN, NaN];
     if (Number.isFinite(y1) && x >= Math.max(hb.minX, ab.minX)) s.dims.push({ layer: 'A-ANNO-DIMS', a: pt({ x, y: y1 }), b: pt({ x, y: y2 }), offset: 24, text: '<> BUILDING SEPARATION' });
   }
+  // Rooms (A-AREA outlines, A-AREA-IDEN names/sizes), doors (A-DOOR) and windows (A-GLAZ) as thin closed outlines in the wall.
+  for (const r of p.adu.rooms) {
+    const abs = roomAbs(p, r); s.outlines.push({ layer: 'A-AREA', pts: abs.map(pt) }); const rb = bbox(abs); const z = roomSize(r);
+    s.texts.push({ layer: 'A-AREA-IDEN', x: IN((rb.minX + rb.maxX) / 2) - 24, y: IN((rb.minY + rb.maxY) / 2) + 6, h: 6, text: (r.name || 'ROOM').toUpperCase() });
+    s.texts.push({ layer: 'A-AREA-IDEN', x: IN((rb.minX + rb.maxX) / 2) - 24, y: IN((rb.minY + rb.maxY) / 2) - 4, h: 4, text: `${fmtFtIn(z.w)} x ${fmtFtIn(z.d)}  ${fmtSqFt(roomArea(r))}${z.taped ? ' (TAPE)' : ''}` });
+    for (const o of r.openings) { const w = wallPoint(abs, o.wall, o.offsetMm); const e = { x: w.x + w.ux * o.widthMm, y: w.y + w.uy * o.widthMm }; const t = 40, nx = -w.uy * t, ny = w.ux * t;
+      s.outlines.push({ layer: o.kind === 'door' ? 'A-DOOR' : 'A-GLAZ', pts: [w, e, { x: e.x + nx, y: e.y + ny }, { x: w.x + nx, y: w.y + ny }].map(pt) }); }
+  }
+  // Review pins (G-ANNO-REDL): "[n] comment" at the pin.
+  for (const x of p.markup.pins) s.texts.push({ layer: 'G-ANNO-REDL', x: IN(x.x), y: IN(x.y), h: 8, text: `[${x.n}${x.status === 'resolved' ? ' RESOLVED' : ''}] ${x.comment}`.slice(0, 250) });
   const se = p.site.streetEdge, a = lot[se], b = lot[(se + 1) % lot.length];
   const street = streetName(p.site.address);
   s.texts.push({ layer: 'G-ANNO-TEXT', x: IN((a.x + b.x) / 2) - 60, y: IN((a.y + b.y) / 2) - 90, h: 14, text: street ? `STREET: ${street.toUpperCase()}` : 'STREET' });
   const lab = (pl: Poly, t: string) => { const bb = bbox(pl); s.texts.push({ layer: 'G-ANNO-TEXT', x: IN((bb.minX + bb.maxX) / 2) - t.length * 3, y: IN((bb.minY + bb.maxY) / 2), h: 10, text: t }); };
   lab(p.site.primary, 'EXISTING HOUSE'); lab(fp, p.adu.mode === 'conversion' ? 'GARAGE CONVERSION (ADU)' : 'ADU');
-  s.texts.push({ layer: 'G-ANNO-TEXT', x: IN(lot[0].x), y: IN(lot[0].y) - 150, h: 10, text: `${p.site.address || 'Address'}  APN ${p.site.apn || '-'}  UNITS: INCHES  ${PACK_ID}  DRAFT - verify all dimensions` });
+  s.texts.push({ layer: 'G-ANNO-TEXT', x: IN(lot[0].x), y: IN(lot[0].y) - 150, h: 10, text: `${p.site.address || 'Address'}  APN ${p.site.apn || '-'}${p.site.zone ? '  ZONE ' + p.site.zone : ''}  UNITS: INCHES  ${PACK_ID}  DRAFT - verify all dimensions` });
   s.texts.push({ layer: 'G-ANNO-TEXT', x: IN(lot[0].x), y: IN(lot[0].y) - 172, h: 8, text: `Prepared by ${p.people.preparerName || '-'} (${p.people.preparerRole})${p.people.preparerLicense ? ' Lic. ' + p.people.preparerLicense : ''}. Made with Open Permit Hub software; the software is not the preparer.` });
   return s;
 }
@@ -58,7 +70,7 @@ export const dxfText = (s: string) => s.replace(/[\r\n\t]/g, ' ').replace(/[^\x2
 export function toDXFR12(p: Project): string {
   const spec = sitePlanSpec(p);
   const o: string[] = []; const w = (c: number, v: string | number) => o.push(String(c), String(v));
-  const layers: [string, number][] = [['C-PROP', 7], ['A-EXST-BLDG', 8], ['A-ADU-WALL', 1], ['C-PROP-SETB', 3], ['A-ANNO-DIMS', 5], ['G-ANNO-TEXT', 7]];
+  const layers: [string, number][] = [['C-PROP', 7], ['A-EXST-BLDG', 8], ['A-ADU-WALL', 1], ['C-PROP-SETB', 3], ['A-ANNO-DIMS', 5], ['G-ANNO-TEXT', 7], ['A-AREA', 4], ['A-AREA-IDEN', 4], ['A-DOOR', 2], ['A-GLAZ', 5], ['G-ANNO-REDL', 1]];
   w(0, 'SECTION'); w(2, 'HEADER'); w(9, '$ACADVER'); w(1, 'AC1009'); w(9, '$INSBASE'); w(10, 0); w(20, 0); w(30, 0); w(0, 'ENDSEC');
   w(0, 'SECTION'); w(2, 'TABLES'); w(0, 'TABLE'); w(2, 'LAYER'); w(70, layers.length);
   layers.forEach(([n, c]) => { w(0, 'LAYER'); w(2, n); w(70, 0); w(62, c); w(6, 'CONTINUOUS'); });

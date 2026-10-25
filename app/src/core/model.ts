@@ -9,6 +9,23 @@ export type Tri = 'yes' | 'no' | 'unknown';
 export type Role = 'owner' | 'drafter' | 'contractor' | 'architect' | 'engineer';
 export type Mode = 'conversion' | 'youadu';
 
+export type RoomUse = 'sleeping' | 'living' | 'bath' | 'kitchen';
+export const ROOM_USES: RoomUse[] = ['sleeping', 'living', 'kitchen', 'bath'];
+/** A door or window on one wall of a room. Window sizes are the clear opening (what escape rules measure). */
+export interface Opening { id: string; kind: 'door' | 'window'; wall: number; offsetMm: number; widthMm: number; heightMm: number | null; sillMm: number | null }
+/**
+ * A room drawn inside the garage footprint. `poly` is in mm relative to the footprint's lower-left corner (so moving the ADU
+ * moves its rooms). `tape` holds tape-measured sizes; when set they override the drawn size (rectangle rooms only).
+ */
+export interface Room { id: string; name: string; use: RoomUse; shape: 'rect' | 'poly'; poly: Poly; tape: { w: number | null; d: number | null }; ceilingMm: number | null; openings: Opening[] }
+export type PinStatus = 'open' | 'resolved';
+/** A numbered review pin on the site plan (model mm). Travels inside the .permitpack, so a reviewer needs no account. */
+export interface Pin { id: string; n: number; x: number; y: number; comment: string; status: PinStatus; author: string; at: string; ref?: string }
+/** One item of a city correction letter, answered as a checklist response. */
+export interface Response { id: string; ref: string; text: string; response: string; sheet: string; done: boolean; pinId?: string }
+/** Where parcel values came from. `fromMap` lists fields still holding the map's value (removed when the user edits one). */
+export interface ParcelInfo { at: string; matched: string; cityName: string; fromMap: string[]; failed: string[]; pin: string }
+
 export interface Window { id: string; room: string; sleeping: boolean; clearWidthMm: number | null; clearHeightMm: number | null; sillMm: number | null; gradeFloor: boolean }
 export interface Project {
   format: typeof FORMAT; version: number; id: string; createdAt: string; updatedAt: string;
@@ -20,6 +37,9 @@ export interface Project {
     address: string; apn: string; jurisdiction: 'la-city' | 'la-county' | 'other' | 'unknown';
     lotSource: 'manual' | 'gis' | 'survey'; lotUncertaintyMm: number;
     lot: Poly; streetEdge: number; // index of lot edge facing street
+    /** Zoning from the city map (e.g. R1-1), or typed by the user. */
+    zone: string;
+    parcel: ParcelInfo | null;
     /** Main building on the lot (sheet II-C is for an existing single-family dwelling only). */
     mainBuilding: 'sfd' | 'duplex' | 'multifamily' | 'unknown';
     /** ADUs and JADUs already on the lot, permitted or not (sheet II-C.5 unit mix). */
@@ -63,7 +83,10 @@ export interface Project {
     garageConstruction: 'wood' | 'masonry' | 'concrete' | 'unknown';
     /** 1-hour rated eave underside where an eave is 2-5 ft from the line (LARC Table R302.1(1)). Separate from the wall rating. */
     ratedEaveUndersidePlanned: Tri;
+    /** Rooms drawn inside the footprint (Rooms step). When there are rooms, bedrooms and escape windows come from them. */
+    rooms: Room[];
   };
+  markup: { pins: Pin[]; responses: Response[] };
   /** Answers to correction-sheet "ask" items: yes = shown on plans / handled, no = not yet, na = does not apply. */
   sheet: Record<string, 'yes' | 'no' | 'na'>;
   /** Correction-sheet "doc" items the user has attached. */
@@ -104,7 +127,7 @@ export function blankProject(): Project {
     name: 'My garage conversion', applicationDate: null, rulePack: PACK_ID,
     site: {
       address: '', apn: '', jurisdiction: 'unknown', lotSource: 'manual', lotUncertaintyMm: ft(2),
-      lot: rect(0, 0, ft(50), ft(130)), streetEdge: 0, mainBuilding: 'unknown', existingAdus: null, existingJadus: null,
+      lot: rect(0, 0, ft(50), ft(130)), streetEdge: 0, zone: '', parcel: null, mainBuilding: 'unknown', existingAdus: null, existingJadus: null,
       primary: rect(ft(10), ft(20), ft(30), ft(45)), primaryHeightMm: ft(16), otherBuildings: 'unknown', otherBuildingGapMm: null,
       flags: { hillside: 'unknown', vhfhsz: 'unknown', hpoz: 'unknown', coastal: 'unknown', methane: 'unknown', fireRebuild: 'unknown', transitHalfMile: 'unknown', easementsKnown: 'unknown', anyUnitRented: 'unknown', primarySprinklered: 'unknown', slopeOver10: 'unknown', dwpEasement10ft: 'unknown' },
     },
@@ -115,8 +138,9 @@ export function blankProject(): Project {
       roofPitchMatches: 'unknown', windows: [], bedrooms: 1, smokeCoPlanned: 'unknown', allElectric: 'unknown',
       garageAttachment: 'unknown', staysInsideWalls: 'unknown', addedForIngressOnly: 'unknown', legalization: false,
       slabVaporBarrier: 'unknown', openingsNearLine: 'unknown', smokeHardwired: 'unknown', panelAmps: null, separateGasMeter: 'unknown',
-      floorPlanSideSetbackMm: null, floorPlanRearSetbackMm: null, garageConstruction: 'unknown', ratedEaveUndersidePlanned: 'unknown',
+      floorPlanSideSetbackMm: null, floorPlanRearSetbackMm: null, garageConstruction: 'unknown', ratedEaveUndersidePlanned: 'unknown', rooms: [],
     },
+    markup: { pins: [], responses: [] },
     sheet: {}, docs: {},
     people: { ownerName: '', preparerRole: 'owner', preparerName: '', preparerLicense: '', language: 'en', engineerName: '' },
     modules: Object.fromEntries(MODULES.map(m => [m.id, true])),

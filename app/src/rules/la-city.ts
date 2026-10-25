@@ -3,6 +3,7 @@ import type { Project, Tri } from '../core/model';
 import { area, clearanceToEdge, gap, polyInside } from '../core/geom';
 import { ft, fmtFtIn, inch, isNum, toSqFt, RANGES } from '../core/units';
 import { PACK, PACK_ID, LA_ED, packFreshness } from './pack';
+import { applyTape, footLocal, openingProblems, roomArea, roomCeiling, roomFits, roomMinDim } from '../core/rooms';
 
 export { PACK_ID };
 const SHEET_URL = PACK.sheet.url;
@@ -205,9 +206,38 @@ export const RULES: Rule[] = [
 
   { id: 'CEI-01', version: '1', module: 'egress', severity: 'major', kind: 'city', hs: true, effectiveFrom: EFF, applies: all,
     title: t('Ceiling height in living areas', 'Altura del techo en áreas habitables'), cites: [{ code: 'LARC R305.1 (7\'-0" minimum; LADBS sheet III-G.1)', url: SHEET_URL, verified: true, edition: LAED }],
-    check: p => !fin(p.adu.ceilingHeightMm) ? unk('Ceiling height not entered.', 'Altura del techo no ingresada.', 'Measure floor to ceiling in the main room.', 'Mida del piso al techo en el cuarto principal.')
+    check: p => {
+      // Drawn rooms: every room is checked with its own ceiling (or the garage's). Bathrooms may be 6' 8" (R305.1 exception).
+      if (p.adu.rooms?.length) {
+        const low: string[] = [], none: string[] = [];
+        p.adu.rooms.forEach((r, i) => { const c = roomCeiling(p, r); const nm = safeName(r.name) || `room ${i + 1}`; const need = r.use === 'bath' ? inch(80) : inch(84);
+          if (!fin(c)) none.push(nm); else if (c < need) low.push(`${nm} ${fmtFtIn(c)} (need ${fmtFtIn(need)})`); });
+        if (low.length) return fail(`Ceiling too low in ${low.join('; ')}.`, `Techo demasiado bajo en ${low.join('; ')}.`, 'Garages often fail here once insulation and drywall go in. Plan for the finished height.', 'Los garajes suelen fallar aquí después del aislamiento y el panel de yeso. Planifique la altura terminada.');
+        if (none.length) return unk(`Ceiling height not entered for ${none.join(', ')}.`, `Falta la altura del techo en ${none.join(', ')}.`, 'Measure floor to ceiling in each room, or enter the garage ceiling height.', 'Mida del piso al techo en cada cuarto, o ingrese la altura del techo del garaje.');
+        return pass('Every room meets the ceiling height (7\' 0", bathrooms 6\' 8").', 'Cada cuarto cumple la altura del techo (7\' 0", baños 6\' 8").');
+      }
+      return !fin(p.adu.ceilingHeightMm) ? unk('Ceiling height not entered.', 'Altura del techo no ingresada.', 'Measure floor to ceiling in the main room.', 'Mida del piso al techo en el cuarto principal.')
       : p.adu.ceilingHeightMm >= inch(84) ? pass(`Ceiling ${fmtFtIn(p.adu.ceilingHeightMm)} (need 7' 0").`, `Techo de ${fmtFtIn(p.adu.ceilingHeightMm)} (se necesitan 7' 0").`)
-      : fail(`Ceiling ${fmtFtIn(p.adu.ceilingHeightMm)} is under 7' 0".`, `El techo de ${fmtFtIn(p.adu.ceilingHeightMm)} mide menos de 7' 0".`, 'Garages often fail here once insulation and drywall go in. Plan for the finished height.', 'Los garajes a menudo no cumplen aquí una vez que se ponen el aislamiento y los paneles. Planifique la altura terminada.') },
+      : fail(`Ceiling ${fmtFtIn(p.adu.ceilingHeightMm)} is under 7' 0".`, `El techo de ${fmtFtIn(p.adu.ceilingHeightMm)} mide menos de 7' 0".`, 'Garages often fail here once insulation and drywall go in. Plan for the finished height.', 'Los garajes a menudo no cumplen aquí una vez que se ponen el aislamiento y los paneles. Planifique la altura terminada.');
+    } },
+
+  { id: 'ROM-01', version: '1', module: 'egress', severity: 'major', kind: 'city', hs: true, effectiveFrom: EFF, applies: p => (p.adu.rooms?.length ?? 0) > 0,
+    title: t('Room sizes and room drawing', 'Tamaño de los cuartos y dibujo'), cites: [{ code: 'LARC R304.1, R304.2 (habitable rooms at least 70 sq ft and 7 ft in any direction; kitchens exempt)', verified: false, edition: LAED }, { code: 'LADBS sheet III-G.8 (interior doors at least 32" wide)', url: SHEET_URL, verified: true, edition: LAED }],
+    check: p => {
+      const foot = footLocal(p); const out: string[] = [], small: string[] = [], bad: string[] = [];
+      p.adu.rooms.forEach((r, i) => { const nm = safeName(r.name) || `room ${i + 1}`;
+        if (!roomFits(r.shape === 'rect' ? applyTape(r).poly : r.poly, foot)) out.push(nm);
+        if (openingProblems(r).length) bad.push(nm);
+        if (r.use === 'sleeping' || r.use === 'living') { const a = toSqFt(roomArea(r)), m = roomMinDim(r); if (a < 70 || m < ft(7)) small.push(`${nm} (${Math.round(a)} sq ft, narrowest ${fmtFtIn(m)})`); } });
+      if (out.length) return fail(`Drawn outside the garage outline: ${out.join(', ')}.`, `Dibujado fuera del contorno del garaje: ${out.join(', ')}.`, 'Move or resize the room inside the garage, or check the garage size and the tape sizes.', 'Mueva o cambie el tamaño del cuarto dentro del garaje, o revise el tamaño del garaje y las medidas con cinta.');
+      if (small.length) return fail(`Too small for a living or sleeping room: ${small.join('; ')}.`, `Demasiado pequeño para sala o dormitorio: ${small.join('; ')}.`, 'Habitable rooms need 70 sq ft and 7 ft across. Make it bigger, or call it a different use.', 'Los cuartos habitables necesitan 70 pies² y 7 pies de ancho. Hágalo más grande o cambie su uso.');
+      const doors = p.adu.rooms.flatMap(r => r.openings.filter(o => o.kind === 'door').map(o => ({ r, o })));
+      const narrow = doors.filter(x => x.o.widthMm < inch(32) - 0.5).map(x => `${safeName(x.r.name) || 'room'} ${fmtFtIn(x.o.widthMm)}`);
+      if (narrow.length) return fail(`Door narrower than 32": ${narrow.join(', ')}.`, `Puerta de menos de 32": ${narrow.join(', ')}.`, 'Use doors at least 32" wide (the door slab size, like 2-8).', 'Use puertas de al menos 32" de ancho (tamaño de la hoja, como 2-8).');
+      if (bad.length) return unk(`A door or window does not fit its wall in ${bad.join(', ')}.`, `Una puerta o ventana no cabe en su muro en ${bad.join(', ')}.`, 'Check where each door and window starts and how wide it is.', 'Revise dónde empieza cada puerta y ventana y su ancho.');
+      if (!doors.length) return unk('No doors drawn yet.', 'Aún no hay puertas dibujadas.', 'Add the doors to the rooms so door widths can be checked.', 'Agregue las puertas a los cuartos para revisar su ancho.');
+      return pass('Rooms fit inside the garage, are big enough, and doors are at least 32" wide.', 'Los cuartos caben en el garaje, tienen el tamaño suficiente y las puertas miden al menos 32".');
+    } },
 
   { id: 'EGR-01', version: '3', module: 'egress', severity: 'critical', kind: 'city', hs: true, effectiveFrom: EFF, applies: all,
     title: t('Escape window in each sleeping room', 'Ventana de escape en cada cuarto para dormir'), cites: [{ code: 'LARC R310.1, R310.2 (every sleeping room; 5.7 sq ft net clear; 5.0 at grade; 24" high; 20" wide; 44" max to bottom; LADBS sheet III-F.1)', url: SHEET_URL, verified: true, edition: LAED }],

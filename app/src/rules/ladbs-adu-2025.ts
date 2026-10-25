@@ -234,7 +234,7 @@ export const RULE_ITEMS: Record<string, string[]> = {
   'GEO-01': ['I.A.1', 'I.C.7'], 'INP-01': ['I.A.1', 'I.C.7'], 'JUR-01': ['I.C.2'], 'REV-01': ['I.A.1'],
   'GAR-01': ['II.C.2', 'II.G.2', 'I.C.10'], 'SCP-01': ['II.C.3', 'II.C.4'], 'MIX-01': ['II.C.1', 'II.C.5', 'II.G.1', 'II.G.3'], 'ADD-01': ['II.C.3', 'II.C.4'],
   'SET-01': ['I.C.10', 'II.K.1'], 'SET-02': ['II.D.4'], 'SET-03': ['I.C.7'], 'SEP-01': ['III.D.1'], 'HGT-01': ['II.D.3'],
-  'CEI-01': ['III.G.1', 'III.F.14'], 'EGR-01': ['III.F.1'], 'ALM-01': ['III.E.1', 'III.E.3', 'III.I.9'], 'ALM-02': ['III.E.2'],
+  'CEI-01': ['III.G.1', 'III.F.14'], 'EGR-01': ['III.F.1'], 'ROM-01': ['III.G.8'], 'ALM-01': ['III.E.1', 'III.E.3', 'III.I.9'], 'ALM-02': ['III.E.2'],
   'FIR-01': ['III.D.1', 'III.D.2', 'III.A.5'], 'FIR-02': ['III.D.4', 'III.A.5'], 'SPK-01': ['III.E.4', 'III.I.7'], 'ACC-01': ['I.B.7'],
   'ENG-01': ['III.J.7', 'III.J.3'], 'VAP-01': ['III.J.1'],
   'HAZ-01': ['II.K.14'], 'HAZ-02': ['I.C.4'], 'HAZ-03': ['I.B.9'], 'HAZ-04': ['I.B.1', 'III.J.1'], 'HAZ-05': ['I.B.1'],

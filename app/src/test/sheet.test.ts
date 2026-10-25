@@ -8,6 +8,11 @@ import { ES } from '../ui/es';
 import { ft, inch } from '../core/units';
 import { rect } from '../core/geom';
 import appSrc from '../ui/App.tsx?raw';
+import roomsSrc from '../ui/Rooms.tsx?raw';
+import roomPlanSrc from '../ui/RoomPlan.tsx?raw';
+import reviewSrc from '../ui/Review.tsx?raw';
+import parcelSrc from '../ui/ParcelLookup.tsx?raw';
+import fieldsSrc from '../ui/fields.tsx?raw';
 
 const st = (p: Project, id: string) => evaluate(p, RULES, PACK_ID, new Date('2026-10-24')).results.find(r => r.rule.id === id)?.status;
 const demo = () => { const p = demoProject(); p.site.apn = '1111-111-111'; return p; };
@@ -88,7 +93,7 @@ describe('fees (2026) and AB 2533', () => {
 
 describe('Spanish strings', () => {
   it('every L("...") label in the app has a Spanish entry', () => {
-    const src: string = appSrc;
+    const src: string = [appSrc, roomsSrc, roomPlanSrc, reviewSrc, parcelSrc, fieldsSrc].join('\n');
     const keys = [...src.matchAll(/\bL\("((?:[^"\\]|\\.)*)"\)/g)].map(m => JSON.parse(`"${m[1]}"`));
     // single-quoted L('...') too (round 1: these were not checked, so Spanish mode leaked English)
     keys.push(...[...src.matchAll(/\bL\('((?:[^'\\]|\\.)*)'\)/g)].map(m => m[1].replace(/\\'/g, "'")));
