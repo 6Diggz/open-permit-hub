@@ -52,10 +52,16 @@ export function clearanceToEdge(inner: Poly, outer: Poly, edge: number): number 
   return Math.min(...edges(inner).map(([p, q]) => segSegDist(p, q, a, b)));
 }
 /** Every vertex inside and no edge of `inner` crosses an edge of `outer` (catches a lot corner cutting through). */
+/** True when the point lies on the polygon's outline (within tol mm). */
+export const onOutline = (p: Pt, poly: Poly, tol = 1) => edges(poly).some(([a, b]) => segDist(p, a, b) <= tol);
+/** Inner lies within outer. Touching the outline counts as inside (a garage built on the lot line is on the lot). */
 export function polyInside(inner: Poly, outer: Poly) {
-  if (!inner.every(p => inside(p, outer))) return false;
+  const inOrOn = (p: Pt, poly: Poly) => onOutline(p, poly) || inside(p, poly);
+  if (!inner.every(p => inOrOn(p, outer))) return false;
+  // Edge midpoints catch an edge that leaves and re-enters between two boundary vertices.
+  if (!edges(inner).every(([p, q]) => inOrOn({ x: (p.x + q.x) / 2, y: (p.y + q.y) / 2 }, outer))) return false;
   for (const [p, q] of edges(inner)) for (const [r, s] of edges(outer)) if (segmentsCross(p, q, r, s)) return false;
-  return !outer.some(p => inside(p, inner));
+  return !outer.some(p => inside(p, inner) && !onOutline(p, inner));
 }
 /** True when the two shapes share any area (edge crossing, or one inside the other). */
 export function overlaps(a: Poly, b: Poly): boolean {

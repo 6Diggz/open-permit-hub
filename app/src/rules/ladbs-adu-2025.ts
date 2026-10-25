@@ -237,7 +237,7 @@ export const RULE_ITEMS: Record<string, string[]> = {
   'CEI-01': ['III.G.1', 'III.F.14'], 'EGR-01': ['III.F.1'], 'ROM-01': ['III.G.8'], 'ALM-01': ['III.E.1', 'III.E.3', 'III.I.9'], 'ALM-02': ['III.E.2'],
   'FIR-01': ['III.D.1', 'III.D.2', 'III.A.5'], 'FIR-02': ['III.D.4', 'III.A.5'], 'SPK-01': ['III.E.4', 'III.I.7'], 'ACC-01': ['I.B.7'],
   'ENG-01': ['III.J.7', 'III.J.3'], 'VAP-01': ['III.J.1'],
-  'HAZ-01': ['II.K.14'], 'HAZ-02': ['I.C.4'], 'HAZ-03': ['I.B.9'], 'HAZ-04': ['I.B.1', 'III.J.1'], 'HAZ-05': ['I.B.1'],
+  'HAZ-01': ['II.K.14'], 'WUI-01': ['I.C.8'], 'HAZ-02': ['I.C.4'], 'HAZ-03': ['I.B.9'], 'HAZ-04': ['I.B.1', 'III.J.1'], 'HAZ-05': ['I.B.1'],
   'ESM-01': ['I.C.7', 'I.B.8'], 'DWP-01': ['I.B.8'], 'PRK-01': ['II.K.3'], 'FEE-01': ['I.B.1', 'FM.1'],
   'NRG-01': ['III.H.9'], 'GAS-01': ['III.I.1', 'III.I.3'], 'PNL-01': ['I.A.3'], 'LEG-01': ['I.C.10'],
   'OWN-01': ['I.A.4'], 'RSO-01': ['I.B.10'], 'CLK-01': ['N.2'],

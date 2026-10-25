@@ -37,6 +37,7 @@ export interface Project {
     address: string; apn: string; jurisdiction: 'la-city' | 'la-county' | 'other' | 'unknown';
     lotSource: 'manual' | 'gis' | 'survey'; lotUncertaintyMm: number;
     lot: Poly; streetEdge: number; // index of lot edge facing street
+    /** Other lot edges on a street or alley (a corner lot's side street, a rear alley). */ streetEdges?: number[];
     /** Zoning from the city map (e.g. R1-1), or typed by the user. */
     zone: string;
     parcel: ParcelInfo | null;

@@ -50,6 +50,7 @@ export function migrate(raw: any): Project {
   if (!okPoly(out.site.primary)) { out.site.primary = base.site.primary; out.confirmed.house = false; notes.push('house size and position'); }
   if (!okPoly(out.adu.footprint)) { out.adu.footprint = base.adu.footprint; out.confirmed.adu = false; notes.push('garage size and position'); }
   if (!Number.isInteger(out.site.streetEdge) || out.site.streetEdge < 0 || out.site.streetEdge >= out.site.lot.length) out.site.streetEdge = 0;
+  out.site.streetEdges = Array.isArray(out.site.streetEdges) ? [...new Set(out.site.streetEdges.filter((i: unknown) => Number.isInteger(i) && (i as number) >= 0 && (i as number) < out.site.lot.length))].slice(0, 4) as number[] : [];
   // Numbers: finite and in range, or reset.
   const fix = <T,>(label: string, v: any, ok: (x: any) => boolean, dflt: T): T => { if (v === null || v === undefined) return dflt; if (ok(v)) return v; notes.push(label); return dflt; };
   const len = (x: any) => isNum(x) && x >= 0 && x <= MAX_LEN_MM;
