@@ -2,6 +2,12 @@
 
 Check an LA garage conversion against cited rules before you pay for drawings. Free, runs on your device, no account. **Not a city approval.**
 
+**Try it:** https://6diggz.github.io/open-permit-hub/ (English and Español, works offline once loaded)
+
+![Drag the ADU off the property line and watch the fire-wall check go green](docs/demo.gif)
+
+Every result names the code section behind it. Unknown answers never show as a pass. Turning a check off prints "not checked" on every export.
+
 ## What's in here
 | Folder | What it is |
 |---|---|
