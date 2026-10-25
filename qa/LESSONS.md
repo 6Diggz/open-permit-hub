@@ -6,3 +6,6 @@
 - R3: Seats rebuilding app/dist broke other seats' offline tests. Each agent tests a frozen copy of dist on its own port.
 - R3: A "needs Diggz" call (bath ceiling) was answerable from the primary source. Check the source before escalating.
 - R3: Golden cases (13 hand-derived lots) found the highest-value bugs. Grow this suite each round.
+- R3: Lane B finished 21 items in about 70 min, about 3x lane A's early rate. Splitting by file area works. Seat tests that point at fixtures outside the repo, or at local-only tools (pymupdf), broke CI. Seats must vendor fixtures and use repo helpers only.
+- R4: Re-deriving the previous round's rule changes found 1 regression and an overstating plain answer. Every new user-facing claim ("Likely yes") needs a dedicated adversarial seat. Golden suite grew 13 to 49 cases.
+- R4: Round 3's font fix silently broke the 'fi' ligature in PDF text. Add a text-layer round-trip test whenever fonts or exports change.
