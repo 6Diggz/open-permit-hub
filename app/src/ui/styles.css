@@ -150,5 +150,8 @@ label.btn[aria-disabled="true"] { opacity: .45; cursor: progress; }
 .fm-hc .lead, .fm-hc .cite, .fm-hc .help, .fm-hc .fm-group, .fm-hc .tri button:not([aria-pressed="true"]) { color: var(--ink); }
 @media not (prefers-color-scheme: dark) { :root:not([data-theme="dark"]) .fm-hc { --pass: #145a38; --fix: #8c1b12; --info-need: #6a4405; --info-text: #6a4405; } }
 :root[data-theme="light"] .fm-hc { --pass: #145a38; --fix: #8c1b12; --info-need: #6a4405; --info-text: #6a4405; }
+/* r7-04: dark theme keeps its text tokens, but the pressed Pass / Fail fills (white text) use the same AAA fills as light: 8.24:1 / 9.21:1. */
+.fm-hc .fm-result button[data-s="pass"][aria-pressed="true"] { background: #145a38; }
+.fm-hc .fm-result button[data-s="fail"][aria-pressed="true"] { background: #8c1b12; }
 .fm-hc .btn, .fm-hc .fm-big, .fm-hc input, .fm-hc select, .fm-hc .tri button { min-height: 56px; min-width: 56px; }
 .fm-hc .field input, .fm-hc .field select { font-size: 1.05rem; }

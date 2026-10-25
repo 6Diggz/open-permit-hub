@@ -73,7 +73,10 @@ export function sanitizeInspection(raw: unknown): Inspection | undefined {
   if (!raw || typeof raw !== 'object') return undefined; const r = raw as any;
   const items: Record<string, InspResult> = {};
   const src = r.items && typeof r.items === 'object' ? r.items : {};
-  for (const x of INSP_ITEMS) { const v = src[x.id]; if (!v || typeof v !== 'object') continue;
+  for (const x of INSP_ITEMS) { let v = src[x.id]; if (!v || typeof v !== 'object') continue;
+    // r7-05: before r6 the override reason was appended to the note as "Reason for Pass: ..." / "Motivo de Cumple: ..."; lift it into reason.
+    if (!(typeof v.reason === 'string' && v.reason.trim()) && typeof v.note === 'string') { const m = v.note.match(/(?:^|\n)(?:Reason for Pass|Motivo de Cumple):\s*([^\n]+)\s*$/);
+      if (m) v = { ...v, reason: m[1], note: v.note.slice(0, m.index).trim() }; }
     items[x.id] = { s: v.s === 'pass' || v.s === 'fail' || v.s === 'na' ? v.s : null, note: str(v.note, MAX_NOTE), photo: typeof v.photo === 'string' && PHOTO_ID.test(v.photo) ? v.photo : null, at: str(v.at, 40), ...(typeof v.reason === 'string' && v.reason.trim() ? { reason: str(v.reason, 300) } : {}) }; }
   return { inspector: str(r.inspector, 80), date: /^\d{4}-\d{2}-\d{2}$/.test(r.date) ? r.date : today(), general: str(r.general, MAX_NOTE * 2), items };
 }
