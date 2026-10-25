@@ -171,3 +171,8 @@ label.btn[aria-disabled="true"] { opacity: .45; cursor: progress; }
 /* English rule text, sheet items and citations inside an RTL page keep their own direction (no "on the garage side." flipped). */
 [dir="rtl"] :is(p, label, li, summary, h2, h3, td, th, .help, .title, .sub, .verdict) { unicode-bidi: plaintext; }
 .pw-loading { position: fixed; inset: 0; display: grid; place-items: center; color: var(--pencil); background: var(--desk); }
+/* Guided/Pro segmented control (same control as the Pro workspace header). */
+.seg-mode { display: inline-flex; border: 1px solid var(--line, #d0d0cc); border-radius: 6px; overflow: hidden; }
+.seg-mode button { border: 0; background: transparent; padding: 6px 12px; color: inherit; font: inherit; cursor: pointer; min-height: 32px; }
+.seg-mode button + button { border-left: 1px solid var(--line, #d0d0cc); }
+.seg-mode button[aria-pressed="true"] { font-weight: 700; background: var(--faint, rgba(0,0,0,.06)); }

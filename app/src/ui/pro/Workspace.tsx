@@ -48,6 +48,7 @@ const ICONS: Record<string, string> = {
   move: 'M8 2v12M2 8h12M8 2l-2 2M8 2l2 2M8 14l-2-2M8 14l2-2M2 8l2-2M2 8l2 2M14 8l-2-2M14 8l-2 2', copy: 'M5.5 5.5h8v8h-8zM2.5 10.5v-8h8', rotate: 'M13 8a5 5 0 1 1-1.5-3.6M13 2.5v2.5h-2.5',
   mirror: 'M8 1.5v13M6 4L2.5 12H6zM10 4l3.5 8H10z', scale: 'M2.5 13.5v-5h5v5zM7.5 8.5l6-6M9.5 2.5h4v4', offset: 'M2.5 11.5h11M2.5 6.5h11M8 8l0 2M7 9l1 1.2L9 9', trim: 'M2 13L13 2M9 3l4 4M4.5 8.5l-2 2', extend: 'M2 13l7-7M11 2v12M7.5 7.5l1.5-1.5', erase: 'M6 13.5h7.5M3 10l5.5-5.5 4 4L9 12H5z',
   save: 'M3 2.5h8l2.5 2.5v8.5h-10.5zM5 2.5v3.5h5V2.5M5 13.5v-4h6v4', zoomwin: 'M2.5 2.5h7v7h-7zM8 8l5.5 5.5',
+  zoomadu: 'M2 5.5V2h3.5M10.5 2H14v3.5M14 10.5V14h-3.5M5.5 14H2v-3.5M5 11V7.5L8 5l3 2.5V11z', pinoff: 'M2 2l12 12M8 14.5s4.5-4.2 4.5-7.5c0-.9-.3-1.8-.7-2.5M10.6 3A4.5 4.5 0 0 0 3.5 7c0 3.3 4.5 7.5 4.5 7.5',
 };
 export const Icon = ({ n, s = 16 }: { n: string; s?: number }) => <svg width={s} height={s} viewBox="0 0 16 16" aria-hidden="true" focusable="false" className="ico"><path d={ICONS[n]} fill="none" stroke="currentColor" strokeWidth="1.35" strokeLinecap="round" strokeLinejoin="round" /></svg>;
 
@@ -65,8 +66,9 @@ const MODIFY: { cmd: string; icon: string; en: string }[] = [
 ];
 const SHEETS: { id: SheetId; en: string }[] = [{ id: 'model', en: 'Model' }, { id: 'a1', en: 'A-1 Site' }, { id: 'a2', en: 'A-2 Floor' }, { id: 'g2', en: 'G-2 Markup' }];
 const INCS = [inch(1), inch(3), inch(6), ft(1)];
-const STATUS_LABEL = (s: string) => (s === 'FAIL' ? L('Fix') : s === 'UNKNOWN' ? L('Need info') : s === 'NOT_CHECKED' ? L('Not checked') : s === 'INFO' ? L('Note') : L('Pass'));
-const CMD_EN: Record<string, string> = { LINE: 'Line', PLINE: 'Polyline', RECTANG: 'Rectangle', CIRCLE: 'Circle', ARC: 'Arc', TEXT: 'Text', MTEXT: 'Multiline text', LEADER: 'Leader', REVCLOUD: 'Revision cloud', DIMLINEAR: 'Linear dimension', DIMALIGNED: 'Aligned dimension', DIST: 'Measure distance', AREA: 'Measure area', MOVE: 'Move', COPY: 'Copy', ROTATE: 'Rotate', MIRROR: 'Mirror', SCALE: 'Scale', ERASE: 'Erase', OFFSET: 'Offset', TRIM: 'Trim', EXTEND: 'Extend', ROOM: 'Room', DOOR: 'Door', WINDOW: 'Window', PIN: 'Review note', ZOOM: 'Zoom to fit', UNDO: 'Undo', REDO: 'Redo', LAYER: 'Layers', ORTHO: 'Ortho', GRID: 'Grid', SNAP: 'Snap', OSNAP: 'Object snap', POLAR: 'Polar tracking', UNITS: 'Units', HELP: 'Help' };
+/** One status vocabulary for Guided and Pro: Fix, Need info, Pass, Off (not checked), Note. */
+export const STATUS_LABEL = (s: string) => (s === 'FAIL' ? L('Fix') : s === 'UNKNOWN' ? L('Need info') : s === 'NOT_CHECKED' ? L('Off') : s === 'INFO' ? L('Note') : L('Pass'));
+const CMD_EN: Record<string, string> = { LINE: 'Line', PLINE: 'Polyline', RECTANG: 'Rectangle', CIRCLE: 'Circle', ARC: 'Arc', TEXT: 'Text', MTEXT: 'Multiline text', LEADER: 'Leader', REVCLOUD: 'Revision cloud', DIMLINEAR: 'Linear dimension', DIMALIGNED: 'Aligned dimension', DIST: 'Measure distance', AREA: 'Measure area', MOVE: 'Move', COPY: 'Copy', ROTATE: 'Rotate', MIRROR: 'Mirror', SCALE: 'Scale', ERASE: 'Erase', OFFSET: 'Offset', TRIM: 'Trim', EXTEND: 'Extend', ROOM: 'Room', DOOR: 'Door', WINDOW: 'Window', PIN: 'Review note', ZOOM: 'Zoom extents', ZOOMADU: 'Zoom to ADU', MARKUP: 'Show or hide markups', UNDO: 'Undo', REDO: 'Redo', LAYER: 'Layers', ORTHO: 'Ortho', GRID: 'Grid', SNAP: 'Snap', OSNAP: 'Object snap', POLAR: 'Polar tracking', UNITS: 'Units', HELP: 'Help' };
 
 type Tab = 'checks' | 'props' | 'layers' | 'takeoff';
 interface Cmd { id: string; label: string; key?: string; group: string; run: () => void }
@@ -97,12 +99,17 @@ export function Workspace(W: WorkspaceProps) {
   const [phone, setPhone] = useState(() => typeof matchMedia !== 'undefined' && matchMedia('(max-width: 719px)').matches);
   useEffect(() => { if (typeof matchMedia === 'undefined') return; const m = matchMedia('(max-width: 719px)'); const on = () => setPhone(m.matches); m.addEventListener?.('change', on); return () => m.removeEventListener?.('change', on); }, []);
   const [sheetUp, setSheetUp] = useState<'peek' | 'half' | 'full'>('peek');
+  // Touch screens: the command line stays hidden until asked for (More > Command line); taps drive the tools.
+  const [touch] = useState(() => typeof matchMedia !== 'undefined' && matchMedia('(pointer: coarse)').matches); const [cmdShown, setCmdShown] = useState(false);
+  const [histOpen, setHistOpen] = useState(false);
+  const markupOn = layers['G-ANNO-REDL']?.on !== false;
+  const toggleMarkup = () => setLayers(l => ({ ...l, 'G-ANNO-REDL': { ...l['G-ANNO-REDL'], on: !markupOn } }));
 
   // ----- command engine -----
   const [st, setSt] = useState<St>(IDLE); const [prompt, setPrompt] = useState(''); const [hist, setHist] = useState<string[]>([]); const lastCmd = useRef<string | null>(null);
   const [cmdCursor, setCmdCursor] = useState<Pt | null>(null); const cmdIn = useRef<HTMLInputElement>(null); const [line, setLine] = useState('');
   const pRef = useRef(p); pRef.current = p; const selRef = useRef(sel); selRef.current = sel;
-  const ctx = (): Ctx => { const s = selRef.current; const cad = pRef.current.cad ?? DEFAULT_CAD(); return { p: pRef.current, cursor: cmdCursor, sel: s?.kind === 'ents' ? s.ids : [], room: s?.kind === 'room' ? s.id : null, layer: cad.current, textH: inch(4.5), newId: uid, es,
+  const ctx = (): Ctx => { const s = selRef.current; const cad = pRef.current.cad ?? DEFAULT_CAD(); return { p: pRef.current, cursor: cmdCursor, sel: s?.kind === 'ents' ? s.ids : [], room: s?.kind === 'room' ? s.id : null, layer: cad.current, textH: Math.max(inch(3), annoMm), /* annotative: 3/32" plotted at the current scale */ newId: uid, es,
     hit: q => { const tol = Math.max(ft(0.5), annoMm * 0.6); const ents = pRef.current.cad?.ents ?? []; for (let i = ents.length - 1; i >= 0; i--) if (entDist(ents[i], q) <= tol) return { ent: ents[i].id }; const h = hitTest(pRef.current, q, tol); return h?.kind === 'room' ? { room: h.id } : null; } }; };
   const run = (o: Out) => {
     setSt(o.st); setPrompt(o.st.name ? o.prompt : '');
@@ -112,11 +119,16 @@ export function Workspace(W: WorkspaceProps) {
       else if (f.kind === 'say') say(f.msg);
       else if (f.kind === 'select') setSel(f.room ? { kind: 'room', id: f.room } : f.ids.length ? { kind: 'ents', ids: f.ids } : null);
       else if (f.kind === 'toggle') { const m = { ortho: () => setOrtho(v => !v), grid: () => setGrid(v => !v), snap: () => setSnapOn(v => !v), osnap: () => setOsnap(v => !v), polar: () => setPolar(v => !v), units: () => setUnitsState(u => (u === 'ftin' ? 'metric' : 'ftin')) }; m[f.what](); say(`${L(CMD_EN[f.what.toUpperCase()] ?? f.what)}: ${L('switched')}`); }
-      else if (f.kind === 'view') { if (f.what === 'fit') api.current?.fit(); if (f.what === 'undo') W.undo(); if (f.what === 'redo') W.redo(); if (f.what === 'layers') setTab('layers'); if (f.what === 'help') setHelp(true); }
+      else if (f.kind === 'view') { if (f.what === 'fit') api.current?.fit(); if (f.what === 'adu') api.current?.zoomAdu(); if (f.what === 'markup') toggleMarkup(); if (f.what === 'undo') W.undo(); if (f.what === 'redo') W.redo(); if (f.what === 'layers') setTab('layers'); if (f.what === 'help') setHelp(true); }
     }
   };
   const begin = (name: string) => { if (sheet !== 'model') setSheet('model'); setTool('select'); const o = start(name, ctx()); run(o); if (o.st.name) say(`${L(CMD_EN[o.st.name] ?? o.st.name)}: ${o.prompt}`); };
-  const submit = (raw: string) => { const s = raw; setLine(''); if (!s.trim()) { run(cmdEnter(st, ctx(), lastCmd.current)); return; } setHist(h => [...h.slice(-30), `> ${s}`]); if (!st.name) { begin(s.trim()); return; } run(cmdTextFn(st, s, ctx())); };
+  // History echoes commands and typed points, never note text (AutoCAD shows "Command: TEXT", not the words typed).
+  const submit = (raw: string) => { const s = raw; setLine(''); if (!s.trim()) { run(cmdEnter(st, ctx(), lastCmd.current)); return; }
+    if (!st.name) { const nm = ALIASES[s.trim().toUpperCase()] ?? s.trim().toUpperCase(); setHist(h => [...h.slice(-30), `${L('Command')}: ${nm}`]); begin(s.trim()); return; }
+    const isText = (st.name === 'TEXT' || st.name === 'MTEXT' || st.name === 'LEADER') && st.step === 's';
+    if (!isText) setHist(h => [...h.slice(-30), `${prompt ? prompt.replace(/[:.]?\s*$/, '') + ': ' : ''}${s}`]);
+    run(cmdTextFn(st, s, ctx())); };
   const cancel = () => { if (st.name) run(cmdEsc(ctx())); };
   const ghost = useMemo(() => previewOf(st, cmdCursor, ctx()), [st, cmdCursor, p, sel]); // eslint-disable-line react-hooks/exhaustive-deps
   useEffect(() => { if (W.pinRequest) { setPanel(null); begin('PIN'); } }, [W.pinRequest]); // eslint-disable-line react-hooks/exhaustive-deps
@@ -134,7 +146,9 @@ export function Workspace(W: WorkspaceProps) {
     ...RAIL.map(t => ({ id: 'tool-' + t.id, label: `${L('Tool')}: ${L(t.en)}${t.cmd ? ` (${t.cmd})` : ''}`, key: t.key, group: L('Draw'), run: () => pickRail(t.id) })),
     ...MODIFY.map(m => ({ id: 'mod-' + m.cmd, label: `${L(m.en)} (${m.cmd})`, group: L('Modify'), run: () => begin(m.cmd) })),
     ...['MTEXT', 'DIMLINEAR', 'AREA'].map(c => ({ id: 'c-' + c, label: `${L(CMD_EN[c])} (${c})`, group: L('Draw'), run: () => begin(c) })),
-    { id: 'fit', label: L('Zoom to fit'), key: 'F', group: L('View'), run: () => api.current?.fit() },
+    { id: 'fit', label: L('Zoom extents'), key: 'F', group: L('View'), run: () => api.current?.fit() },
+    { id: 'zadu', label: L('Zoom to ADU'), key: 'A', group: L('View'), run: () => api.current?.zoomAdu() },
+    { id: 'markup', label: `${L('Markups')}: ${markupOn ? L('hide') : L('show')}`, group: L('View'), run: toggleMarkup },
     { id: 'zsel', label: L('Zoom to selection'), key: 'Shift+F', group: L('View'), run: () => api.current?.zoomSel() },
     { id: 'zwin', label: L('Zoom window'), group: L('View'), run: () => api.current?.zoomWindow() },
     { id: 'zin', label: L('Zoom in'), key: '+', group: L('View'), run: () => api.current?.zoomBy(1.25) }, { id: 'zout', label: L('Zoom out'), key: '−', group: L('View'), run: () => api.current?.zoomBy(0.8) },
@@ -148,7 +162,7 @@ export function Workspace(W: WorkspaceProps) {
     { id: 'units', label: `${L('Units')}: ${units === 'ftin' ? L('metric (mm)') : L('feet and inches')}`, group: L('Drafting aids'), run: () => setUnitsState(u => (u === 'ftin' ? 'metric' : 'ftin')) },
     { id: 'theme', label: `${L('Model space')}: ${dark ? L('light') : L('dark')}`, group: L('View'), run: () => setMsTheme(dark ? 'light' : 'dark') },
     { id: 'undo', label: L('Undo'), key: 'Ctrl+Z', group: L('Edit'), run: W.undo }, { id: 'redo', label: L('Redo'), key: 'Ctrl+Shift+Z', group: L('Edit'), run: W.redo },
-    { id: 'cmdline', label: L('Command line'), key: '/', group: L('Edit'), run: () => requestAnimationFrame(() => cmdIn.current?.focus()) },
+    { id: 'cmdline', label: L('Command line'), key: '/', group: L('Edit'), run: () => { setCmdShown(true); if (phone) setSheetUp('half'); requestAnimationFrame(() => cmdIn.current?.focus()); } },
     { id: 'p-lot', label: L('Lot and parcel lookup…'), group: L('Project data'), run: () => setPanel('lot') },
     { id: 'p-garage', label: L('Garage details…'), group: L('Project data'), run: () => setPanel('garage') },
     { id: 'p-rooms', label: L('Rooms and openings list…'), group: L('Project data'), run: () => setPanel('rooms') },
@@ -166,12 +180,12 @@ export function Workspace(W: WorkspaceProps) {
   ];
 
   // Single-key shortcuts (not while typing), / for the command line, Ctrl/Cmd+K palette, F-keys for drafting aids. Other letters and digits type into the command line.
-  const SINGLE = new Set(['V', 'H', 'M', 'W', 'D', 'N', 'P', 'I', 'F']);
+  const SINGLE = new Set(['V', 'H', 'M', 'W', 'D', 'N', 'P', 'I', 'F', 'A']);
   useEffect(() => {
     const on = (e: KeyboardEvent) => {
       const t = e.target as HTMLElement | null; const typing = !!t && (t.tagName === 'INPUT' || t.tagName === 'TEXTAREA' || t.tagName === 'SELECT' || t.isContentEditable);
       if ((e.metaKey || e.ctrlKey) && e.key.toLowerCase() === 'k') { e.preventDefault(); setPalette(v => !v); return; }
-      const fk: Record<string, () => void> = { F3: () => setOsnap(v => !v), F7: () => setGrid(v => !v), F8: () => setOrtho(v => !v), F9: () => setSnapOn(v => !v), F10: () => setPolar(v => !v) };
+      const fk: Record<string, () => void> = { F2: () => setHistOpen(v => !v), F3: () => setOsnap(v => !v), F7: () => setGrid(v => !v), F8: () => setOrtho(v => !v), F9: () => setSnapOn(v => !v), F10: () => setPolar(v => !v) };
       if (fk[e.key]) { e.preventDefault(); fk[e.key](); return; }
       if (typing || e.metaKey || e.ctrlKey || e.altKey || palette || help) return;
       if (e.key === 'Escape') { if (st.name) cancel(); else if (panel) setPanel(null); else if (tool !== 'select') setTool('select'); else setSel(null); return; }
@@ -184,7 +198,7 @@ export function Workspace(W: WorkspaceProps) {
         return; }
       if ((e.key === ' ' || e.key === 'Enter') && st.name && t?.tagName !== 'BUTTON') { if (e.key === ' ' && t?.closest('svg')) return; e.preventDefault(); run(cmdEnter(st, ctx(), lastCmd.current)); return; }
       const k = e.key.toUpperCase();
-      if (!st.name && !e.shiftKey && SINGLE.has(k)) { e.preventDefault(); if (k === 'F') { api.current?.fit(); return; } const r = RAIL.find(x => x.key === k); if (r) pickRail(r.id); return; }
+      if (!st.name && !e.shiftKey && SINGLE.has(k)) { e.preventDefault(); if (k === 'F') { api.current?.fit(); return; } if (k === 'A') { api.current?.zoomAdu(); return; } const r = RAIL.find(x => x.key === k); if (r) pickRail(r.id); return; }
       if (e.shiftKey && k === 'F' && !st.name) { e.preventDefault(); api.current?.zoomSel(); return; }
       // Anything else that can start a command or a typed point goes to the command line.
       if (/^[a-zA-Z0-9@.,<'"\-]$/.test(e.key)) { e.preventDefault(); setLine(v => v + e.key); cmdIn.current?.focus(); }
@@ -203,7 +217,7 @@ export function Workspace(W: WorkspaceProps) {
     preview={W.preview} commit={W.commit}
     cmd={{ active: !!st.name, selecting: st.step === 'sel', base: basePt(st), ghost, cursorSet: q => { if (st.name) setCmdCursor(q); }, pick: q => run(point(st, q, ctx())) }} />;
 
-  const checksTab = <ChecksPanel issues={issues} verdict={verdict} es={es} active={activeIssue} onPick={goIssue} update={W.update} openStep={setPanel} say={say} />;
+  const checksTab = <ChecksPanel issues={issues} verdict={verdict} es={es} active={activeIssue} onPick={goIssue} update={W.update} openStep={setPanel} say={say} northSet={p.site.northDeg != null} />;
   const propsTab = <Properties p={p} sel={sel} update={W.update} openStep={setPanel} setSel={setSel} phone={phone} />;
   const layersTab = <LayersPanel p={p} update={W.update} layers={layers} setLayers={setLayers} />;
   const takeoffTab = <TakeoffPanel p={p} es={es} onCsv={exportCsv} />;
@@ -215,28 +229,34 @@ export function Workspace(W: WorkspaceProps) {
 
   const sugg = !st.name && line.trim() ? COMMANDS.filter(c => c.startsWith(line.trim().toUpperCase()) || Object.entries(ALIASES).some(([a, v]) => v === c && a.startsWith(line.trim().toUpperCase()) && a.length <= 3)).slice(0, 6) : [];
   const cmdLine = <div className="pw-cmd" role="group" aria-label={L('Command line')}>
-    <div className="pw-cmd-hist" aria-hidden>{hist.slice(-2).map((h, i) => <div key={i}>{h}</div>)}</div>
-    <div className="pw-cmd-row"><label htmlFor="pw-cmd-in" className="pw-cmd-p">{prompt || L('Type a command (L, PL, C, DLI, M, RO…)')}</label>
-      <input id="pw-cmd-in" ref={cmdIn} value={line} autoComplete="off" spellCheck={false} aria-describedby="pw-cmd-hint" aria-autocomplete="list" aria-controls={sugg.length ? 'pw-cmd-sugg' : undefined}
+    <div className={`pw-cmd-hist${histOpen ? ' open' : ''}`} aria-hidden>{hist.slice(histOpen ? -12 : -1).map((h, i) => <div key={i}>{h}</div>)}</div>
+    <button type="button" className="pw-cmd-x" aria-expanded={histOpen} onClick={() => setHistOpen(v => !v)} title={`${L('Command history')} (F2)`} aria-label={`${L('Command history')} (F2)`}>{histOpen ? '▾' : '▴'}</button>
+    <div className="pw-cmd-row"><label htmlFor="pw-cmd-in" className="pw-cmd-p">{prompt || `${L('Command')}:`}</label>
+      <input id="pw-cmd-in" ref={cmdIn} value={line} autoComplete="off" spellCheck={false} placeholder={prompt ? '' : 'L, PL, C, DLI, M, RO…'} aria-describedby="pw-cmd-hint" aria-autocomplete="list" aria-controls={sugg.length ? 'pw-cmd-sugg' : undefined}
         onChange={e => setLine(e.target.value)} onKeyDown={e => { if (e.key === 'Enter') { e.preventDefault(); submit(sugg.length && !st.name && !ALIASES[line.trim().toUpperCase()] ? sugg[0] : line); } else if (e.key === 'Escape') { e.preventDefault(); setLine(''); cancel(); (document.querySelector('[data-testid=viewport] svg') as HTMLElement | null)?.focus(); } else if (e.key === ' ' && !st.name && line.trim()) { e.preventDefault(); submit(line); } else if (e.key === 'Tab' && sugg.length) { e.preventDefault(); setLine(sugg[0]); } }} />
       <span id="pw-cmd-hint" className="sr">{L('Type a command name or alias and press Enter. Points: x,y or @dx,dy or @distance<angle, or a distance along the cursor.')}</span></div>
     {sugg.length > 0 && <ul id="pw-cmd-sugg" className="pw-cmd-sugg" role="listbox" aria-label={L('Matching commands')}>{sugg.map(c => <li key={c} role="option" aria-selected="false" onMouseDown={e => { e.preventDefault(); submit(c); }}><b>{c}</b> <span className="mut">{L(CMD_EN[c] ?? c)}</span></li>)}</ul>}
   </div>;
 
-  const status = <footer className="pw-status" aria-label={L('Status bar')}>
-    <span className="pw-xy" aria-live="off">{cursor ? `X ${fmtArch(cursor.x)}  Y ${fmtArch(cursor.y)}` : `X —  Y —`}</span>
-    <span className="pw-sep" /><span title={L('Scale')}>{scale}</span><span className="pw-sep" />
-    <Toggle on={snapOn} set={setSnapOn} label={L('Snap')} k="F9" />
-    <label className="pw-inc"><span className="sr">{L('Snap increment')}</span><select value={snapInc} onChange={e => setSnapInc(Number(e.target.value))}>{INCS.map(v => <option key={v} value={v}>{fmtArch(v).replace(/^0'-/, '')}</option>)}</select></label>
-    <Toggle on={gridOn} set={setGrid} label={L('Grid')} k="F7" /><Toggle on={orthoOn} set={setOrtho} label={L('Ortho')} k="F8" /><Toggle on={polarOn} set={setPolar} label={L('Polar')} k="F10" /><Toggle on={osnap} set={setOsnap} label={L('Osnap')} k="F3" /><Toggle on={lwt} set={setLwt} label={L('LWT')} />
-    <span className="grow" />
-    <button type="button" className="pw-tog" onClick={() => setUnitsState(u => (u === 'ftin' ? 'metric' : 'ftin'))} aria-label={`${L('Units')}: ${units === 'ftin' ? L('feet and inches') : L('millimeters')}`}>{units === 'ftin' ? 'ft-in' : 'mm'}</button>
-    <button type="button" className="pw-ibtn" onClick={() => setMsTheme(dark ? 'light' : 'dark')} aria-label={dark ? L('Light model space') : L('Dark model space')} title={dark ? L('Light model space') : L('Dark model space')}><Icon n={dark ? 'sun' : 'moon'} /></button>
-  </footer>;
+  // Status bar: items drop into the "…" menu by priority as the bar narrows (coords > scale > SNAP/GRID/ORTHO/OSNAP > units > LWT/POLAR > theme).
+  const statusItems: StatusItem[] = [
+    { id: 'snap', w: 104, prio: 3, node: <><Toggle on={snapOn} set={setSnapOn} label={L('Snap')} k="F9" /><label className="pw-inc"><span className="sr">{L('Snap increment')}</span><select value={snapInc} onChange={e => setSnapInc(Number(e.target.value))}>{INCS.map(v => <option key={v} value={v}>{fmtArch(v).replace(/^0'-/, '')}</option>)}</select></label></> },
+    { id: 'grid', w: 50, prio: 3, node: <Toggle on={gridOn} set={setGrid} label={L('Grid')} k="F7" /> },
+    { id: 'ortho', w: 58, prio: 3, node: <Toggle on={orthoOn} set={setOrtho} label={L('Ortho')} k="F8" /> },
+    { id: 'osnap', w: 58, prio: 3, node: <Toggle on={osnap} set={setOsnap} label={L('Osnap')} k="F3" /> },
+    { id: 'units', w: 52, prio: 4, node: <button type="button" className="pw-tog" onClick={() => setUnitsState(u => (u === 'ftin' ? 'metric' : 'ftin'))} aria-label={`${L('Units')}: ${units === 'ftin' ? L('feet and inches') : L('millimeters')}`}>{units === 'ftin' ? 'ft-in' : 'mm'}</button> },
+    { id: 'polar', w: 58, prio: 5, node: <Toggle on={polarOn} set={setPolar} label={L('Polar')} k="F10" /> },
+    { id: 'lwt', w: 46, prio: 5, node: <Toggle on={lwt} set={setLwt} label={L('LWT')} /> },
+    { id: 'markup', w: 78, prio: 5, node: <Toggle on={markupOn} set={() => toggleMarkup()} label={L('Markups')} /> },
+    { id: 'theme', w: 34, prio: 6, node: <button type="button" className="pw-ibtn" onClick={() => setMsTheme(dark ? 'light' : 'dark')} aria-label={dark ? L('Light model space') : L('Dark model space')} title={dark ? L('Light model space') : L('Dark model space')}><Icon n={dark ? 'sun' : 'moon'} /></button> },
+  ];
+  const status = <StatusBar items={statusItems} lead={<><span className="pw-xy" aria-live="off">{cursor ? `X ${fmtArch(cursor.x)}  Y ${fmtArch(cursor.y)}` : `X —  Y —`}</span>
+    <span className="pw-sep" /><span className="pw-scale" title={L('Scale')}>{scale}</span><span className="pw-sep" /></>} />;
 
   const sheetTabs = <div className="pw-sheets" role="tablist" aria-label={L('Sheets')}>{SHEETS.map(s => <button key={s.id} type="button" role="tab" aria-selected={sheet === s.id} onClick={() => setSheet(s.id)}>{L(s.en)}</button>)}</div>;
   const modBar = sheet === 'model' && <div className="pw-modbar" role="toolbar" aria-label={L('Modify')}>{MODIFY.map(m => <button key={m.cmd} type="button" aria-pressed={st.name === m.cmd} aria-label={`${L(m.en)} (${m.cmd})`} title={`${L(m.en)} (${m.cmd})`} onClick={() => { if (st.name) run(cmdEsc(ctx())); begin(m.cmd); }}><Icon n={m.icon} /></button>)}
-    <span className="pw-modsep" /><button type="button" aria-label={L('Zoom window')} title={L('Zoom window')} onClick={() => api.current?.zoomWindow()}><Icon n="zoomwin" /></button><button type="button" aria-label={`${L('Zoom to fit')} (F)`} title={`${L('Zoom to fit')} (F)`} onClick={() => api.current?.fit()}><Icon n="fit" /></button></div>;
+    <span className="pw-modsep" /><button type="button" aria-label={L('Zoom window')} title={L('Zoom window')} onClick={() => api.current?.zoomWindow()}><Icon n="zoomwin" /></button><button type="button" aria-label={`${L('Zoom to ADU')} (A)`} title={`${L('Zoom to ADU')} (A)`} onClick={() => api.current?.zoomAdu()}><Icon n="zoomadu" /></button><button type="button" aria-label={`${L('Zoom extents')} (F)`} title={`${L('Zoom extents')} (F)`} onClick={() => api.current?.fit()}><Icon n="fit" /></button>
+    <span className="pw-modsep" /><button type="button" aria-pressed={markupOn} aria-label={markupOn ? L('Hide markups') : L('Show markups')} title={`${markupOn ? L('Hide markups') : L('Show markups')} (MARKUP)`} onClick={toggleMarkup}><Icon n={markupOn ? 'pin' : 'pinoff'} /></button></div>;
 
   const overlays = <>
     {palette && <Palette cmds={cmds} onClose={() => setPalette(false)} />}
@@ -257,15 +277,15 @@ export function Workspace(W: WorkspaceProps) {
     return <div className={`pw pw-phone${dark ? ' pw-msdark' : ''}`}>
       <header className="pw-ph-top">
         <button type="button" className="pw-ibtn" aria-label={L('All projects')} onClick={W.close}><Icon n="back" /></button>
-        <div className="pw-ph-title"><h1>{L(SHEETS.find(s => s.id === sheet)!.en)}</h1><div className="sub">{crumbs[0]} · {scale} · {online ? W.saveText : L('Offline · saved on this device')}</div></div>
+        <div className="pw-ph-title"><h1>{crumbs[0]}</h1><div className="sub">{L(SHEETS.find(s => s.id === sheet)!.en)} · {online ? W.saveText : L('Offline · saved on this device')}</div></div>
         <button type="button" className="pw-btn primary" onClick={() => setPanel('export')}>{L('Export')}</button>
       </header>
-      <div className="pw-ph-canvas">{canvas}{empty}{st.name && <div className="pw-ph-prompt" role="status">{prompt}<button type="button" className="pw-btn" onClick={() => run(cmdEnter(st, ctx(), null))}>{L('Done')}</button><button type="button" className="pw-btn" onClick={cancel}>{L('Cancel')}</button></div>}{sel1 && sheetUp === 'peek' && !st.name && <div className="pw-chip" aria-hidden>{sel1}</div>}</div>
+      <div className="pw-ph-canvas">{canvas}{empty}<span className="pw-scale-chip" aria-label={`${L('Scale')}: ${scale}`}>{scale}</span>{st.name && <div className="pw-ph-prompt" role="status">{prompt}<button type="button" className="pw-btn" onClick={() => run(cmdEnter(st, ctx(), null))}>{L('Done')}</button><button type="button" className="pw-btn" onClick={cancel}>{L('Cancel')}</button></div>}{sel1 && sheetUp === 'peek' && !st.name && <div className="pw-chip" aria-hidden>{sel1}</div>}</div>
       {W.banners}
       <section className={`pw-sheet pw-sheet-${sheetUp}`} aria-label={L('Inspector')}>
         <button type="button" className="pw-grab" aria-label={sheetUp === 'peek' ? L('Show more') : L('Show less')} aria-expanded={sheetUp !== 'peek'} onClick={() => setSheetUp(sheetUp === 'peek' ? 'half' : sheetUp === 'half' ? 'full' : 'peek')}><span /></button>
         {sheetUp === 'peek' ? <div className="pw-peek" data-testid="plain-answer-pro">{iss ? <><span className={`pw-num ${iss.status === 'FAIL' ? 'fix' : 'need'}`}>{iss.n ?? '·'}</span><b>{iss.r.rule.title[es ? 'es' : 'en']}</b><span className="grow" /><span className="mut">{counts.PASS} {L('pass')}</span></> : <b>{plain}</b>}</div>
-          : <div className="pw-sheet-body">{tabList}<div id="pw-tabpanel" role="tabpanel" aria-labelledby={'tab-' + tab}>{tabBody}</div>{cmdLine}</div>}
+          : <div className="pw-sheet-body">{tabList}<div id="pw-tabpanel" role="tabpanel" aria-labelledby={'tab-' + tab}>{tabBody}</div>{(!touch || cmdShown) && cmdLine}</div>}
         <nav className="pw-ph-tools" aria-label={L('Tools')}>
           <button type="button" aria-pressed={!st.name && tool === 'select'} onClick={() => pickRail('select')}><Icon n="select" />{L('Select')}</button>
           <button type="button" aria-pressed={st.name === 'DIST'} onClick={() => pickRail('measure')}><Icon n="measure" />{L('Measure')}</button>
@@ -307,7 +327,7 @@ export function Workspace(W: WorkspaceProps) {
         <div className="pw-canvas">{canvas}{empty}{modBar}
           <div className="pw-hud" aria-hidden>{st.name ? L(CMD_EN[st.name] ?? st.name) : tool === 'pan' ? L('Pan') : ''}{sheet !== 'model' ? `${L('Sheets are view-only; edit in Model')}` : ''}</div>
         </div>
-        {cmdLine}
+        {(!touch || cmdShown) && cmdLine}
         {sheetTabs}
         {status}
       </main>
@@ -315,6 +335,24 @@ export function Workspace(W: WorkspaceProps) {
     </div>
     {overlays}
   </div>;
+}
+
+interface StatusItem { id: string; w: number; prio: number; node: ReactNode }
+/** Status bar that measures itself and moves the lowest-priority items into a "…" menu when they do not fit. */
+function StatusBar({ items, lead }: { items: StatusItem[]; lead: ReactNode }) {
+  const ref = useRef<HTMLElement>(null); const [w, setW] = useState(2000); const [open, setOpen] = useState(false);
+  useEffect(() => { const el = ref.current; if (!el || typeof ResizeObserver === 'undefined') return; const ro = new ResizeObserver(() => setW(el.clientWidth)); ro.observe(el); setW(el.clientWidth); return () => ro.disconnect(); }, []);
+  const LEAD = 300, MORE = 36; let budget = w - LEAD; const shown = new Set<string>();
+  const total = items.reduce((a, x) => a + x.w, 0); const fitsAll = total <= budget;
+  if (fitsAll) items.forEach(x => shown.add(x.id)); else { budget -= MORE; [...items].sort((a, b) => a.prio - b.prio).forEach(x => { if (x.w <= budget) { shown.add(x.id); budget -= x.w; } else budget = -1; }); }
+  const hidden = items.filter(x => !shown.has(x.id));
+  return <footer ref={ref} className="pw-status" aria-label={L('Status bar')}>{lead}
+    {items.filter(x => shown.has(x.id) && x.prio <= 4).map(x => <span key={x.id} className="pw-si" data-si={x.id}>{x.node}</span>)}
+    <span className="grow" />
+    {items.filter(x => shown.has(x.id) && x.prio > 4).map(x => <span key={x.id} className="pw-si" data-si={x.id}>{x.node}</span>)}
+    {hidden.length > 0 && <span className="pw-si pw-more-wrap"><button type="button" className="pw-ibtn" aria-expanded={open} aria-label={`${L('More status bar items')} (${hidden.length})`} title={L('More status bar items')} onClick={() => setOpen(v => !v)}><Icon n="more" /></button>
+      {open && <div className="pw-more-pop" role="group" aria-label={L('More status bar items')}>{hidden.map(x => <span key={x.id} className="pw-si" data-si={x.id}>{x.node}</span>)}</div>}</span>}
+  </footer>;
 }
 
 function Toggle({ on, set, label, k }: { on: boolean; set: (f: (v: boolean) => boolean) => void; label: string; k?: string }) {
@@ -328,7 +366,7 @@ function describeSel(p: Project, s: Sel, es: boolean): string {
   return '';
 }
 
-function ChecksPanel({ issues, verdict, es, active, onPick, update, openStep, say }: { issues: Issue[]; verdict: Verdict; es: boolean; active: string | null; onPick: (id: string) => void; update: (fn: (d: Project) => void) => void; openStep: (s: Step) => void; say: (m: string) => void }) {
+function ChecksPanel({ issues, verdict, es, active, onPick, update, openStep, say, northSet }: { issues: Issue[]; verdict: Verdict; es: boolean; active: string | null; onPick: (id: string) => void; update: (fn: (d: Project) => void) => void; openStep: (s: Step) => void; say: (m: string) => void; northSet: boolean }) {
   const c = verdict.counts; const lg = es ? 'es' : 'en'; const total = Math.max(1, c.FAIL + c.UNKNOWN + c.PASS + c.INFO);
   const pinned = issues.filter(i => i.n); const rest = issues.filter(i => !i.n);
   const passes = verdict.report.results.filter(r => r.status === 'PASS');
@@ -343,11 +381,13 @@ function ChecksPanel({ issues, verdict, es, active, onPick, update, openStep, sa
   </li>; };
   return <div className="pw-checks">
     <div className="pw-sum"><p className="pw-plain" data-testid="plain-answer">{verdict.plain[lg]}</p>
-      <div className="pw-counts"><span className="big">{c.FAIL} {c.FAIL === 1 ? L('issue') : L('issues')}</span><span className="mut">{c.PASS} {L('pass')} · {c.UNKNOWN} {L('need info')} · {c.NOT_CHECKED} {L('not checked')}</span></div>
+      <div className="pw-counts" data-testid="pro-counts"><span className="big">{c.FAIL} {L('Fix')}</span><span className="mut">{c.UNKNOWN} {L('Need info')} · {c.PASS} {L('Pass')} · {c.NOT_CHECKED} {L('Off')}</span></div>
       <div className="pw-bar" aria-hidden><span className="fix" style={{ flex: c.FAIL / total }} /><span className="need" style={{ flex: c.UNKNOWN / total }} /><span className="pass" style={{ flex: c.PASS / total }} /></div>
       <p className="mut small">{verdict.score[lg]}</p></div>
     {pinned.length > 0 && <><h2 className="pw-h">{L('On the drawing')}</h2><ul className="pw-list">{pinned.map(row)}</ul></>}
-    {rest.length > 0 && <><h2 className="pw-h">{L('Not tied to one spot')}</h2><ul className="pw-list">{rest.map(row)}</ul></>}
+    {(rest.length > 0 || !northSet) && <><h2 className="pw-h">{L('Not tied to one spot')}</h2><ul className="pw-list">
+      {!northSet && <li className="pw-iss s-UNKNOWN" data-testid="north-not-set"><div className="pw-iss-h static"><span className="pw-st">{L('Need info')}</span><span className="pw-iss-t">{L('North is not set. The sheet shows plan north up until you enter it.')}</span><button type="button" className="pw-btn" onClick={() => openStep('lot')}>{L('Set north…')}</button></div></li>}
+      {rest.map(row)}</ul></>}
     <h2 className="pw-h">{L('Passing')} ({passes.length})</h2>
     <ul className="pw-list">{(morePass ? passes : passes.slice(0, 5)).map(r => <li key={r.rule.id} className="pw-iss s-PASS"><div className="pw-iss-h static"><span className="pw-st">{L('Pass')}</span><span className="pw-iss-t">{r.rule.title[lg]}</span><span className="pw-id">{r.rule.id}</span></div></li>)}</ul>
     {passes.length > 5 && <button type="button" className="pw-link" onClick={() => setMorePass(v => !v)}>{morePass ? L('Show fewer') : `+ ${passes.length - 5} ${L('more passing')}`}</button>}

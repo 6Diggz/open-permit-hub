@@ -104,4 +104,10 @@ export const ES_PRO = {
 "Property lines": "Linderos", "Setback lines": "Líneas de retiro", "Existing buildings": "Edificios existentes", "Walls, existing": "Muros existentes", "Walls, new": "Muros nuevos",
 "Walls and doors, demolition": "Muros y puertas a demoler", "Wall poché": "Relleno de muros", "Doors": "Puertas", "Windows": "Ventanas", "Plumbing fixtures": "Muebles de baño y cocina",
 "Appliances": "Electrodomésticos", "Room tags": "Etiquetas de cuartos", "Dimensions": "Cotas", "Labels": "Rótulos", "North arrow, scale bar": "Flecha norte, escala gráfica", "Check pins and review markup": "Marcas de revisión",
+"Command": "Comando", "Zoom extents": "Zoom a todo", "Zoom to ADU": "Zoom al ADU", "Markups": "Marcas", "hide": "ocultar", "show": "mostrar",
+"Command history": "Historial de comandos", "Hide markups": "Ocultar marcas", "Show markups": "Mostrar marcas", "More status bar items": "Más opciones de la barra de estado",
+"North is not set. The sheet shows plan north up until you enter it.": "El norte no está fijado. La hoja muestra el norte del plano hacia arriba hasta que lo indique.",
+"Set north…": "Fijar el norte…", "Show or hide markups": "Mostrar u ocultar marcas", "Door tags": "Etiquetas de puertas", "Window tags": "Etiquetas de ventanas",
+"Room boundaries": "Límites de cuartos", "Keynotes and leaders": "Notas clave y directrices", "Check pins and review markup (does not plot)": "Marcas de revisión (no se imprimen)",
+"Layer is locked": "La capa está bloqueada",
 };

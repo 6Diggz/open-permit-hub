@@ -135,7 +135,7 @@ export default function App() {
   const show = (x: Project, s = 0) => { flushSave(); setNotice(openNotes(x)); const y = { ...x, repairNotes: undefined }; hist.current = new History(y); setP(y); if (tool === 'field') { setStepRaw(s); if (location.hash !== '#field') history.replaceState(null, '', '#field'); } else setStep(s); };
 
   if (tool === 'clean') return <><CleanFix onBack={() => openTool('adu')} /><AskHost /></>;
-  if (!p || !report) return <><AskHost /><Welcome onPick={id => { try { show(store.open(id)); } catch (e) { loadError = (e as Error).message; loadErrorId = id; setP(null); } }} onClean={() => openTool('clean')} lang={lang} ui={ui} setLang={setLang} field={tool === 'field'}
+  if (!p || !report) return <><AskHost /><Welcome onPick={id => { try { show(store.open(id)); } catch (e) { loadError = (e as Error).message; loadErrorId = id; setP(null); } }} onClean={() => { saveMode('pro'); setWsRaw('pro'); openTool('clean'); }} lang={lang} ui={ui} setLang={setLang} field={tool === 'field'}
     onStart={(d) => { const x = d ? demoProject() : blankProject(); x.people.language = lang; if (lang === 'es') x.name = d ? 'Lote de ejemplo (no es una dirección real)' : 'Mi conversión de garaje'; show(x); }} onOpen={x => show(x, 3)} /></>;
 
   if (tool === 'field') return <><AskHost /><Suspense fallback={<p className="lead" role="status">{L('Loading…')}</p>}><FieldMode p={p} update={update} onBack={() => openTool('adu')} download={download} /></Suspense></>;
@@ -188,7 +188,8 @@ export default function App() {
         <div className="toolbar">
           <h1 style={{ font: 'inherit', fontWeight: 700, margin: 0 }}>{p.name}</h1>{isDemo(p) && <span className="res tag" style={{ background: 'var(--off)', color: '#fff', padding: '2px 6px' }}>{L("Demo")}</span>}
           <span className="grow" />
-          <button className="btn quiet" onClick={() => setWs('pro')} title={L("CAD-style workspace for drafters")}>{L("Pro workspace")}</button>
+          {/* Same Guided/Pro segmented control as inside Pro. */}
+          <div className="seg-mode" role="group" aria-label={L("Workspace mode")}><button type="button" aria-pressed="true">{L("Guided")}</button><button type="button" aria-pressed="false" aria-label={L("Pro workspace")} onClick={() => setWs('pro')} title={L("CAD-style workspace for drafters")}>{L("Pro")}</button></div>
           <button className="btn quiet mobile-only" onClick={close}>{L("All projects")}</button>
           <button className="btn quiet" onClick={undo} disabled={!hist.current?.canUndo}>{tr(lang, 'undo')}</button>
           <button className="btn quiet" onClick={redo} disabled={!hist.current?.canRedo}>{tr(lang, 'redo')}</button>

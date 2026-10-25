@@ -11,7 +11,7 @@ export interface Ctx {
   p: Project; cursor: Pt | null; sel: string[]; room: string | null; layer: string; textH: number; newId: () => string; es: boolean;
   /** What is under a point: an entity id or a room id. */ hit: (q: Pt) => { ent?: string; room?: string } | null;
 }
-export type Effect = { kind: 'apply'; fn: (d: Project) => void; msg?: string } | { kind: 'say'; msg: string } | { kind: 'select'; ids: string[]; room?: string | null } | { kind: 'toggle'; what: 'ortho' | 'grid' | 'snap' | 'osnap' | 'units' | 'polar' } | { kind: 'view'; what: 'fit' | 'undo' | 'redo' | 'layers' | 'help' } | { kind: 'tool'; tool: 'door' | 'window' | 'pin' };
+export type Effect = { kind: 'apply'; fn: (d: Project) => void; msg?: string } | { kind: 'say'; msg: string } | { kind: 'select'; ids: string[]; room?: string | null } | { kind: 'toggle'; what: 'ortho' | 'grid' | 'snap' | 'osnap' | 'units' | 'polar' } | { kind: 'view'; what: 'fit' | 'adu' | 'markup' | 'undo' | 'redo' | 'layers' | 'help' } | { kind: 'tool'; tool: 'door' | 'window' | 'pin' };
 export interface St { name: string | null; step: string; pts: Pt[]; data: Record<string, unknown> }
 export interface Out { st: St; prompt: string; fx: Effect[] }
 export const IDLE: St = { name: null, step: '', pts: [], data: {} };
@@ -25,7 +25,7 @@ export const ALIASES: Record<string, string> = {
   M: 'MOVE', MOVE: 'MOVE', CO: 'COPY', CP: 'COPY', COPY: 'COPY', RO: 'ROTATE', ROTATE: 'ROTATE', MI: 'MIRROR', MIRROR: 'MIRROR', SC: 'SCALE', SCALE: 'SCALE',
   E: 'ERASE', ERASE: 'ERASE', DEL: 'ERASE', O: 'OFFSET', OFFSET: 'OFFSET', TR: 'TRIM', TRIM: 'TRIM', EX: 'EXTEND', EXTEND: 'EXTEND',
   RM: 'ROOM', ROOM: 'ROOM', DR: 'DOOR', DOOR: 'DOOR', WI: 'WINDOW', WINDOW: 'WINDOW', PN: 'PIN', PIN: 'PIN',
-  Z: 'ZOOM', ZOOM: 'ZOOM', U: 'UNDO', UNDO: 'UNDO', REDO: 'REDO', LA: 'LAYER', LAYER: 'LAYER', ORTHO: 'ORTHO', GRID: 'GRID', SNAP: 'SNAP', SN: 'SNAP', OS: 'OSNAP', OSNAP: 'OSNAP', POLAR: 'POLAR', UN: 'UNITS', UNITS: 'UNITS', HELP: 'HELP',
+  Z: 'ZOOM', ZOOM: 'ZOOM', ZE: 'ZOOM', ZA: 'ZOOMADU', ZO: 'ZOOMADU', ZOOMADU: 'ZOOMADU', MARKUP: 'MARKUP', MK: 'MARKUP', U: 'UNDO', UNDO: 'UNDO', REDO: 'REDO', LA: 'LAYER', LAYER: 'LAYER', ORTHO: 'ORTHO', GRID: 'GRID', SNAP: 'SNAP', SN: 'SNAP', OS: 'OSNAP', OSNAP: 'OSNAP', POLAR: 'POLAR', UN: 'UNITS', UNITS: 'UNITS', HELP: 'HELP',
 };
 export const COMMANDS = [...new Set(Object.values(ALIASES))].sort();
 const SEL_CMDS = new Set(['MOVE', 'COPY', 'ROTATE', 'MIRROR', 'SCALE', 'ERASE']);
@@ -82,7 +82,7 @@ function prompt(st: St, es: boolean): string {
     'MOVE:b': ['MOVE: base point', 'MOVER: punto base'], 'MOVE:t': ['MOVE: second point, or @dx,dy', 'MOVER: segundo punto, o @dx,dy'],
     'COPY:b': ['COPY: base point', 'COPIAR: punto base'], 'COPY:t': ['COPY: second point (Enter ends)', 'COPIAR: segundo punto (Enter termina)'],
     'ROTATE:b': ['ROTATE: base point', 'GIRAR: punto base'], 'ROTATE:a': ['ROTATE: angle in degrees (counter-clockwise), or a point', 'GIRAR: ángulo en grados (antihorario), o un punto'],
-    'MIRROR:m0': ['MIRROR: first point of the mirror line', 'SIMETRÍA: primer punto del eje'], 'MIRROR:m1': ['MIRROR: second point of the mirror line', 'SIMETRÍA: segundo punto del eje'],
+    'MIRROR:m0': ['MIRROR: first point of the mirror line', 'SIMETRÍA: primer punto del eje'], 'MIRROR:m1': ['MIRROR: second point of the mirror line', 'SIMETRÍA: segundo punto del eje'], 'MIRROR:e': ['MIRROR: Erase source objects? [Yes/No] <No>', 'SIMETRÍA: ¿Borrar los objetos originales? [Sí/No] <No>'],
     'SCALE:b': ['SCALE: base point', 'ESCALA: punto base'], 'SCALE:k': ['SCALE: scale factor', 'ESCALA: factor de escala'],
     'OFFSET:d': ['OFFSET: distance', 'DESFASE: distancia'], 'OFFSET:o': ['OFFSET: select a line, polyline, circle or arc', 'DESFASE: seleccione una línea, polilínea, círculo o arco'], 'OFFSET:s': ['OFFSET: click the side to offset to', 'DESFASE: haga clic en el lado'],
     'TRIM:o': ['TRIM: click the part of a line to remove (Enter ends)', 'RECORTAR: haga clic en la parte de la línea que quiere quitar (Enter termina)'],
@@ -100,7 +100,7 @@ const done = (c: Ctx, fx: Effect[] = []): Out => out(IDLE, c, fx);
 export function start(name: string, c: Ctx): Out {
   const n = ALIASES[name.trim().toUpperCase()];
   if (!n) return done(c, [{ kind: 'say', msg: T(c.es, `Unknown command "${name}". Type HELP for the list.`, `Comando desconocido "${name}". Escriba HELP para ver la lista.`) }]);
-  const simple: Record<string, Effect> = { ORTHO: { kind: 'toggle', what: 'ortho' }, GRID: { kind: 'toggle', what: 'grid' }, SNAP: { kind: 'toggle', what: 'snap' }, OSNAP: { kind: 'toggle', what: 'osnap' }, POLAR: { kind: 'toggle', what: 'polar' }, UNITS: { kind: 'toggle', what: 'units' }, ZOOM: { kind: 'view', what: 'fit' }, UNDO: { kind: 'view', what: 'undo' }, REDO: { kind: 'view', what: 'redo' }, LAYER: { kind: 'view', what: 'layers' }, HELP: { kind: 'view', what: 'help' } };
+  const simple: Record<string, Effect> = { ORTHO: { kind: 'toggle', what: 'ortho' }, GRID: { kind: 'toggle', what: 'grid' }, SNAP: { kind: 'toggle', what: 'snap' }, OSNAP: { kind: 'toggle', what: 'osnap' }, POLAR: { kind: 'toggle', what: 'polar' }, UNITS: { kind: 'toggle', what: 'units' }, ZOOM: { kind: 'view', what: 'fit' }, ZOOMADU: { kind: 'view', what: 'adu' }, MARKUP: { kind: 'view', what: 'markup' }, UNDO: { kind: 'view', what: 'undo' }, REDO: { kind: 'view', what: 'redo' }, LAYER: { kind: 'view', what: 'layers' }, HELP: { kind: 'view', what: 'help' } };
   if (simple[n]) return done(c, [simple[n]]);
   if (SEL_CMDS.has(n)) {
     if (!c.sel.length && !c.room) return out({ name: n, step: 'sel', pts: [], data: { ids: [] as string[], room: null } }, c);
@@ -138,10 +138,12 @@ export function point(st: St, q: Pt, c: Ctx): Out {
       if (st.step === 'b') return out({ ...st, step: n === 'ROTATE' ? 'a' : n === 'SCALE' ? 'k' : 't', pts }, c);
       if (n === 'ROTATE') return rotate(st, Math.atan2(q.y - st.pts[0].y, q.x - st.pts[0].x), c);
       if (n === 'SCALE') { const k = Math.hypot(q.x - st.pts[0].x, q.y - st.pts[0].y) / ft(1); return scale(st, k, c); }
-      { const dx = q.x - st.pts[0].x, dy = q.y - st.pts[0].y; let ok = true; const fx: Effect = { kind: 'apply', fn: d => { ok = mapSel(d, c, moveF(dx, dy), {}, n === 'COPY'); }, msg: T(c.es, `${n === 'COPY' ? 'Copied' : 'Moved'} ${fmtArch(Math.hypot(dx, dy))}.`, `${n === 'COPY' ? 'Copiado' : 'Movido'} ${fmtArch(Math.hypot(dx, dy))}.`) };
+      { const dx = q.x - st.pts[0].x, dy = q.y - st.pts[0].y; let ok = true; const fx: Effect = { kind: 'apply', fn: d => { ok = mapSel(d, c, moveF(dx, dy), {}, n === 'COPY'); if (!ok) throw new Error('room outside'); }, msg: T(c.es, `${n === 'COPY' ? 'Copied' : 'Moved'} ${fmtArch(Math.hypot(dx, dy))}.`, `${n === 'COPY' ? 'Copiado' : 'Movido'} ${fmtArch(Math.hypot(dx, dy))}.`) };
         void ok; return n === 'COPY' ? out({ ...st }, c, [fx]) : done(c, [fx]); }
     case 'MIRROR': if (st.step === 'm0') return out({ ...st, step: 'm1', pts }, c);
-      return done(c, [{ kind: 'apply', fn: d => { mapSel(d, c, mirrorF(st.pts[0], q), { flip: true }, false); }, msg: T(c.es, 'Mirrored.', 'Reflejado.') }]);
+      // Like AutoCAD: ask whether to erase the source objects; the default (Enter) keeps them.
+      if (st.step === 'm1') return out({ ...st, step: 'e', pts }, c);
+      return out(st, c);
     case 'OFFSET': {
       if (st.step === 'd') { const d = Math.hypot(q.x - (last?.x ?? q.x), q.y - (last?.y ?? q.y)); if (!last) return out({ ...st, pts }, c); return out({ ...st, step: 'o', pts: [], data: { d } }, c); }
       if (st.step === 'o') { const h = c.hit(q); const e = h?.ent ? ents(c.p).find(x => x.id === h.ent) : null; if (!e || !['line', 'pline', 'circle', 'arc'].includes(e.t)) return out(st, c, [{ kind: 'say', msg: T(c.es, 'Pick a line, polyline, circle or arc.', 'Elija una línea, polilínea, círculo o arco.') }]); return out({ ...st, step: 's', data: { ...st.data, id: e.id } }, c); }
@@ -217,6 +219,7 @@ export function text(st: St, s: string, c: Ctx): Out {
   if ((n === 'TEXT' || n === 'MTEXT') && st.step === 's') { const v = s.replace(/\\P/g, '\n').trim(); if (!v) return done(c); return done(c, [{ kind: 'apply', fn: addEnts([ent(c, 'text', [st.pts[0]], { text: v, h: c.textH, rot: 0 })]), msg: T(c.es, 'Text added.', 'Texto agregado.') }]); }
   if (n === 'LEADER' && st.step === 's') { const v = s.trim(); return done(c, [{ kind: 'apply', fn: addEnts([ent(c, 'leader', st.pts, { text: v, h: c.textH })]), msg: T(c.es, 'Leader added.', 'Directriz agregada.') }]); }
   if (st.step === 'sel') return out(st, c);
+  if (n === 'MIRROR' && st.step === 'e') { if (/^(Y|YES|S|SI|SÍ)$/.test(up)) return mirrorDone(st, c, true); if (up === '' || /^(N|NO)$/.test(up)) return mirrorDone(st, c, false); return out(st, c, [{ kind: 'say', msg: T(c.es, 'Type Y (yes) or N (no).', 'Escriba S (sí) o N (no).') }]); }
   if (n === 'ROOM' && st.step === 'p0') { const u = ({ BED: 'sleeping', BEDROOM: 'sleeping', SLEEP: 'sleeping', BATH: 'bath', BA: 'bath', KITCHEN: 'kitchen', KIT: 'kitchen', LIVING: 'living', LIV: 'living', COCINA: 'kitchen', BAÑO: 'bath', RECAMARA: 'sleeping', SALA: 'living' } as Record<string, string>)[up]; if (u) return out({ ...st, data: { ...st.data, use: u } }, c, [{ kind: 'say', msg: T(c.es, `Room use: ${u}.`, `Uso del cuarto: ${u}.`) }]); }
   if ((n === 'LINE' || n === 'PLINE') && st.step === 'pn' && up === 'C') return close(st, c);
   if (n === 'LINE' && st.step === 'pn' && up === 'U') { const pts = st.pts.slice(0, -1); return out({ ...st, pts, step: pts.length ? 'pn' : 'p0' }, c, [{ kind: 'apply', fn: d => { if (d.cad) d.cad.ents.pop(); } }]); }
@@ -228,6 +231,10 @@ export function text(st: St, s: string, c: Ctx): Out {
   const q = parsePoint(s, base, c.cursor);
   if (!q) return out(st, c, [{ kind: 'say', msg: T(c.es, `Not understood: "${s}". Type a point like 10,20 or @5,0 or @12<90, or a distance.`, `No se entendió: "${s}". Escriba un punto como 10,20 o @5,0 o @12<90, o una distancia.`) }]);
   return point(st, q, c);
+}
+/** MIRROR result: a mirrored copy (source kept, the default) or the source replaced. A room that would land outside the garage says so. */
+function mirrorDone(st: St, c: Ctx, erase: boolean): Out {
+  const [a, b] = st.pts; return done(c, [{ kind: 'apply', fn: d => { if (!mapSel(d, c, mirrorF(a, b), { flip: true }, !erase)) throw new Error('room outside'); }, msg: erase ? T(c.es, 'Mirrored; source erased.', 'Reflejado; original borrado.') : T(c.es, 'Mirrored copy added; source kept.', 'Copia reflejada agregada; se conservó el original.') }]);
 }
 function close(st: St, c: Ctx): Out {
   if (st.pts.length < 3) return done(c);
@@ -242,6 +249,7 @@ export function enter(st: St, c: Ctx, lastCmd?: string | null): Out {
   if (n === 'REVCLOUD' && st.pts.length >= 3) return done(c, [{ kind: 'apply', fn: addEnts([ent(c, 'cloud', st.pts, { closed: true })]), msg: T(c.es, 'Revision cloud added.', 'Nube de revisión agregada.') }]);
   if (n === 'AREA' && st.pts.length >= 3) { let a = 0, per = 0; st.pts.forEach((q, i) => { const r = st.pts[(i + 1) % st.pts.length]; a += q.x * r.y - r.x * q.y; per += Math.hypot(r.x - q.x, r.y - q.y); }); return done(c, [{ kind: 'say', msg: `${T(c.es, 'Area', 'Área')} ${Math.round(Math.abs(a) / 2 / 92903.04 * 10) / 10} ${T(c.es, 'sq ft', 'pies²')} · ${T(c.es, 'perimeter', 'perímetro')} ${fmtArch(per)}` }]); }
   if (n === 'LEADER' && st.pts.length >= 2) return out({ ...st, step: 's' }, c);
+  if (n === 'MIRROR' && st.step === 'e') return mirrorDone(st, c, false);
   return done(c);
 }
 export const esc = (c: Ctx): Out => done(c, [{ kind: 'say', msg: T(c.es, 'Cancelled.', 'Cancelado.') }]);

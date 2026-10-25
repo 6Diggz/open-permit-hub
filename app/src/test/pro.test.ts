@@ -64,8 +64,8 @@ describe('drafting graphics from the model', () => {
     const dims = d.texts.filter(t => t.layer === 'A-ANNO-DIMS').map(t => t.s);
     expect(dims).toContain(`2'-0"`); expect(d.prims.some(x => x.layer === 'A-ANNO-DIMS' && x.tone === 'fix')).toBe(true);
   });
-  it('north arrow follows northDeg, or says it is not set; a scale bar is drawn', () => {
-    expect(d.texts.some(t => t.s === 'N ?')).toBe(true);
+  it('north arrow is a standard filled arrow, plan north up when not set (never "N ?" on the sheet); a scale bar is drawn', () => {
+    expect(d.texts.some(t => /N \?|NOT SET/.test(t.s))).toBe(false); expect(d.texts.filter(t => t.s === 'N').length).toBe(1);
     const q = structuredClone(p); q.site.northDeg = 90; expect(draft(q, { anno: 96 * 25.4 }).texts.some(t => t.s === 'N')).toBe(true);
     expect(d.prims.some(x => x.layer === 'A-ANNO-SYMB' && x.fill === 'ink')).toBe(true);
   });
@@ -176,6 +176,28 @@ describe('command engine', () => {
   });
 });
 
+describe('parity re-audit bugs', () => {
+  it('1: MIRROR asks "Erase source objects?" and keeps the source by default (Enter or N); Y replaces it', () => {
+    const p0 = drive(blankProject(), ['L', '0,0', '10,0', '']).p; const id = p0.cad!.ents[0].id;
+    const r = drive(p0, ['MI', '0,1', '10,1'], { sel: [id] }); expect(r.outs[r.outs.length - 1].prompt).toMatch(/Erase source objects\? \[Yes\/No\] <No>/);
+    expect(drive(p0, ['MI', '0,1', '10,1', ''], { sel: [id] }).p.cad!.ents.length).toBe(2);
+    expect(drive(p0, ['MI', '0,1', '10,1', 'N'], { sel: [id] }).p.cad!.ents.length).toBe(2);
+    const y = drive(p0, ['MI', '0,1', '10,1', 'Y'], { sel: [id] }).p; expect(y.cad!.ents.length).toBe(1); expect(y.cad!.ents[0].pts[0].y).toBeCloseTo(F(2));
+  });
+  it('2: COPY of a room to a spot outside the garage is refused (the app says why), never a silent "Copied"', () => {
+    const p = demoProject(); p.adu.rooms = [{ id: 'r1', name: 'Bed', use: 'sleeping', shape: 'rect', poly: rect(inch(6), inch(6), F(8), F(8)), tape: { w: null, d: null }, ceilingMm: null, openings: [] }];
+    const o = start('CO', ctxOf(p, { room: 'r1' })); let st = o.st; const c = ctxOf(p, { room: 'r1' });
+    st = point(st, { x: 0, y: 0 }, c).st; const fin = point(st, { x: F(200), y: 0 }, c); const ap = fin.fx.find(f => f.kind === 'apply')!;
+    const d = structuredClone(p); expect(() => (ap as { fn: (d: Project) => void }).fn(d)).toThrow(); expect(d.adu.rooms.length).toBe(1);
+    const ok = point(st, { x: F(9), y: 0 }, c).fx.find(f => f.kind === 'apply') as { fn: (d: Project) => void }; const d2 = structuredClone(p); ok.fn(d2); expect(d2.adu.rooms.length).toBe(2);
+  });
+  it('4: a click on an object whose layer is locked names the locked layer', async () => {
+    const { lockedLayerAt } = await import('../ui/pro/view'); const p = demoProject(); const b = bbox(p.adu.footprint); const m = { x: (b.minX + b.maxX) / 2, y: (b.minY + b.maxY) / 2 };
+    expect(lockedLayerAt(p, m, 10, new Set(['A-WALL-EXST']))).toBe('A-WALL-EXST'); expect(lockedLayerAt(p, m, 10, new Set())).toBeNull();
+    expect(lockedLayerAt(p, { x: -F(500), y: 0 }, 10, new Set(['X']), [{ layer: 'X', dist: 2 }])).toBe('X');
+  });
+});
+
 describe('checks on the drawing', () => {
   it('pins come from the shared verdict, numbered, fixes first; the move fix clears fire separation', () => {
     const p = demoProject(); const rep = evaluate(p, RULES, PACK_ID); const iss = issuesOf(p, rep.results);
@@ -233,5 +255,42 @@ describe('DXF round trip (M2)', () => {
     expect(txt).toContain('EXISTING SLAB TO REMAIN'); expect(txt).toContain('A-FURN'); expect(txt).toMatch(/\nCIRCLE\r?\n/);
     const info = JSON.parse(inspect(bytes)); const s = JSON.stringify(info);
     expect(s).toMatch(/A-ANNO-DIMS/); expect(s).toMatch(/A-FURN/);
+  });
+});
+
+describe('one NCS layer table for screen and DXF (parity re-audit 3)', () => {
+  it('every layer the DXF writes for the model is a layer the Pro workspace shows', async () => {
+    const { sitePlanSpec } = await import('../out/dxf');
+    const names = new Set(LAYERS.map(l => l.id as string)); const s = sitePlanSpec(demoProject());
+    const used = new Set([...s.outlines.map(x => x.layer), ...s.texts.map(x => x.layer), ...s.dims.map(x => x.layer)]);
+    expect([...used].filter(n => !names.has(n))).toEqual([]);
+    expect(used.has('A-BLDG-EXST')).toBe(true); expect(used.has('A-ADU-WALL')).toBe(false);
+  });
+});
+
+describe('check pin layout (pins.ts)', () => {
+  it('pins clear text boxes, linework and each other, and stay near their anchors', async () => {
+    const { layoutPins } = await import('../ui/pro/pins');
+    const rects = [{ x0: -40, y0: -10, x1: 40, y1: 10 }]; const segs: [number, number, number, number][] = [[-200, 30, 200, 30], [60, -200, 60, 200]];
+    const out = layoutPins([{ key: 'a', ax: 0, ay: 0 }, { key: 'b', ax: 2, ay: 1 }, { key: 'c', ax: 1, ay: -2 }], { rects, segs }, 11);
+    for (const p of out) { expect(Math.max(rects[0].x0 - (p.x + 11), p.x - 11 - rects[0].x1, rects[0].y0 - (p.y + 11), p.y - 11 - rects[0].y1)).toBeGreaterThanOrEqual(3); expect(Math.abs(p.y - 30)).toBeGreaterThan(11); expect(Math.abs(p.x - 60)).toBeGreaterThan(11); expect(Math.hypot(p.x - p.ax, p.y - p.ay)).toBeLessThan(260); }
+    for (let i = 0; i < out.length; i++) for (let j = i + 1; j < out.length; j++) expect(Math.max(Math.abs(out[i].x - out[j].x), Math.abs(out[i].y - out[j].y))).toBeGreaterThanOrEqual(22);
+  });
+  it('a dimension the drafter drew is not drawn again by the automatic dims (same two points)', () => {
+    const p = demoProject(); const fb = bbox(p.adu.footprint); const a = { x: fb.minX, y: fb.maxY }, b = { x: fb.maxX, y: fb.maxY };
+    const base = draft(p, { anno: 96 * 25.4 }); const w = base.dims.filter(x => x.text === fmtArch(fb.maxX - fb.minX)).length;
+    const d = draft(p, { anno: 96 * 25.4, userDims: [{ a: b, b: a }] }); const keys = d.dims.map(x => [x.a, x.b].map(q => `${Math.round(q.x)},${Math.round(q.y)}`).sort().join('|'));
+    expect(new Set(keys).size).toBe(keys.length); expect(d.dims.some(x => (x.a.x === a.x && x.a.y === a.y && x.b.x === b.x) || (x.a.x === b.x && x.b.x === a.x && x.a.y === a.y))).toBe(false); void w;
+  });
+  it('text heights follow the plotted standard: notes and dims 3/32", room names 1/8"', () => {
+    const A = 48 * 25.4; const q = demoProject(); q.adu.rooms = [{ id: 'b', name: 'Bed', use: 'sleeping', shape: 'rect', poly: rect(inch(6), inch(6), F(10), F(10)), tape: { w: null, d: null }, ceilingMm: null, openings: [] }];
+    const d = draft(q, { anno: A }); expect(d.texts.find(t => t.s === 'BED')!.h).toBeCloseTo(A / 8); expect(d.texts.filter(t => t.layer === 'A-ANNO-DIMS').every(t => Math.abs(t.h - A * 3 / 32) < 1e-6)).toBe(true);
+    expect(d.texts.filter(t => t.layer === 'A-ANNO-DIMS').every(t => t.mask)).toBe(true);
+  });
+  it('pen table: cut walls heavier than existing, existing heavier than dims; LWT honors it', async () => {
+    const { PEN, lwPx } = await import('../ui/pro/drafting');
+    expect(PEN['A-WALL']).toBeGreaterThan(PEN['A-WALL-EXST']); expect(PEN['A-WALL-EXST']).toBeGreaterThan(PEN['A-ANNO-DIMS']); expect(PEN['C-PROP']).toBe(0.5);
+    expect(lwPx(0.5, true)).toBeGreaterThan(lwPx(0.18, true) * 2); expect(lwPx(0.5, false)).toBe(1);
+    const d = draft(demoProject(), { anno: 96 * 25.4 }); expect(d.prims.filter(x => x.layer === 'A-ANNO-DIMS').every(x => x.lw === PEN['A-ANNO-DIMS'])).toBe(true);
   });
 });

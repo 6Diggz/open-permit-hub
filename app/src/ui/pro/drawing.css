@@ -1,0 +1,9 @@
+/* Drawing graphics shared by the Pro canvas and the Guided lot sketch (one renderer, one look). Scope: .msd */
+.ms-light { --ms-bg: #ffffff; --ms-ink: #16181b; --ms-exst: #7d838c; --ms-exstfill: #e4e6e9; --ms-poche: #4a4f57; --ms-fix: #c0261a; --ms-g1: rgba(20,30,45,.035); --ms-g2: rgba(20,30,45,.075); --ms-sel: #1559d6; --ms-snap: #c27c00; --ms-mut: #5c6066; --ms-xh: rgba(20,30,45,.35); }
+.ms-dark { --ms-bg: #20242a; --ms-ink: #e9ebee; --ms-exst: #8d949e; --ms-exstfill: #393e46; --ms-poche: #aeb4bd; --ms-fix: #ff8b7d; --ms-g1: rgba(255,255,255,.035); --ms-g2: rgba(255,255,255,.08); --ms-sel: #6aa0ff; --ms-snap: #ffc23d; --ms-mut: #a5abb3; --ms-xh: rgba(255,255,255,.4); }
+.msd .gfx path { fill: none; stroke-linecap: round; stroke-linejoin: round; }
+.msd .t-ink { stroke: var(--ms-ink); } .msd .t-exst { stroke: var(--ms-exst); } .msd .t-fix { stroke: var(--ms-fix); }
+.msd .gfx path.f-poche { fill: var(--ms-poche); stroke: none; } .msd .gfx path.f-exst { fill: var(--ms-exstfill); } .msd .gfx path.f-bg { fill: var(--ms-bg); stroke: none; } .msd .gfx path.f-ink { fill: var(--ms-ink); }
+.msd text.tx { stroke: none; font-family: 'Public Sans', Arial, sans-serif; letter-spacing: .02em; }
+.msd text.t-ink { fill: var(--ms-ink); } .msd text.t-exst { fill: var(--ms-exst); } .msd text.t-fix { fill: var(--ms-fix); } .msd text.b { font-weight: 600; }
+.msd text.tx.mk { paint-order: stroke; stroke: var(--ms-bg); stroke-linejoin: round; }

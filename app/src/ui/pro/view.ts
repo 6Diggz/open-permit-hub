@@ -26,7 +26,9 @@ export const toUnits = (c: Cam, sx: number, sy: number, w: number, h: number) =>
 const STEPS = [inch(1), inch(3), inch(6), ft(1), ft(2), ft(5), ft(10), ft(20), ft(50), ft(100), ft(200), ft(500)];
 export function gridStep(k: number, minPx = 9): { minor: number; major: number } {
   const i = STEPS.findIndex(s => s * k >= minPx); const minor = STEPS[i < 0 ? STEPS.length - 1 : i];
-  const major = STEPS.find(s => s >= minor * 5 - 1e-6 && s * k >= minPx * 5) ?? minor * 10; return { minor, major };
+  // Major lines on round feet a drafter counts by: every 10' at plan scales, then 50', 100', 500'.
+  const MAJ = [ft(1), ft(5), ft(10), ft(50), ft(100), ft(500), ft(1000)];
+  const major = MAJ.find(s => s >= minor * 4 - 1e-6 && s >= ft(10) - 1e-6 && s * k >= minPx * 4) ?? MAJ.find(s => s >= minor * 4 - 1e-6 && s * k >= minPx * 4) ?? minor * 10; return { minor, major };
 }
 /** Grid lines covering a view box (screen-oriented units), as two path strings. */
 export function gridPaths(vb: { x: number; y: number; w: number; h: number }, k: number): { minor: string; major: string; step: number } {
@@ -90,6 +92,14 @@ export function hitTest(p: Project, q: Pt, tolMm: number, locked: Set<string> = 
   if (!locked.has('A-BLDG-EXST') && inside(q, p.site.primary)) return { kind: 'house' };
   if (!locked.has('C-PROP')) { const lot = p.site.lot; const near = lot.some((a, i) => { const b = lot[(i + 1) % lot.length]; const dx = b.x - a.x, dy = b.y - a.y, L = dx * dx + dy * dy; let t = L ? ((q.x - a.x) * dx + (q.y - a.y) * dy) / L : 0; t = Math.max(0, Math.min(1, t)); return Math.hypot(q.x - a.x - t * dx, q.y - a.y - t * dy) <= tolMm; }); if (near) return { kind: 'lot' }; }
   return null;
+}
+/** The locked layer of whatever is under q (a drafting entity or a model object), so a click on it can say so instead of doing nothing. */
+export function lockedLayerAt(p: Project, q: Pt, tolMm: number, locked: Set<string>, ents: { layer: string; dist: number }[] = []): string | null {
+  const e = ents.find(x => x.dist <= tolMm && locked.has(x.layer)); if (e) return e.layer;
+  const h = hitTest(p, q, tolMm); if (!h) return null;
+  const opening = h.kind === 'opening' ? p.adu.rooms.find(r => r.id === h.room)?.openings.find(o => o.id === h.id) : undefined;
+  const layers = h.kind === 'opening' ? [opening?.kind === 'window' ? 'A-GLAZ' : 'A-DOOR'] : h.kind === 'room' ? ['A-WALL', 'A-AREA-IDEN'] : h.kind === 'adu' ? [p.adu.mode === 'conversion' ? 'A-WALL-EXST' : 'A-WALL'] : h.kind === 'house' ? ['A-BLDG-EXST'] : h.kind === 'lot' ? ['C-PROP'] : [];
+  return layers.find(l => locked.has(l)) ?? null;
 }
 /** Outline (model) of a selection, for grips and zoom-to-selection. */
 export function selOutline(p: Project, s: Sel | null): Poly | null {
