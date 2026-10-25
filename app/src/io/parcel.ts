@@ -67,7 +67,7 @@ export function splitAddress(raw: string): { street: string; zip: string } {
   const t = s.replace(/,?\s*(USA|U\.S\.A\.|United States(?: of America)?)\s*$/i, '').trim();
   const zip = t.match(/\b(9\d{4})(?:-\d{4})?\s*$/)?.[1] ?? '';
   // Unit words are cut only when a unit token follows ("Apt 2", "Ste #B"), so "1300 Suite Ave" keeps its street name.
-  const street = (t.split(',')[0] ?? '').replace(/\b9\d{4}(?:-\d{4})?\s*$/, '').replace(/\s*#\s*\w{1,6}\s*$|\s+\b(apt|apartment|unit|ste|suite|spc|space)\b\.?\s*#?\s*[\w-]{1,6}\s*$/i, '').trim();
+  const street = (t.split(',')[0] ?? '').replace(/\b9\d{4}(?:-\d{4})?\s*$/, '').replace(/\s*#\s*\w{1,6}\s*$|\s+\b(apt|apartment|unit|ste|suite|spc|space)\b\.?\s*#?\s*(?!(?:ave|avenue|st|street|blvd|dr|drive|rd|road|way|pl|place|ln|lane|ct|court|ter|cir|hwy|pkwy)\b)[\w-]{1,6}\s*$/i, '').trim();
   return { street, zip };
 }
 

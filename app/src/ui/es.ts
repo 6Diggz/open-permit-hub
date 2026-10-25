@@ -432,5 +432,17 @@ export const ES = {
 "garage outline": "contorno del garaje",
 "2025 burn area": "área de incendio 2025",
 "Downtown zoning": "zonificación del Centro",
-"house and garage outlines": "contornos de casa y garaje"
+"house and garage outlines": "contornos de casa y garaje",
+"Which side of the lot is the street on?": "¿De qué lado del lote está la calle?",
+"South side": "Lado sur",
+"North side": "Lado norte",
+"East side": "Lado este",
+"West side": "Lado oeste",
+"From the city parcel map": "Del mapa de parcelas de la ciudad",
+"This turns the north arrow on the plans. Look up fills it from the parcel map.": "Esto gira la flecha del norte en los planos. Buscar la llena con el mapa de parcelas.",
+"Search notes": "Buscar notas",
+"Word, name or letter item": "Palabra, nombre o punto de la carta",
+"All notes": "Todas las notas",
+"Open only": "Solo abiertas",
+"Resolved only": "Solo resueltas"
 } as const;

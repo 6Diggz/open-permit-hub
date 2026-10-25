@@ -346,11 +346,14 @@ pub fn loss_report(bytes: &[u8], target: &str, units: i16) -> Value {
     // Pair conversions: LwPolyline written as Polyline2D in old formats, Spline/Ellipse written as polylines.
     let poly_in = *before.get("LwPolyline").unwrap_or(&0) + approx; let poly_out = *after.get("LwPolyline").unwrap_or(&0) + *after.get("Polyline2D").unwrap_or(&0);
     let poly_converted = r12 && poly_out >= poly_in && poly_in > 0;
+    // R12 has no MTEXT: the writer explodes each one into TEXT lines (one per line of the paragraph), so the words stay.
+    let (mt_in, tx_in, tx_out) = (*before.get("MText").unwrap_or(&0), *before.get("Text").unwrap_or(&0), *after.get("Text").unwrap_or(&0));
+    let mtext_converted = r12 && mt_in > 0 && *after.get("MText").unwrap_or(&0) == 0 && tx_out >= tx_in + mt_in;
     let keys: std::collections::BTreeSet<&String> = before.keys().chain(after.keys()).collect();
     for k in keys {
         let (b, a) = (*before.get(k).unwrap_or(&0), *after.get(k).unwrap_or(&0));
         let curve = r12 && (k == "Spline" || k == "Ellipse") && approx > 0;
-        let conv = poly_converted && (k == "LwPolyline" || k == "Polyline2D");
+        let conv = (poly_converted && (k == "LwPolyline" || k == "Polyline2D")) || (mtext_converted && k == "MText");
         let tidied = *cleaned.get(k).unwrap_or(&0);
         let status = if curve { "approximated" } else if conv { "converted" } else if tidied > 0 && b >= a && b - a <= tidied { "cleaned" } else if b > 0 && a == 0 { "dropped" } else if a < b { "reduced" } else if b == 0 && a > 0 { "added" } else { "kept" };
         if status == "dropped" || status == "reduced" { lost += b - a; }
