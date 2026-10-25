@@ -1,0 +1,4 @@
+# Rule packs and anything that changes a check result need the maintainer's review.
+/app/src/rules/  @6Diggz
+/mcp/            @6Diggz
+/.github/        @6Diggz

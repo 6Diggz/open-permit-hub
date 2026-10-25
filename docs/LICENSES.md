@@ -8,4 +8,4 @@
 | React, Vite | MIT | App |
 | @modelcontextprotocol/sdk | MIT | Claude connection |
 | Public Sans font | OFL-1.1 | UI typeface |
-Rules: no GPL code in the bundle (CI check planned). Hatch patterns: none shipped yet; only our own CC0 patterns may be added.
+Rules: no GPL code in the bundle (checked in CI by license-checker). The full notices ship as `THIRD_PARTY_NOTICES.txt` on the site and in every handoff ZIP (regenerate with `node app/scripts/notices.mjs`). Hatch patterns: none shipped yet; only our own CC0 patterns may be added.

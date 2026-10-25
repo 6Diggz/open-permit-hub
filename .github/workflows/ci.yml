@@ -5,23 +5,41 @@ jobs:
   app:
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
-      - uses: dtolnay/rust-toolchain@stable
-        with: { targets: wasm32-unknown-unknown }
-      - uses: Swatinem/rust-cache@v2
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+      - uses: dtolnay/rust-toolchain@b725eda525362e7cf34af9a7243cac1e3f01a7ec # stable
+        with: { toolchain: stable, targets: wasm32-unknown-unknown }
+      - uses: Swatinem/rust-cache@d1527c8f67ef9af357290475d4af4b0fab8f12e0 # v2
         with: { workspaces: clean }
-      - run: cargo install wasm-pack --locked
-      - run: cd clean && cargo test --release && wasm-pack build --release --target web --out-dir ../app/src/clean-wasm
-      - uses: actions/setup-node@v4
+      - uses: taiki-e/install-action@1e29709c0ec63babbe8f266397a465f29a825f91 # v2
+        with: { tool: "wasm-pack@0.15.0" }
+      - name: Rust tests
+        run: cd clean && cargo test --release
+      - name: Build the CAD WebAssembly
+        run: cd clean && wasm-pack build --release --target web --out-dir ../app/src/clean-wasm
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
         with: { node-version: 22 }
-      - run: cd app && npm ci && npx vitest run && npm run build
+      - name: App tests, typecheck, build, lint
+        run: cd app && npm ci && npx vitest run && npm run build && npx oxlint
       - name: No GPL code in the web bundle
-        run: cd app && npx --yes license-checker --production --failOn "GPL;AGPL;LGPL" --summary
+        run: cd app && npx license-checker --production --excludePackages app@0.0.0 --failOn "GPL;AGPL;LGPL" --summary
       - name: Bundle size budget (main JS under 3 MB)
         run: cd app && test $(du -cb dist/assets/index-*.js | tail -1 | cut -f1) -lt 3000000
-      - run: cd mcp && npm ci && npx esbuild src/server.ts --bundle --platform=node --format=esm --outfile=dist/server.mjs --banner:js="import{createRequire}from'module';const require=createRequire(import.meta.url);" && npx esbuild src/selftest.ts --bundle --platform=node --format=esm --outfile=dist/selftest.mjs --banner:js="import{createRequire}from'module';const require=createRequire(import.meta.url);" && node dist/selftest.mjs
-      - uses: actions/upload-artifact@v4
+      - name: Browser tests (390 and 1440 wide, offline, deploy update, accessibility)
+        run: cd app && npx playwright install --with-deps chromium && node e2e/e2e.mjs
+      - name: MCP server self-test
+        run: cd mcp && npm ci && npm test
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
         with: { name: web-build, path: app/dist }
+  audit:
+    # Known-vulnerability check of the Rust crates (reported on every push; it does not hold back a site deploy).
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+      - uses: taiki-e/install-action@1e29709c0ec63babbe8f266397a465f29a825f91 # v2
+        with: { tool: "cargo-audit@0.22.2" }
+      - run: cd clean && cargo audit
+      - run: cd app && npm audit --omit=dev --audit-level=high
+      - run: cd mcp && npm audit --omit=dev --audit-level=high
   deploy:
     needs: app
     if: github.ref == 'refs/heads/main' && github.event_name == 'push'
@@ -29,9 +47,9 @@ jobs:
     permissions: { pages: write, id-token: write }
     environment: { name: github-pages, url: "${{ steps.d.outputs.page_url }}" }
     steps:
-      - uses: actions/download-artifact@v4
+      - uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4
         with: { name: web-build, path: dist }
-      - uses: actions/upload-pages-artifact@v3
+      - uses: actions/upload-pages-artifact@56afc609e74202658d3ffba0e8f6dda462b719fa # v3
         with: { path: dist }
       - id: d
-        uses: actions/deploy-pages@v4
+        uses: actions/deploy-pages@d6db90164ac5ed86f2b6aed7e0febac5b3c0c03e # v4

@@ -21,11 +21,12 @@ Every result names the code section behind it. Unknown answers never show as a p
 ```bash
 cd app && npm install && npm run dev        # open the printed URL
 npx vitest run                               # rule + export tests
+npm run build && node e2e/e2e.mjs           # browser tests (phone + desktop, offline, accessibility)
 ```
 
 ## Use it with Claude
 ```bash
-cd mcp && npm install && npx esbuild src/server.ts --bundle --platform=node --format=esm --outfile=dist/server.mjs
+cd mcp && npm install && npm test        # builds dist/server.mjs and runs the self-test
 ```
 Add to Claude Desktop's config (`claude_desktop_config.json`):
 ```json
@@ -39,6 +40,14 @@ Tools: `run_checks`, `list_rules`, `propose_edit`, `apply_edit`, `materials`, `c
 - It does not approve plans or make a submittal-ready set. A human preparer finalizes the handoff packet.
 - It does not do structural or Title 24 energy design. It tells you when you need those pros.
 - Only LA City in this version.
+
+## Docs
+- `CHANGELOG.md`, `GOVERNANCE.md`, `SECURITY.md`, `ACCESSIBILITY.md`
+- `docs/JURISDICTION_PACKS.md` (adding cities), `docs/DWG_FIDELITY.md` (Clean and Fix limits), `docs/PRIVACY_NOTES.md`
+- Pending decisions: `docs/TERMS_PENDING_ATTORNEY_REVIEW.md`, `docs/TRADEMARK_PENDING.md`
+
+## Hosting
+The site is static files on GitHub Pages (free; fits today's size and traffic). GitHub Pages is not meant for a commercial SaaS: before any paid tier, move hosting (for example to Cloudflare Pages) and keep the bundle budget check in CI.
 
 ## License
 Our code: Apache-2.0. `acadrust` (used unmodified by `clean/`): MPL-2.0. See `docs/LICENSES.md`.
