@@ -2,6 +2,9 @@
 // .permitpack copy that carries the photos. Items are our own plain words, keyed to the LADBS correction sheet
 // (form PC/STR/Corr.Lst.20A) item ids and the California Residential Code section numbers they point at.
 import type { Project } from './model';
+import type { Report } from '../rules/engine';
+import { readiness } from '../rules/readiness';
+import { RULE_ITEMS } from '../rules/ladbs-adu-2025';
 
 export type InspStatus = 'pass' | 'fail' | 'na';
 export interface InspResult { s: InspStatus | null; note: string; /** Photo id (the photo itself is kept on this device, not in the project). */ photo: string | null; at: string }
@@ -82,3 +85,17 @@ export function inspectionPack(base: string, photos: Record<string, string>, max
   j.inspectionPhotos = keep; return { text: JSON.stringify(j, null, 1), left };
 }
 export const hasInspection = (p: Project) => !!p.inspection && (Object.keys(p.inspection.items).length > 0 || !!p.inspection.inspector || !!p.inspection.general);
+
+/** r5whole-02: items marked Pass in the field whose sheet items the app's checks fail (the field result overrides a failing check). */
+export function fieldConflicts(p: Project, rep: Report): string[] {
+  const failing = new Set(readiness(p, rep).items.filter(x => x.state === 'failing').map(x => x.item.id));
+  return INSP_ITEMS.filter(x => result(p.inspection, x.id).s === 'pass' && x.sheet.some(id => failing.has(id))).map(x => x.id);
+}
+/** The app's own result for one field item: the failing rule messages behind its sheet items (empty when nothing fails). */
+export function appFails(p: Project, rep: Report, itemId: string, lang: 'en' | 'es'): string[] {
+  const x = INSP_ITEMS.find(i => i.id === itemId); if (!x) return [];
+  const rd = readiness(p, rep); const bad = new Set(rd.items.filter(i => i.state === 'failing').map(i => i.item.id));
+  if (!x.sheet.some(id => bad.has(id))) return [];
+  return [...new Set(rep.results.filter(r => r.status === 'FAIL' && !r.dismissed && (RULE_ITEMS_OF(r.rule.id).some(id => x.sheet.includes(id)))).map(r => r.msg[lang]))];
+}
+const RULE_ITEMS_OF = (id: string): string[] => RULE_ITEMS[id] ?? [];

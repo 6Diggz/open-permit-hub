@@ -1,6 +1,6 @@
 import type { Project } from '../core/model';
 import type { Report } from '../rules/engine';
-import { readiness, scoreLine } from '../rules/readiness';
+import { readiness, scoreLine, plainAnswer } from '../rules/readiness';
 import { RULE_ITEMS } from '../rules/ladbs-adu-2025';
 import { PACK, rulesLine } from '../rules/pack';
 import { citeText } from '../rules/cites-es';
@@ -15,10 +15,10 @@ export function reportHTML(p: Project, rep: Report, lang: 'en' | 'es' = p.people
   const order = ['FAIL', 'UNKNOWN', 'NOT_CHECKED', 'INFO', 'PASS'];
   const items = [...rep.results].sort((a, b) => order.indexOf(a.status) - order.indexOf(b.status)).map(r => `<li><h3>${esc(label[r.status])}: ${esc(r.rule.id)} ${esc(r.rule.title[lang])}</h3><p>${esc(r.msg[lang])}</p>${r.next ? `<p><strong>${es ? 'Siguiente paso' : 'Next step'}:</strong> ${esc(r.next[lang])}</p>` : ''}${r.dismissed ? `<p>${es ? 'Descartado por el usuario' : 'Dismissed by user'}: ${esc(r.dismissed)}</p>` : ''}<p><small>${esc(r.rule.cites.map(c => citeText(c, es) + (c.verified ? '' : es ? ' [cita en verificación]' : ' [citation pending verification]')).join('; '))}${RULE_ITEMS[r.rule.id]?.length ? esc(`; ${es ? 'hoja' : 'sheet'} ${RULE_ITEMS[r.rule.id].join(', ')}`) : ''}</small></p></li>`).join('\n');
   return `<!doctype html><html lang="${es ? 'es' : 'en'}"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1"><title>${esc(p.name)} - ${es ? 'informe de revisión' : 'check report'}</title>
-<style>body{font-family:system-ui,sans-serif;max-width:46rem;margin:2rem auto;padding:0 1rem;line-height:1.5;color:#1e2228;background:#fff}h3{font-size:1rem;margin:0}li{margin:0 0 1rem}small{color:#4a515c}</style></head>
-<body><main><p>${es ? 'Revisión por software, no una revisión de la ciudad' : 'Software check, not a city review'}</p>
-<h1>${esc(p.name)}</h1><p>${esc(p.site.address || '-')} · APN ${esc(p.site.apn || '-')}</p>
-<h2>${esc(ov)}</h2><p>${esc(fr.text)}</p>
+<style>body{font-family:system-ui,sans-serif;max-width:46rem;margin:2rem auto;padding:0 1rem;line-height:1.5;color:#1e2228;background:#fff}h3{font-size:1rem;margin:0}li{margin:0 0 1rem}small{color:#4a515c}@media print{body{margin:0;max-width:none}li{break-inside:avoid}h2,h3{break-after:avoid}.noprint{display:none}}@page{margin:0.6in}</style></head>
+<body><main><p class="noprint"><button type="button" onclick="window.print()">${es ? 'Imprimir' : 'Print'}</button></p><p>${es ? 'Revisión por software, no una revisión de la ciudad' : 'Software check, not a city review'}</p>
+<h1>${esc(p.name)}</h1><p>${esc(p.site.address || '-')} · APN ${esc(p.site.apn || '-')} · ${es ? 'fecha' : 'date'} ${new Date().toISOString().slice(0, 10)}</p>
+<h2>${esc(ov)}</h2><p><strong>${esc(plainAnswer(p, rep)[lang])}</strong></p><p>${esc(fr.text)}</p>
 <p>${es ? 'Revisiones de reglas' : 'Rule checks'}: ${label.PASS} ${rep.counts.PASS}, ${label.FAIL} ${rep.counts.FAIL}, ${label.UNKNOWN} ${rep.counts.UNKNOWN}, ${label.NOT_CHECKED} ${rep.counts.NOT_CHECKED}</p>
 <p>${es ? 'Puntos de la hoja LADBS' : 'LADBS sheet items'}: ${esc(scoreLine(readiness(p, rep), es))} (${esc(PACK.sheet.form)} Rev ${esc(PACK.sheet.rev)})</p>
 <h2>${es ? 'Resultados' : 'Results'}</h2><ul>${items}</ul>

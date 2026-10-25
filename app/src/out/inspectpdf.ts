@@ -1,7 +1,8 @@
 // Site-visit record (PDF, letter size): every checklist item with its result, note and photo. Fonts embedded like every sheet.
 import { PDFDocument, rgb, PDFName, PDFString, type PDFFont, type PDFPage } from 'pdf-lib';
 import type { Project } from '../core/model';
-import { INSP_ITEMS, GROUPS, result, tally } from '../core/inspection';
+import { INSP_ITEMS, GROUPS, result, tally, fieldConflicts, appFails } from '../core/inspection';
+import { getVerdict } from '../core/verdict';
 import { sheetFonts } from './pdffonts';
 import { safe } from './glyphs';
 
@@ -15,6 +16,8 @@ function wrap(t: string, f: PDFFont, size: number, max: number): string[] {
 /** `photos`: JPEG bytes by photo id (missing ids print "photo not on this device"). */
 export async function inspectionPDF(p: Project, photos: Record<string, Uint8Array>, lang: 'en' | 'es' = p.people.language): Promise<Uint8Array> {
   const es = lang === 'es'; const ins = p.inspection; const t = tally(ins);
+  // r5whole-02: the app's own result is printed next to every field result; a Pass over a failing check is recorded as an override.
+  const rep = getVerdict(p).report; const conf = new Set(fieldConflicts(p, rep));
   const doc = await PDFDocument.create(); doc.setTitle(`${p.name} - ${es ? 'registro de visita' : 'site visit record'}`); doc.catalog.set(PDFName.of('Lang'), PDFString.of(es ? 'es-US' : 'en-US'));
   const { f, fb } = await sheetFonts(doc);
   let pg: PDFPage = doc.addPage([612, 792]); let y = 740; const X = 54, W = 504; let pageNo = 1;
@@ -26,6 +29,7 @@ export async function inspectionPDF(p: Project, photos: Record<string, Uint8Arra
   line(`${p.site.address || '-'}   APN ${p.site.apn || '-'}`, 10, f, MUTE);
   line(`${es ? 'Inspector' : 'Inspector'}: ${ins?.inspector || '-'}   ${es ? 'Fecha' : 'Date'}: ${ins?.date || '-'}`, 10, f, INK); y -= 4;
   line(`${es ? 'Cumple' : 'Pass'} ${t.pass}  ·  ${es ? 'No cumple' : 'Fail'} ${t.fail}  ·  ${es ? 'No aplica' : 'N/A'} ${t.na}  ·  ${es ? 'Sin revisar' : 'Not checked'} ${t.open}  ·  ${es ? 'Fotos' : 'Photos'} ${t.photos}`, 11, fb, t.fail ? RED : INK);
+  if (conf.size) line(es ? `${conf.size} resultado(s) Cumple anulan una revisión que falla en la app (ver abajo).` : `${conf.size} Pass result${conf.size === 1 ? '' : 's'} override${conf.size === 1 ? 's' : ''} a check that fails in the app (see below).`, 10, fb, RED);
   if (ins?.general) { y -= 4; line(es ? 'Notas generales' : 'General notes', 10, fb); line(ins.general, 10, f, INK); }
   y -= 8;
   let group = '';
@@ -36,7 +40,10 @@ export async function inspectionPDF(p: Project, photos: Record<string, Uint8Arra
     need(34); pg.drawText(lab, { x: X, y, size: 9, font: fb, color: col });
     const txt = wrap(safe(it[lang]), fb, 10, W - 80); txt.forEach((l, i) => { if (i) need(14); pg.drawText(l, { x: X + 80, y, size: 10, font: fb, color: INK }); y -= 14; });
     line([es ? `Hoja LADBS ${it.sheet.join(', ')}` : `LADBS sheet ${it.sheet.join(', ')}`, it.code].filter(Boolean).join('  ·  ') + (r.at ? `  ·  ${r.at.slice(0, 16).replace('T', ' ')}` : ''), 8, f, MUTE, 80);
-    if (r.note) line(r.note, 9, f, INK, 80);
+    const af = appFails(p, rep, it.id, lang);
+    if (af.length) line((es ? 'Las revisiones de la app no cumplen este punto: ' : "The app's checks fail this item: ") + af.join(' '), 8, fb, RED, 80);
+    if (conf.has(it.id)) line(es ? `Cumple en campo anula la revisión de la app. Motivo: ${r.note || '(sin motivo)'}` : `Field Pass overrides the app's failing check. Reason: ${r.note || '(none given)'}`, 9, fb, RED, 80);
+    else if (r.note) line(r.note, 9, f, INK, 80);
     if (r.photo) {
       const bytes = photos[r.photo];
       if (bytes) { try { const img = await doc.embedJpg(bytes); const k = Math.min(200 / img.width, 150 / img.height); const w = img.width * k, h = img.height * k; need(h + 8); pg.drawImage(img, { x: X + 80, y: y - h + 8, width: w, height: h }); y -= h + 6; }

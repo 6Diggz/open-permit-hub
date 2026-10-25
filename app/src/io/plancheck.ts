@@ -2,11 +2,14 @@
 // items. It is an assist, not a review: drawings, stamps and signatures are pictures and are never read, so "not found"
 // means "not found in the text", and every item carries a confidence. Everything runs on the device.
 import { CATALOG } from '../rules/ladbs-adu-2025';
+import { PARAMS } from '../rules/la-city';
 
 /** One line of text on a page (items joined left to right). */
 export interface PageText { page: number; lines: string[]; /** Positioned segments, used to read a title block label's value in its own column. */ segs?: Seg[] }
 export type Confidence = 'high' | 'medium' | 'low';
-export type ItemState = 'addressed' | 'partial' | 'missing';
+/** addressed = mentioned on a page (text only, never proof); negated = the note says it is not provided (N/A, TBD, see engineer);
+ * conflict = a number read from the text fails the rule; partial = part of it found; missing = not found in the text. */
+export type ItemState = 'addressed' | 'negated' | 'conflict' | 'partial' | 'missing';
 export interface Hit { page: number; text: string }
 export interface CheckItem { id: string; state: ItemState; confidence: Confidence; pages: number[]; evidence: Hit[];
   /** Plain words about what matched, or what to look for (en / es). */ why: { en: string; es: string };
@@ -38,6 +41,17 @@ export function normalize(s: string): string {
 export interface Seg { x: number; y: number; s: string }
 /** pdf.js text items -> segments: items on the same baseline (within 2 pt) and close together (gap under 3 em) join into one. */
 export function toSegs(items: { str: string; transform: number[]; width?: number }[]): Seg[] {
+  // r5plan-06: text turned 90 degrees (a vertical title block) is read in its own frame: along the text is x, across it is y.
+  const rot = items.filter(i => Math.abs(i.transform[1]) > Math.abs(i.transform[0]));
+  if (!rot.length) return toSegsFlat(items);
+  const flat = toSegsFlat(items.filter(i => !rot.includes(i)));
+  const frame = (dir: 1 | -1) => toSegsFlat(rot.map(i => ({ ...i, transform: [Math.abs(i.transform[1]), 0, 0, Math.abs(i.transform[1]), i.transform[5], -1e5 + dir * i.transform[4]] })));
+  // Which way the lines run depends on the program; pick the frame where more labels have a value (not another label) under them.
+  const score = (sg: Seg[]) => sg.filter(g => LABELS.some(([, r]) => r.test(g.s))).filter(g => { const b = sg.filter(v => v !== g && Math.abs(v.x - g.x) <= 12 && v.y < g.y && g.y - v.y <= 40).sort((a, b) => b.y - a.y)[0]; return b && !LABELS.some(([, r]) => r.test(b.s)); }).length;
+  const a = frame(-1), b = frame(1);
+  return [...flat, ...(score(b) > score(a) ? b : a)];
+}
+function toSegsFlat(items: { str: string; transform: number[]; width?: number }[]): Seg[] {
   const rows: { y: number; parts: { x: number; w: number; e: number; s: string }[] }[] = [];
   for (const it of items) { if (!it.str || !it.str.trim()) continue; const x = it.transform[4], y = it.transform[5];
     let r = rows.find(q => Math.abs(q.y - y) <= 2); if (!r) { r = { y, parts: [] }; rows.push(r); } r.parts.push({ x, w: it.width ?? 0, e: Math.abs(it.transform[0]) || 10, s: it.str }); }
@@ -59,9 +73,13 @@ export function parseInches(s: string): number | null {
   let m = s.match(FTIN); if (m) return Number(m[1]) * 12 + (m[2] ? Number(m[2]) : 0) + (m[3] ? Number(m[3]) / Number(m[4]) : 0);
   m = s.match(/(\d{1,3}(?:\.\d+)?)\s*(?:"|in\b|inch)/i); if (m) return Number(m[1]);
   m = s.match(/(\d{1,3}(?:\.\d+)?)\s*(?:ft|feet)\b/i); if (m) return Number(m[1]) * 12;
+  // Metric drawings (r5plan-09): mm, cm, m.
+  m = s.match(/(\d{2,5}(?:\.\d+)?)\s*mm\b/i); if (m) return Number(m[1]) / 25.4;
+  m = s.match(/(\d{1,4}(?:\.\d+)?)\s*cm\b/i); if (m) return Number(m[1]) / 2.54;
+  m = s.match(/(\d{1,2}(?:\.\d+)?)\s*m\b/i); if (m) return Number(m[1]) / 0.0254;
   return null;
 }
-const LEN_G = /\d{1,3}\s*'\s*-?\s*(?:\d{1,2}(?:\.\d+)?)?(?:\s+\d\/\d{1,2})?\s*"?|\d{1,3}(?:\.\d+)?\s*(?:"|in\b|ft\b|feet\b)/gi;
+const LEN_G = /\d{1,3}\s*'\s*-?\s*(?:\d{1,2}(?:\.\d+)?)?(?:\s+\d\/\d{1,2})?\s*"?|\d{1,3}(?:\.\d+)?\s*(?:"|in\b|ft\b|feet\b)|\d{2,5}(?:\.\d+)?\s*mm\b|\d{1,4}(?:\.\d+)?\s*cm\b|\d{1,2}\.\d+\s*m\b/gi;
 const lengthsIn = (s: string) => [...s.matchAll(LEN_G)].map(m => ({ t: m[0].trim(), v: parseInches(m[0]) })).filter((x): x is { t: string; v: number } => x.v != null && x.v > 0);
 /** The first length after the keyword (else the last one before it): "Outside 20' x 20' Ceiling 8'" -> 8'. */
 function lenNear(s: string, re: RegExp): { t: string; v: number }[] {
@@ -105,6 +123,9 @@ const INLINE: [TitleField, RegExp][] = [
 ];
 const ADDRESS = /\b\d{2,6}\s+(?:[NSEW]\.?\s+)?[A-Za-z0-9.' ]{2,30}?\s(?:st|street|ave|avenue|blvd|boulevard|dr|drive|rd|road|pl|place|way|ln|lane|ct|court|ter|terrace|cir|circle)\b\.?/i;
 
+/** r5plan-01: a note that says the thing is not there. "No gas" is the all-electric note itself, so it is not a negation. */
+const NEG = /\b(not provided|not shown|not included|n\/a|none|tbd|t\.b\.d\.|not required|see (?:structural |the )?(?:engineer|engineering|structural|s-sheets)|by others|non[- ]rated)\b|^\s*no\s|\bnot\s/i;
+export const negated = (t: string) => NEG.test(t.replace(/\bno gas\b/gi, ''));
 const clip = (s: string, n = 90) => (s.length > n ? s.slice(0, n - 1) + '…' : s);
 
 export function analyze(pagesIn: PageText[]): PlanCheck {
@@ -118,6 +139,13 @@ export function analyze(pagesIn: PageText[]): PlanCheck {
   const sheets: Sheet[] = pages.map(p => {
     const kinds = new Set<SheetKind>(); const scales: string[] = []; let id: string | null = null;
     p.lines.forEach((l, i) => {
+      if (!id) { const lab = l.match(/^sheet(?: no\.?| number| #)?\s*:?\s*(.*)$/i);
+        const cand = lab ? (lab[1] ? lab[1] : p.lines[i + 1] ?? '') : null;
+        if (cand != null) { const m = cand.match(SHEET_ID); if (m) id = m[1].replace(/\s/g, '').toUpperCase(); } } });
+    if (!id) for (const l of p.lines) { const m = l.match(new RegExp('^' + SHEET_ID.source + '(\\s|$)')); if (m && l.length < 50 && !/\s\S/.test(l.slice(m[0].length - 1).trim())) { id = m[1].replace(/\s/g, '').toUpperCase(); break; } }
+    p.lines.forEach(l => {
+      // r5plan-03: a sheet-index row ("A3.1 ELEVATIONS") names another sheet; it is not this sheet's own title.
+      const row = l.match(new RegExp('^' + SHEET_ID.source + '\\s+\\S')); if (row && row[1].replace(/\s/g, '').toUpperCase() !== id) return;
       for (const [k, re] of KIND) if (re.test(l)) {
         // "section" also appears in code notes ("Section R310"): count it only on a short heading-like line.
         if (k === 'section' && l.length > 40) continue;
@@ -125,13 +153,13 @@ export function analyze(pagesIn: PageText[]): PlanCheck {
         kinds.add(k);
       }
       const s = l.match(SCALE); if (s) scales.push(normalize(s[1])); else if (NTS.test(l)) scales.push('NTS');
-      if (!id) { const lab = l.match(/^sheet(?: no\.?| number| #)?\s*:?\s*(.*)$/i);
-        const cand = lab ? (lab[1] ? lab[1] : p.lines[i + 1] ?? '') : null;
-        if (cand != null) { const m = cand.match(SHEET_ID); if (m) id = m[1].replace(/\s/g, '').toUpperCase(); } }
     });
-    if (!id) for (const l of p.lines) { const m = l.match(new RegExp('^' + SHEET_ID.source + '(\\s|$)')); if (m && l.length < 50) { id = m[1].replace(/\s/g, '').toUpperCase(); break; } }
     return { page: p.page, id, kinds: [...kinds], scales: [...new Set(scales)].slice(0, 4), chars: p.lines.join(' ').length };
   });
+  // r5plan-03: sheet-index rows name other sheets; they are never evidence for a note.
+  const idOf = new Map(sheets.map(x => [x.page, x.id]));
+  const indexRow = (page: number, t: string) => { const m = t.match(new RegExp('^' + SHEET_ID.source + '\\s+\\S')); return !!m && m[1].replace(/\s/g, '').toUpperCase() !== idOf.get(page); };
+  for (let k = all.length - 1; k >= 0; k--) if (indexRow(all[k].page, all[k].text)) all.splice(k, 1);
   const kindPages = (k: SheetKind) => sheets.filter(s => s.kinds.includes(k)).map(s => s.page);
 
   // Title block (label on its own item/line, value on the next; or "Label: value" inline)
@@ -176,7 +204,8 @@ export function analyze(pagesIn: PageText[]): PlanCheck {
   const add = (id: string, state: ItemState, confidence: Confidence, evidence: Hit[], why: { en: string; es: string }, attention?: { en: string; es: string }) =>
     items.push({ id, state, confidence: state === 'missing' ? 'low' : confidence, pages: uniq(evidence), evidence: evidence.slice(0, 4), why, ...(attention ? { attention } : {}) });
   const kw = (id: string, re: RegExp, enWhat: string, esWhat: string, strong?: RegExp) => {
-    const h = find(re); const s = strong ? h.filter(x => strong.test(x.text)) : [];
+    const all_ = find(re); const neg = all_.filter(x => negated(x.text)); const h = all_.filter(x => !negated(x.text)); const s = strong ? h.filter(x => strong.test(x.text)) : [];
+    if (!h.length && neg.length) return add(id, 'negated', 'medium', neg, { en: `${enWhat[0].toUpperCase() + enWhat.slice(1)} is mentioned, but the note says it is not provided (for example N/A, TBD or see engineer).`, es: `Se menciona ${esWhat}, pero la nota dice que no se incluye (por ejemplo N/A, TBD o ver ingeniero).` });
     if (!h.length) return add(id, 'missing', 'low', [], { en: `No note about ${enWhat} was found in the text.`, es: `No se encontró una nota sobre ${esWhat} en el texto.` });
     add(id, 'addressed', s.length ? 'high' : 'medium', s.length ? s : h, s.length ? { en: `A specific note about ${enWhat} was found.`, es: `Se encontró una nota específica sobre ${esWhat}.` } : { en: `${enWhat[0].toUpperCase() + enWhat.slice(1)} is mentioned. Check the note says enough.`, es: `Se menciona ${esWhat}. Revise que la nota diga lo suficiente.` });
   };
@@ -229,26 +258,30 @@ export function analyze(pagesIn: PageText[]): PlanCheck {
   kw('III.E.4', /sprinkler/i, 'sprinklers', 'rociadores', /(nfpa ?13d|fire sprinkler system|sprinklers? (required|provided|not required))/i);
   // III.F.1 escape windows (sizes checked against the numbers on the sheet: 24" high, 20" wide, 5.7 sq ft, 5.0 at grade)
   { const h = find(/\b(egress|escape|emergency escape)\b/i); const ew = windows.filter(w => h.some(x => x.page === w.page) || /egress|escape/i.test(w.text));
-    const small = ew.filter(w => w.w < 20 || w.h < 24 || (w.w * w.h) / 144 < 5.0);
-    add('III.F.1', !h.length ? (windows.length ? 'partial' : 'missing') : ew.length ? 'addressed' : 'partial', h.length && ew.length ? 'medium' : 'low', [...h.slice(0, 2), ...ew.slice(0, 2).map(w => ({ page: w.page, text: `${w.w}" x ${w.h}" — ${w.text}` }))],
+    const E = PARAMS.egress; const small = ew.filter(w => w.w < E.minWidthIn || w.h < E.minHeightIn || (w.w * w.h) / 144 < E.gradeSqFt);
+    add('III.F.1', !h.length ? (windows.length ? 'partial' : 'missing') : ew.length ? (small.length ? 'conflict' : 'addressed') : 'partial', h.length && ew.length ? 'medium' : 'low', [...h.slice(0, 2), ...ew.slice(0, 2).map(w => ({ page: w.page, text: `${w.w}" x ${w.h}" — ${w.text}` }))],
       !h.length ? (windows.length ? { en: `${windows.length} window sizes found, but no note says which is the escape window.`, es: `Se encontraron ${windows.length} medidas de ventanas, pero ninguna nota dice cuál es la de escape.` } : { en: 'No escape window note or window size was found.', es: 'No se encontró nota de ventana de escape ni medidas de ventanas.' })
         : ew.length ? { en: `Escape window note with ${ew.length} size${ew.length > 1 ? 's' : ''} read from the text.`, es: `Nota de ventana de escape con ${ew.length} medida${ew.length > 1 ? 's' : ''} leída${ew.length > 1 ? 's' : ''} del texto.` } : { en: 'Escape windows are mentioned, but no size was read next to them.', es: 'Se mencionan ventanas de escape, pero no se leyó una medida junto a ellas.' },
       small.length ? { en: `A size read as ${small[0].w}" x ${small[0].h}" (page ${small[0].page}) is under 20" wide, 24" high or 5.0 sq ft. Check whether it is the clear opening.`, es: `Una medida leída como ${small[0].w}" x ${small[0].h}" (página ${small[0].page}) tiene menos de 20" de ancho, 24" de alto o 5.0 pies². Revise si es la abertura libre.` } : undefined); }
-  kw('III.F.2', /\b3\s*'\s*-?\s*0\s*"?\s*x\s*6\s*'\s*-?\s*8|\b36\s*"?\s*x\s*80\b|\bexit door|entry door|front door/i, 'the exit door size', 'la medida de la puerta de salida', /\b3\s*'\s*-?\s*0\s*"?\s*x\s*6\s*'\s*-?\s*8|\b36\s*"?\s*x\s*80\b/i);
+  kw('III.F.2', /\b3\s*'\s*-?\s*0\s*"?\s*x\s*6\s*'\s*-?\s*8|\b36\s*"?\s*x\s*80\b/i, 'the exit door size', 'la medida de la puerta de salida', /\b3\s*'\s*-?\s*0\s*"?\s*x\s*6\s*'\s*-?\s*8|\b36\s*"?\s*x\s*80\b/i);
   // III.G.1 ceiling height (7 ft per the sheet)
-  { const low = ceilings.filter(c => c.inches < 84);
-    add('III.G.1', ceilings.length ? 'addressed' : find(/ceiling height|clg\.? ht/i).length ? 'partial' : 'missing', ceilings.length ? 'high' : 'low', ceilings.length ? ceilings.slice(0, 3).map(c => ({ page: c.page, text: `${fmtIn(c.inches)} — ${c.text}` })) : find(/ceiling height|clg\.? ht/i),
+  { const low = ceilings.filter(c => c.inches < PARAMS.ceilingMinIn);
+    add('III.G.1', ceilings.length ? (low.length ? 'conflict' : 'addressed') : find(/ceiling height|clg\.? ht/i).length ? 'partial' : 'missing', ceilings.length ? 'high' : 'low', ceilings.length ? ceilings.slice(0, 3).map(c => ({ page: c.page, text: `${fmtIn(c.inches)} — ${c.text}` })) : find(/ceiling height|clg\.? ht/i),
       ceilings.length ? { en: `Ceiling height read: ${[...new Set(ceilings.map(c => fmtIn(c.inches)))].slice(0, 4).join(', ')}.`, es: `Altura de techo leída: ${[...new Set(ceilings.map(c => fmtIn(c.inches)))].slice(0, 4).join(', ')}.` } : { en: 'No ceiling height with a number was found.', es: 'No se encontró una altura de techo con número.' },
       low.length ? { en: `A ceiling height under 7 ft was read (${fmtIn(low[0].inches)}, page ${low[0].page}).`, es: `Se leyó una altura de techo de menos de 7 pies (${fmtIn(low[0].inches)}, página ${low[0].page}).` } : undefined); }
   kw('III.G.4', /exhaust fan|bath(room)? fan|\bexh\.? fan|\b50 cfm|\bcfm\b/i, 'a bathroom exhaust fan', 'un extractor en el baño', /exhaust fan.*(\d+\s*cfm|bath)|bath.*exhaust fan/i);
   kw('III.H.2', /tempered|safety glaz/i, 'tempered glass', 'vidrio templado', /tempered.*(door|tub|shower|within|glass)|R308/i);
-  kw('III.H.9', /title[- ]?24|cf1r|hers|energy compliance/i, 'Title 24 energy compliance', 'el cumplimiento de energía Title 24', /cf1r|hers/i);
+  kw('III.H.9', /\btitle[- ]?24\b|\bcf1r\b|\bhers\b|\benergy compliance\b/i, 'Title 24 energy compliance', 'el cumplimiento de energía Title 24', /\bcf1r\b|\bhers\b/i);
   kw('III.I.1', /all[- ]electric|no gas|heat pump/i, 'all-electric', 'todo eléctrico', /all[- ]electric/i);
   kw('III.I.6', /water heater.*(strap|brac)|(strap|brac).*water heater|seismic strap/i, 'water heater strapping', 'el amarre del calentador de agua', /strap/i);
   kw('III.J.1', /vapor (retarder|barrier)|epoxy/i, 'a slab vapor retarder or epoxy', 'una barrera de vapor o epóxico en la losa', /(6|10|15)[- ]?mil|vapor retarder.*slab|slab.*vapor/i);
   kw('III.J.9', /\b(2|4|6)\s?x\s?(4|6|8|10|12)\b.*(@|o\.?c\.?|joist|rafter|header|beam|stud)/i, 'framing member sizes', 'las medidas de las piezas de madera', /(joist|rafter|header|beam).*@\s*\d+|@\s*\d+\s*"?\s*o\.?c\.?/i);
-  kw('III.J.18', /anchor bolt|\bA\.?B\.?\s*@|mudsill|sill plate/i, 'anchor bolts', 'los pernos de anclaje', /anchor bolts?.*(\d\/\d|@|embed)/i);
+  kw('III.J.18', /anchor bolt|\bA\.?B\.?\s*@/i, 'anchor bolts', 'los pernos de anclaje', /anchor bolts?.*(\d\/\d|@|embed)/i);
 
+  // Claim model (r5plan-01..05, r5whole-01): text matching proves a mention, not compliance. High confidence only where a number
+  // read from the text passes the rule (ceiling, escape window, code edition); partial, negated and conflict are never high.
+  const VALUE_OK = new Set(['III.G.1', 'III.F.1', 'III.F.2', 'N.4', 'I.C.2', 'I.C.8']);
+  items.forEach(i => { if (i.confidence === 'high' && (i.state !== 'addressed' || !VALUE_OK.has(i.id))) i.confidence = 'medium'; });
   const order = CATALOG.map(c => c.id); items.sort((a, b) => order.indexOf(a.id) - order.indexOf(b.id));
   return { pages: pages.length, textPages, chars, scanned: pages.length > 0 && textPages < Math.ceil(pages.length / 2), sheets, title, codes: { editions, sections }, dims: { setbacks, ceilings, windows }, items };
 }
@@ -261,7 +294,7 @@ export const KIND_NAME: Record<SheetKind, { en: string; es: string }> = {
   structural: { en: 'structural sheets', es: 'hojas estructurales' }, details: { en: 'details', es: 'detalles' },
 };
 
-export const counts = (c: PlanCheck) => ({ addressed: c.items.filter(i => i.state === 'addressed').length, partial: c.items.filter(i => i.state === 'partial').length, missing: c.items.filter(i => i.state === 'missing').length });
+export const counts = (c: PlanCheck): Record<ItemState, number> => { const n = (s: ItemState) => c.items.filter(i => i.state === s).length; return { addressed: n('addressed'), negated: n('negated'), conflict: n('conflict'), partial: n('partial'), missing: n('missing') }; };
 
 // ---- PDF text extraction (pdf.js, loaded only when used) ----
 type PdfLib = { getDocument: (o: any) => { promise: Promise<any>; destroy?: () => void }; GlobalWorkerOptions?: { workerSrc: string } };

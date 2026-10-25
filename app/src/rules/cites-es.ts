@@ -20,6 +20,7 @@ export const CITES_ES: Record<string, string> = {
   'Gov. Code §66314 (max 4 ft side and rear; state law controls over the 5 ft on older LADBS sheets)': 'Código de Gobierno §66314 (máximo 4 pies lateral y trasero; la ley estatal prevalece sobre los 5 pies de hojas LADBS antiguas)',
   'LARC R302.1 (fire separation depends on distance; LADBS sheet III-D.1 assumed property line)': 'LARC R302.1 (la separación contra incendio depende de la distancia; hoja LADBS III-D.1 lindero supuesto)',
   'Gov. Code §66321(b)(4) (16 ft; 18 ft within a half-mile walk of a major transit stop or a high-quality transit corridor, (b)(4)(B); +2 ft to match roof pitch)': 'Código de Gobierno §66321(b)(4) (16 pies; 18 pies a media milla caminando de una parada principal o un corredor de transporte de alta calidad, (b)(4)(B); +2 pies para igualar la pendiente del techo)',
+  'LADBS sheet II-D.1, II-D.5a (new detached ADU on a single-family lot; unit mix)': 'Hoja LADBS II-D.1, II-D.5a (ADU nuevo separado en un lote unifamiliar; combinación de unidades)',
   'LARC R305.1 (7\'-0" minimum; LADBS sheet III-G.1)': 'LARC R305.1 (mínimo 7\'-0"; hoja LADBS III-G.1)',
   'LARC R310.1, R310.2 (every sleeping room; 5.7 sq ft net clear; 5.0 at grade; 24" high; 20" wide; 44" max to bottom; LADBS sheet III-F.1)': 'LARC R310.1, R310.2 (cada cuarto para dormir; 5.7 pies² de abertura libre; 5.0 a nivel del suelo; 24" de alto; 20" de ancho; máximo 44" al borde inferior; hoja LADBS III-F.1)',
   'LARC R314.2, R315 (LADBS sheet III-E.1, III-E.3)': 'LARC R314.2, R315 (hoja LADBS III-E.1, III-E.3)',

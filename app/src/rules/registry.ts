@@ -8,6 +8,6 @@ import type { Rule } from './engine';
 export interface Pack { id: string; meta: typeof PACK; rules: Rule[]; catalog: SheetItem[]; ruleItems: Record<string, string[]>; params: typeof PARAMS }
 const PACKS: Record<string, Pack> = { 'la-city': { id: PACK_ID, meta: PACK, rules: RULES, catalog: CATALOG, ruleItems: RULE_ITEMS, params: PARAMS } };
 /** The pack for a jurisdiction, or null when this app has none ("other", "unknown", or a place with no pack yet). */
-export const packFor = (jurisdiction: string): Pack | null => PACKS[jurisdiction] ?? null;
+export const packFor = (jurisdiction: string): Pack | null => (Object.prototype.hasOwnProperty.call(PACKS, jurisdiction) ? PACKS[jurisdiction] : null) ?? null; // r5gold-05
 /** True when the report was made with this jurisdiction's own pack (a pack id is "<jurisdiction>@<version>"). */
 export const packMatches = (jurisdiction: string, packId: string) => packId.startsWith(jurisdiction + '@');

@@ -102,6 +102,8 @@ export function roomWindows(p: Project): { bedrooms: number; windows: Window[] }
   const label = (r: Room, ri: number) => { const base = r.name.trim() || `Room ${ri + 1}`; const k = base.toLowerCase(); const n = (seen.get(k) ?? 0) + 1; seen.set(k, n); return n > 1 ? `${base} (${n})` : base; };
   const labels = rooms.map(label);
   const foot = footLocal(p);
+  // R310.2.1: 5.0 sq ft only for a grade-floor opening. On a hillside or sloped lot the floor can sit well above outside grade, so use 5.7.
+  const gradeFloor = !(p.site.flags?.hillside === 'yes' || p.site.flags?.slopeOver10 === 'yes');
   rooms.forEach((r, ri) => { const bad = new Set(openingProblems(r)); const tp = applyTape(r).poly; r.openings.filter(o => o.kind === 'window').forEach(o => {
     // A window on a wall shared with another room opens indoors: it is not an escape window.
     if (!bad.has(o.id) && !onOutside(tp, o, foot)) return;
@@ -109,7 +111,7 @@ export function roomWindows(p: Project): { bedrooms: number; windows: Window[] }
     const isSleep = studio ? r.use !== 'bath' : r.use === 'sleeping';
     // A window that does not fit its wall has no size we can trust (EGR-01 then asks for it).
     const ok = !bad.has(o.id);
-    windows.push({ id: o.id, room: studio ? 'Main room' : labels[ri], sleeping: isSleep, clearWidthMm: ok ? o.widthMm : null, clearHeightMm: ok ? o.heightMm : null, sillMm: o.sillMm, gradeFloor: true });
+    windows.push({ id: o.id, room: studio ? 'Main room' : labels[ri], sleeping: isSleep, clearWidthMm: ok ? o.widthMm : null, clearHeightMm: ok ? o.heightMm : null, sillMm: o.sillMm, gradeFloor });
   }); });
   // A sleeping room drawn with no window still has to show up as "missing".
   return { bedrooms: sleeping.length, windows };

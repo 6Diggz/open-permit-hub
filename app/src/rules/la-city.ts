@@ -82,7 +82,8 @@ export function addressCity(addr: string): string | null {
 }
 
 /** r4juris-06: numbers a pack can change without forking rule code. LA City (LADBS sheet III-D.1/D.2): no sprinkler reduction. */
-export const PARAMS = { fireSep: { unratedMinFt: 5, unratedMinFtSprinklered: 5, openingsBanFt: 3, projectionMinFt: 2 } } as const;
+export const PARAMS = { fireSep: { unratedMinFt: 5, unratedMinFtSprinklered: 5, openingsBanFt: 3, projectionMinFt: 2 },
+  /** Shared with the plan-set check (one threshold for every surface). */ ceilingMinIn: 84, egress: { minWidthIn: 20, minHeightIn: 24, minSqFt: 5.7, gradeSqFt: 5.0 } } as const;
 
 export const RULES: Rule[] = [
   { id: 'GEO-01', version: '1', module: 'core', severity: 'critical', kind: 'city', effectiveFrom: EFF, applies: all,
@@ -135,9 +136,9 @@ export const RULES: Rule[] = [
       return a.garageAttachment === 'detached' ? pass('Detached garage converted inside its walls: sheet II-C path.', 'Garaje separado convertido dentro de sus muros: camino de la hoja II-C.') : pass('Attached garage converted inside the house: sheet II-G path.', 'Garaje adjunto convertido dentro de la casa: camino de la hoja II-G.');
     } },
 
-  { id: 'MIX-01', version: '1', module: 'core', severity: 'critical', kind: 'city', effectiveFrom: EFF, applies: conv,
+  { id: 'MIX-01', version: '2', module: 'core', severity: 'critical', kind: 'city', effectiveFrom: EFF, applies: p => conv(p) || p.adu.mode === 'youadu' /* r5gold-02: sheet II-D.1, II-D.5a */,
     title: t('Main house and units already on the lot', 'Casa principal y unidades que ya hay en el lote'),
-    cites: [{ code: 'LADBS sheet II-C (conversion per Gov. Code §66323(a)(1) for an existing single-family dwelling only); II-C.1, II-C.5 (unit mix)', url: SHEET_URL, verified: true }, { code: 'Gov. Code §66323(a)(1) (one ADU and one JADU per single-family lot)', url: GOV + '66323.', verified: true }],
+    cites: [{ code: 'LADBS sheet II-C (conversion per Gov. Code §66323(a)(1) for an existing single-family dwelling only); II-C.1, II-C.5 (unit mix)', url: SHEET_URL, verified: true }, { code: 'LADBS sheet II-D.1, II-D.5a (new detached ADU on a single-family lot; unit mix)', url: SHEET_URL, verified: true }, { code: 'Gov. Code §66323(a)(1) (one ADU and one JADU per single-family lot)', url: GOV + '66323.', verified: true }],
     check: p => {
       const s = p.site;
       if (s.mainBuilding === 'unknown') return unk('We don\'t know what the main building is.', 'No sabemos qué es el edificio principal.', 'Pick single-family house, duplex or apartments. The garage path (sheet II-C) is only for a lot with one existing single-family house.', 'Elija casa unifamiliar, dúplex o apartamentos. El camino del garaje (hoja II-C) es solo para un lote con una casa unifamiliar existente.');
@@ -146,9 +147,9 @@ export const RULES: Rule[] = [
       // r4gold-01: sheet II-C.5a allows a detached conversion plus one attached ADU; II-G.3a allows an attached conversion plus one detached ADU.
       if (s.existingAdus >= 2) return fail(`The lot already has ${s.existingAdus} ADUs. A single-family lot gets at most one more ADU of the other kind on this path.`, `El lote ya tiene ${s.existingAdus} ADU. Un lote unifamiliar tiene como máximo un ADU más del otro tipo en este camino.`, 'Ask your preparer about another path (sheet II-A or II-F), or legalize the existing unit instead.', 'Pregunte a su preparador por otro camino (hoja II-A o II-F), o legalice la unidad existente.');
       if (s.existingAdus === 1) {
-        const ex = s.existingAduAttached ?? 'unknown', ga = p.adu.garageAttachment;
+        const ex = s.existingAduAttached ?? 'unknown', ga = p.adu.mode === 'youadu' ? 'detached' : p.adu.garageAttachment;
         if (ex === 'unknown' || ga === 'unknown') return unk('We don\'t know if the existing ADU and the garage are attached to the house or detached.', 'No sabemos si el ADU existente y el garaje están unidos a la casa o separados.', 'Answer "Is the existing ADU inside or attached to the house?" and whether the garage is attached. One attached ADU plus one detached ADU is allowed (sheet II-C.5a, II-G.3a).', 'Responda si el ADU existente está dentro o unido a la casa y si el garaje está unido. Se permite un ADU unido más un ADU separado (hoja II-C.5a, II-G.3a).');
-        if ((ex === 'yes') === (ga === 'attached')) return fail(`The lot already has an ${ex === 'yes' ? 'attached' : 'detached'} ADU, and this garage is ${ga} too. Only one of each kind is allowed.`, `El lote ya tiene un ADU ${ex === 'yes' ? 'unido' : 'separado'} y este garaje también lo es. Solo se permite uno de cada tipo.`, 'Ask your preparer about another path (sheet II-A or II-F), or legalize the existing unit instead.', 'Pregunte a su preparador por otro camino (hoja II-A o II-F), o legalice la unidad existente.');
+        if ((ex === 'yes') === (ga === 'attached')) return fail(`The lot already has an ${ex === 'yes' ? 'attached' : 'detached'} ADU, and this ${p.adu.mode === 'youadu' ? 'new ADU' : 'garage'} is ${ga} too. Only one of each kind is allowed.`, `El lote ya tiene un ADU ${ex === 'yes' ? 'unido' : 'separado'} y este ${p.adu.mode === 'youadu' ? 'ADU nuevo' : 'garaje'} también lo es. Solo se permite uno de cada tipo.`, 'Ask your preparer about another path (sheet II-A or II-F), or legalize the existing unit instead.', 'Pregunte a su preparador por otro camino (hoja II-A o II-F), o legalice la unidad existente.');
       }
       if (s.existingJadus > 1) return fail(`The lot has ${s.existingJadus} junior ADUs. Only one is allowed.`, `El lote tiene ${s.existingJadus} ADU junior. Solo se permite uno.`, 'Check the permit records with your preparer.', 'Revise los permisos con su preparador.');
       return pass(s.existingAdus === 1 ? 'One single-family house and one ADU of the other kind (attached vs detached): allowed (sheet II-C.5a, II-G.3a).' : 'One single-family house and no other ADU: the garage path applies.', s.existingAdus === 1 ? 'Una casa unifamiliar y un ADU del otro tipo (unido o separado): permitido (hoja II-C.5a, II-G.3a).' : 'Una casa unifamiliar y ningún otro ADU: aplica el camino del garaje.');
@@ -233,9 +234,11 @@ export const RULES: Rule[] = [
     check: p => {
       // Drawn rooms: every room is checked with its own ceiling (or the garage's). LADBS sheet III-G.1 sets 7' 0" in every room, baths included.
       if (p.adu.rooms?.length) {
-        const low: string[] = [], none: string[] = [];
-        p.adu.rooms.forEach((r, i) => { const c = roomCeiling(p, r); const nm = safeName(r.name) || `room ${i + 1}`; const need = inch(84);
-          if (!fin(c)) none.push(nm); else if (c < need) low.push(`${nm} ${fmtFtIn(c)} (need ${fmtFtIn(need)})`); });
+        const low: string[] = [], none: string[] = []; let onlyBathNear = true;
+        p.adu.rooms.forEach((r, i) => { const c = roomCeiling(p, r); const nm = safeName(r.name) || `room ${i + 1}`; const need = inch(PARAMS.ceilingMinIn);
+          if (!fin(c)) none.push(nm); else if (c < need) { low.push(`${nm} ${fmtFtIn(c)} (need ${fmtFtIn(need)})`); if (!(r.use === 'bath' && c >= inch(80))) onlyBathNear = false; } });
+        // CRC R305.1 allows 6' 8" in bathrooms; the LADBS sheet asks 7' 0". Say so, but keep the sheet's number.
+        if (low.length && onlyBathNear) return fail(`Ceiling too low in ${low.join('; ')}.`, `Techo demasiado bajo en ${low.join('; ')}.`, 'The state code allows 6\' 8" in bathrooms; the LADBS sheet asks 7\' 0". Ask plan check before building.', 'El código estatal permite 6\' 8" en baños; la hoja de LADBS pide 7\' 0". Pregunte a revisión de planos antes de construir.');
         if (low.length) return fail(`Ceiling too low in ${low.join('; ')}.`, `Techo demasiado bajo en ${low.join('; ')}.`, 'Garages often fail here once insulation and drywall go in. Plan for the finished height.', 'Los garajes suelen fallar aquí después del aislamiento y el panel de yeso. Planifique la altura terminada.');
         if (none.length) return unk(`Ceiling height not entered for ${none.join(', ')}.`, `Falta la altura del techo en ${none.join(', ')}.`, 'Measure floor to ceiling in each room, or enter the garage ceiling height.', 'Mida del piso al techo en cada cuarto, o ingrese la altura del techo del garaje.');
         return pass('Every room meets the 7\' 0" ceiling height, bathrooms included.', 'Cada cuarto cumple la altura de techo de 7\' 0", baños incluidos.');
@@ -296,7 +299,7 @@ export const RULES: Rule[] = [
     title: t('Smoke and carbon monoxide alarms', 'Alarmas de humo y monóxido de carbono'), cites: [{ code: 'LARC R314.2, R315 (LADBS sheet III-E.1, III-E.3)', url: SHEET_URL, verified: true, edition: LAED }],
     check: p => yes(p.adu.smokeCoPlanned) ? pass('Alarms are shown on the plan.', 'Alarmas en el plano.') : unk('Alarms are not confirmed on the plan.', 'Las alarmas no están confirmadas en el plano.', 'Show smoke alarms in each bedroom and hall, and CO alarms if there is gas or an attached garage.', 'Muestre alarmas de humo en cada dormitorio y pasillo, y alarmas de CO si hay gas o un garaje adjunto.') },
 
-  { id: 'FIR-01', version: '3', module: 'fire', severity: 'critical', kind: 'city', hs: true, effectiveFrom: EFF, applies: all,
+  { id: 'FIR-01', version: '4', module: 'fire', severity: 'critical', kind: 'city', hs: true, effectiveFrom: EFF, applies: all,
     title: t('Fire-rated walls near the property line or the house', 'Muros resistentes al fuego cerca del lindero o de la casa'),
     cites: [{ code: 'LADBS sheet III-D.1 (1-hour exterior walls under 5 ft from the property line or assumed property line; LABC 706.1.1, LARC R302.1)', url: SHEET_URL, verified: true, edition: LAED },
       { code: 'LADBS sheet III-D.2 (projections such as eaves limited by fire separation distance; LARC Table R302.1(1), R302.1(2))', url: SHEET_URL, verified: true, edition: LAED }],
@@ -332,8 +335,13 @@ export const RULES: Rule[] = [
           if (yes(ho) && hg < ft(FS.openingsBanFt)) return fail(`The house wall facing the ADU has openings ${fmtFtIn(hg)} from the assumed line. Openings are not allowed under 3 ft from it.`, `El muro de la casa que da al ADU tiene aberturas a ${fmtFtIn(hg)} de la línea supuesta. No se permiten aberturas a menos de 3 pies.`, 'Close those openings with rated construction, or move the ADU farther from the house.', 'Cierre esas aberturas con construcción resistente, o aleje el ADU de la casa.');
           if (yes(ho)) return unk(`The house wall facing the ADU has openings ${fmtFtIn(hg)} from the assumed line. Their size is limited between 3 and 5 ft.`, `El muro de la casa que da al ADU tiene aberturas a ${fmtFtIn(hg)} de la línea supuesta. Su tamaño está limitado entre 3 y 5 pies.`, 'Your preparer checks the house openings against LARC Table R302.1(1) and shows them on the plans.', 'Su preparador revisa las aberturas de la casa con la Tabla R302.1(1) del LARC y las muestra en los planos.');
           // r4gold-06: under 5 ft apart, every line position leaves the house wall under 5 ft too, so it needs a 1-hour rating (LABC 705.3, LARC Table R302.1(1)).
-          if (hgap < lim) { const hr = p.adu.houseWallRated ?? 'unknown';
-            if (hr === 'no') return fail(`The house wall is ${fmtFtIn(hgap)} from the ADU. Under 5 ft apart, the house wall facing the ADU must be 1-hour rated too.`, `El muro de la casa está a ${fmtFtIn(hgap)} del ADU. A menos de 5 pies, el muro de la casa que da al ADU también debe tener resistencia de 1 hora.`, 'Plan a 1-hour rating on that house wall, or move the ADU 5 ft or more from the house.', 'Planee resistencia de 1 hora en ese muro de la casa, o aleje el ADU 5 pies o más de la casa.');
+          // r5gold-03: ADU openings keep the line 3 ft or more from the ADU, so the house stays unrated only with 5 + 3 = 8 ft between them.
+          const aduOpen = p.adu.openingsNearLine !== 'no'; const need = lim + (aduOpen ? ft(FS.openingsBanFt) : 0);
+          if (hgap < need) { const hr = p.adu.houseWallRated ?? 'unknown';
+            if (hgap >= lim) { const why = t(`The house is ${fmtFtIn(hgap)} from the ADU. The ADU wall has openings, so the assumed line must stay 3 ft from it, which leaves the house wall under 5 ft from the line. That house wall must be 1-hour rated.`, `La casa está a ${fmtFtIn(hgap)} del ADU. El muro del ADU tiene aberturas, así que la línea supuesta debe quedar a 3 pies de él, y el muro de la casa queda a menos de 5 pies de la línea. Ese muro de la casa debe tener resistencia de 1 hora.`);
+              if (hr === 'no') return fail(why.en, why.es, 'Plan a 1-hour rating on that house wall, remove the ADU openings on that side, or keep 8 ft between the buildings.', 'Planee resistencia de 1 hora en ese muro de la casa, quite las aberturas del ADU de ese lado, o deje 8 pies entre los edificios.');
+              if (hr !== 'yes') return unk(why.en, why.es, 'Answer "Will the house wall facing the ADU be 1-hour rated?" on the Garage step.', 'Responda "¿El muro de la casa que da al ADU tendrá resistencia de 1 hora?" en el paso Garaje.'); }
+            else if (hr === 'no') return fail(`The house wall is ${fmtFtIn(hgap)} from the ADU. Under 5 ft apart, the house wall facing the ADU must be 1-hour rated too.`, `El muro de la casa está a ${fmtFtIn(hgap)} del ADU. A menos de 5 pies, el muro de la casa que da al ADU también debe tener resistencia de 1 hora.`, 'Plan a 1-hour rating on that house wall, or move the ADU 5 ft or more from the house.', 'Planee resistencia de 1 hora en ese muro de la casa, o aleje el ADU 5 pies o más de la casa.');
             if (hr !== 'yes') return unk(`The house wall is ${fmtFtIn(hgap)} from the ADU. Under 5 ft apart, the house wall facing the ADU must be 1-hour rated too.`, `El muro de la casa está a ${fmtFtIn(hgap)} del ADU. A menos de 5 pies, el muro de la casa que da al ADU también debe tener resistencia de 1 hora.`, 'Answer "Will the house wall facing the ADU be 1-hour rated?" on the Garage step.', 'Responda "¿El muro de la casa que da al ADU tendrá resistencia de 1 hora?" en el paso Garaje.'); }
         }
         if (!eaveOk) return eaveAsk(t(`Closest wall is ${fmtFtIn(worst)} from ${line.en}. A 1-hour wall is planned.`, `El muro más cercano está a ${fmtFtIn(worst)} ${line.es}. Se planea un muro de 1 hora.`));

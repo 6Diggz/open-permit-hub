@@ -1,12 +1,12 @@
 import { useRef, useState } from 'react';
 import type { PlanCheck as Result, CheckItem, ItemState } from '../io/plancheck';
-import { KIND_NAME as KIND, extractPages, analyze, PLAN_LIMITS, PlanError } from '../io/plancheck';
+import { KIND_NAME as KIND, extractPages, analyze, counts, PLAN_LIMITS, PlanError } from '../io/plancheck';
 import { CATALOG } from '../rules/ladbs-adu-2025';
 import { L, uiLang } from './lang';
 
 type Phase = { k: 'idle' } | { k: 'reading'; page: number; of: number; name: string } | { k: 'error'; msg: string; name: string } | { k: 'done'; r: Result; name: string; total: number };
 type Show = 'all' | ItemState;
-const STATE_CLASS: Record<ItemState, string> = { addressed: 'PASS', partial: 'UNKNOWN', missing: 'FAIL' };
+const STATE_CLASS: Record<ItemState, string> = { addressed: 'PASS', negated: 'UNKNOWN', conflict: 'FAIL', partial: 'UNKNOWN', missing: 'FAIL' };
 
 /**
  * Plan-set pre-check: the user picks the PDF of an existing plan set; its text is read on this device (pdf.js, loaded
@@ -16,7 +16,9 @@ export function PlanCheckPanel({ onNotes }: { /** Adds review notes for the item
   const es = uiLang() === 'es'; const lang = es ? 'es' : 'en';
   const [ph, setPh] = useState<Phase>({ k: 'idle' }); const [show, setShow] = useState<Show>('all'); const [note, setNote] = useState('');
   const sig = useRef({ cancelled: false }); const input = useRef<HTMLInputElement>(null);
-  const STATE: Record<ItemState, string> = { addressed: L('Appears addressed'), partial: L('Partly found'), missing: L('Not found in the text') };
+  const STATE: Record<ItemState, string> = { addressed: L('Mentioned'), negated: L('Mentioned, not shown as provided'), conflict: L('Conflicts with code'), partial: L('Partly found'), missing: L('Not found in the text') };
+  /** Text proves a mention, not compliance: say where it was mentioned. */
+  const stateLabel = (i: CheckItem) => i.state === 'addressed' && i.pages.length ? `${L('Mentioned on page')} ${i.pages.join(', ')}` : STATE[i.state];
   const CONF = { high: L('High'), medium: L('Medium'), low: L('Low') };
   const summary = (id: string) => CATALOG.find(c => c.id === id)?.summary[lang] ?? id;
 
@@ -62,22 +64,22 @@ export function PlanCheckPanel({ onNotes }: { /** Adds review notes for the item
 
   function done() {
     if (ph.k !== 'done') return null; const { r, name, total } = ph;
-    const n = { addressed: r.items.filter(i => i.state === 'addressed').length, partial: r.items.filter(i => i.state === 'partial').length, missing: r.items.filter(i => i.state === 'missing').length };
+    const n = counts(r);
     const list = r.items.filter(i => show === 'all' || i.state === show);
     const missing = r.items.filter(i => i.state === 'missing');
     return <>
       <div className="banner" role="status" style={{ margin: 0 }}>
         <b>{name}</b> · {r.pages} {r.pages === 1 ? L('page read') : L('pages read')}{total > r.pages ? ` (${L('of')} ${total}; ${L('only the first')} ${r.pages} ${L('are read')})` : ''}.{' '}
-        {r.items.length} {L('sheet items')}: {n.addressed} {L('appear addressed')}, {n.partial} {L('partly found')}, {n.missing} {L('not found in the text')}.
+        {r.items.length} {L('sheet items')}: {n.addressed} {L('mentioned')}, {n.conflict} {L('conflict with code')}, {n.negated} {L('not shown as provided')}, {n.partial} {L('partly found')}, {n.missing} {L('not found in the text')}.
       </div>
       {r.scanned && <div className="banner warn" role="alert" style={{ margin: 0 }}>{r.textPages === 0 ? L('No text was found in this PDF. It looks like a scan or a picture of the plans, so nothing could be read. Ask for a PDF exported from the drawing program.') : L('Most pages have no text (they look scanned). Items on those pages show as not found even if they are drawn.')}</div>}
       <div className="field"><label id="pc-show">{L('Show')}</label>
         <div className="tri" role="group" aria-labelledby="pc-show">
-          {(['all', 'missing', 'partial', 'addressed'] as Show[]).map(s => <button key={s} type="button" aria-pressed={show === s} onClick={() => setShow(s)}>{s === 'all' ? `${L('All')} (${r.items.length})` : `${STATE[s]} (${n[s]})`}</button>)}
+          {(['all', 'conflict', 'missing', 'negated', 'partial', 'addressed'] as Show[]).map(s => <button key={s} type="button" aria-pressed={show === s} onClick={() => setShow(s)}>{s === 'all' ? `${L('All')} (${r.items.length})` : `${STATE[s]} (${n[s]})`}</button>)}
         </div></div>
       <ul className="results" style={{ padding: 0 }} aria-label={L('Sheet items found in the plan set')}>
         {list.map(i => <li key={i.id} className={'res ' + STATE_CLASS[i.state]}>
-          <div className="head"><span className="tag">{STATE[i.state]}</span><span className="title">{i.id} · {summary(i.id)}</span></div>
+          <div className="head"><span className="tag">{stateLabel(i)}</span><span className="title">{i.id} · {summary(i.id)}</span></div>
           <p className="next">{i.why[lang]}</p>
           {i.attention && <p className="pending">{i.attention[lang]}</p>}
           <p className="cite">{L('Confidence')}: {CONF[i.confidence]} · {pagesTxt(i)}</p>

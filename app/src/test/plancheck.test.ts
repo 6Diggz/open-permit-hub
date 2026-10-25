@@ -65,13 +65,13 @@ describe('plan-set pre-check: fixtures', () => {
     expect(item(c, 'I.C.8').state).toBe('addressed'); expect(item(c, 'I.C.8').confidence).toBe('high');
     expect(item(c, 'I.C.5').state).toBe('addressed'); expect(item(c, 'I.C.6').state).toBe('addressed');
     expect(item(c, 'N.4').confidence).toBe('high');
-    expect(item(c, 'III.E.2').confidence).toBe('high'); expect(item(c, 'III.E.3').pages).toEqual([1]);
+    expect(item(c, 'III.E.2').confidence).toBe('medium') /* r5 claim model: a keyword alone is never high */; expect(item(c, 'III.E.3').pages).toEqual([1]);
     expect(item(c, 'III.F.1').state).toBe('addressed'); expect(item(c, 'III.F.1').pages).toContain(3); expect(item(c, 'III.F.1').attention).toBeUndefined();
-    expect(item(c, 'III.F.2').confidence).toBe('high'); expect(item(c, 'III.J.1').confidence).toBe('high'); expect(item(c, 'III.J.18').pages).toEqual([4]);
+    expect(item(c, 'III.F.2').confidence).toBe('high'); expect(item(c, 'III.J.1').confidence).toBe('medium'); expect(item(c, 'III.J.18').pages).toEqual([4]);
     expect(item(c, 'I.C.1').confidence).toBe('low'); // stamps and signatures are pictures: never more than low
     expect(item(c, 'III.D.1').attention?.en).toMatch(/under 5 ft/); // 3'-6" side setback read
     expect(c.dims.setbacks.find(s => s.side === 'side')?.inches).toBe(42);
-    const n = counts(c); expect(n.addressed + n.partial + n.missing).toBe(c.items.length);
+    const n = counts(c); expect(n.addressed + n.negated + n.conflict + n.partial + n.missing).toBe(c.items.length);
     // Every item id is a real LADBS sheet item, and every item has both languages.
     c.items.forEach(i => { expect(CATALOG.some(x => x.id === i.id)).toBe(true); expect(i.why.en && i.why.es).toBeTruthy(); });
   });

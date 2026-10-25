@@ -19,7 +19,8 @@ import { FieldMode } from './FieldMode';
 import { fromMap, unmark, type MapField } from '../io/parcel-apply';
 import { ask, AskHost } from './Ask';
 import { autoFit } from '../rules/fit';
-import { readiness, scoreLine, plainAnswer, applies as itemApplies } from '../rules/readiness';
+import { readiness, scoreLine, applies as itemApplies } from '../rules/readiness';
+import { verdictOf } from '../core/verdict';
 import { CATALOG, RULE_ITEMS } from '../rules/ladbs-adu-2025';
 import { citeText } from '../rules/cites-es';
 import { tr, type Lang } from './i18n';
@@ -35,17 +36,19 @@ import type { SaveResult } from '../core/store';
 let loadError = ''; let loadErrorId: string | null = null;
 const load = (): Project | null => { const id = store.lastId(); try { return id ? store.open(id) : null; } catch (e) { loadError = (e as Error).message; loadErrorId = id; return null; } };
 const persist = (p: Project) => store.save(p);
-function download(name: string, data: BlobPart, type: string) {
+function saveFile(name: string, data: BlobPart, type: string) {
   const url = URL.createObjectURL(new Blob([data], { type })); const a = document.createElement('a'); a.href = url; a.download = name; a.click(); setTimeout(() => URL.revokeObjectURL(url), 60000) /* r4reach-06: iOS reads the blob only after the user taps Download */;
 }
 /** On phones, hand the file to the phone's own share sheet (Messages, Mail, WhatsApp); elsewhere, download it. */
-async function shareOrDownload(name: string, data: string, type: string): Promise<'shared' | 'saved' | 'cancelled'> {
+async function shareOrDownload(name: string, data: BlobPart, type: string): Promise<'shared' | 'saved' | 'cancelled'> {
   try {
     const file = new File([data], name, { type });
     if (matchMedia?.('(pointer: coarse)').matches && navigator.canShare?.({ files: [file] })) { await navigator.share({ files: [file], title: name }); return 'shared'; }
   } catch (e) { if ((e as Error)?.name === 'AbortError') return 'cancelled'; }
-  download(name, data, type); return 'saved';
+  saveFile(name, data, type); return 'saved';
 }
+/** r4reach-07: every export goes to the share sheet on phones (Print, AirDrop, Save to Files), else a plain download. */
+function download(name: string, data: BlobPart, type: string) { void shareOrDownload(name, data, type); }
 const slug = (p: Project) => (p.site.address || p.name).replace(/[^a-z0-9]+/gi, '-').replace(/^-|-$/g, '').toLowerCase().slice(0, 40) || 'project';
 const STEP_KEYS = ['lot', 'garage', 'rooms', 'checks', 'export', 'review'];
 const stepFromHash = () => { const m = location.hash.match(/step=(\w+)/); const i = m ? STEP_KEYS.indexOf(m[1]) : -1; return i < 0 ? 0 : i; };
@@ -92,6 +95,7 @@ export default function App() {
   const openTool = (t: 'adu' | 'clean' | 'field') => { setTool(t); history.pushState(null, '', t === 'clean' ? '#clean' : t === 'field' ? '#field' : `#step=${STEP_KEYS[step]}`); };
 
   const report: Report | null = useMemo(() => (p ? evaluate(p, RULES, PACK_ID) : null), [p]);
+  const verdict = useMemo(() => (p && report ? verdictOf(p, report) : null), [p, report]); // one shared verdict for the card
   const commit = (next: Project, key?: string) => { hist.current!.push(next, key); setP(next); };
   const update = (fn: (d: Project) => void, key?: string) => { const d: Project = structuredClone(p!); fn(d); d.rulePack = PACK_ID; commit(d, key); };
   const undo = () => { if (hist.current?.undo()) setP(hist.current.present); };
@@ -177,7 +181,7 @@ export default function App() {
       </main>
 
       <aside className="side" aria-label={L("Check results")} tabIndex={0}>
-        <InspectionCard report={report} lang={lang} appDate={p.applicationDate} score={scoreLine(readiness(p, report), lang === 'es')} plain={plainAnswer(p, report)[lang === 'es' ? 'es' : 'en']} likelyYes={plainAnswer(p, report).verdict === 'likely-yes'} />
+        <InspectionCard report={report} lang={lang} appDate={p.applicationDate} score={verdict!.score[lang === 'es' ? 'es' : 'en']} plain={verdict!.plain[lang === 'es' ? 'es' : 'en']} likelyYes={verdict!.plain.verdict === 'likely-yes'} />
         <ResultList results={report.results} lang={lang} />
       </aside>
     </div>
@@ -241,7 +245,7 @@ function Welcome({ lang, setLang, onStart, onOpen, onClean, onPick }: { onPick: 
         </label>
       </div>
       {(err || loadError) && <p role="alert" style={{ color: 'var(--fix)' }}>{err || (es ? `No pudimos abrir su proyecto guardado (${loadError}).` : `We couldn't open your saved project (${loadError}).`)}
-        {!err && raw && <> <button className="btn quiet" onClick={() => download('damaged-project.permitpack', raw, 'application/json')}>{es ? 'Descargar la copia guardada' : 'Download the saved copy'}</button></>}</p>}
+        {!err && raw && <> <button className="btn quiet" onClick={() => saveFile('damaged-project.permitpack', raw, 'application/json')}>{es ? 'Descargar la copia guardada' : 'Download the saved copy'}</button></>}</p>}
       <Projects key={tick} lang={lang} onPick={onPick} onNew={() => onStart(false)} />
       <p style={{ marginTop: 28 }}><button className="btn quiet" onClick={onClean}>{es ? 'Para dibujantes: limpiar un archivo DWG o DXF' : 'For drafters: clean and fix a DWG or DXF file'}</button></p>
       <p className="help" style={{ fontSize: '.82rem' }}>{es ? 'Código abierto (Apache-2.0).' : 'Open source (Apache-2.0).'} <a href="./THIRD_PARTY_NOTICES.txt">{es ? 'Avisos de terceros' : 'Third-party notices'}</a> · <a href="https://github.com/6Diggz/open-permit-hub" target="_blank" rel="noreferrer">{es ? 'Código fuente' : 'Source code'}</a> · {es ? 'Reglas' : 'Rules'} {PACK_ID}, {es ? 'revisadas el' : 'checked'} {PACK.verifiedOn}</p>
