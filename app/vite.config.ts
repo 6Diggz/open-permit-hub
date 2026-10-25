@@ -15,16 +15,21 @@ function walk(dir: string): string[] { return readdirSync(dir).flatMap(f => { co
 
 /** After the build: write dist/sw.js with a precache list of every emitted file and a cache name from the build hash. */
 function serviceWorker(): Plugin {
-  let outDir = 'dist';
+  let outDir = 'dist'; let allowed = new Set<string>();
   return {
     name: 'opa-service-worker', apply: 'build',
     configResolved(c) { outDir = c.build.outDir; },
+    // r8-04: the landing chunks by exact file name, from the bundle itself (not a name prefix): the entry chunk, the runtime,
+    // and the one 'index' group chunk that holds the modules main.tsx reaches statically. A lazy index.ts screen is not on it.
+    generateBundle(_o, bundle) {
+      allowed = new Set(Object.values(bundle).filter((c: any) => c.type === 'chunk' && !c.isDynamicEntry && (c.isEntry || c.name === 'rolldown-runtime' || (c.name === 'index' && landingSet && Object.keys(c.modules ?? {}).some(m => landingSet!.has(m))))).map((c: any) => c.fileName.replace(/^assets\//, '')));
+    },
     transformIndexHtml: { order: 'post', handler: html => html.replace('<meta charset="UTF-8" />', `<meta charset="UTF-8" />\n    <meta http-equiv="Content-Security-Policy" content="${CSP}" />\n    <meta name="referrer" content="no-referrer" />`) },
     closeBundle() {
       for (const [f, body] of Object.entries(rulePages())) { mkdirSync(dirname(join(outDir, f)), { recursive: true }); writeFileSync(join(outDir, f), body); }
       // r6ux-07 guard: the landing page may preload only the runtime and the one landing chunk, never a lazy screen's code.
       const pre = [...readFileSync(join(outDir, 'index.html'), 'utf8').matchAll(/rel="modulepreload"[^>]*href="\.\/assets\/([^"]+)"/g)].map(m => m[1]);
-      const bad = pre.filter(f => !/^(rolldown-runtime|index)-/.test(f));
+      const bad = pre.filter(f => !allowed.has(f));
       if (bad.length || pre.length > 2) throw new Error(`landing page preloads lazy chunks: ${pre.join(', ')}`);
       const files = walk(outDir).map(f => relative(outDir, f).split('\\').join('/'));
       const sw = buildServiceWorker(files, readFileSync(join(outDir, 'index.html'), 'utf8'));
