@@ -19,7 +19,7 @@ jobs:
       - name: Rust crate licenses (allowlist)
         run: cd clean && cargo deny check licenses
       - name: Build the CAD WebAssembly
-        run: cd clean && wasm-pack build --release --target web --out-dir ../app/src/clean-wasm
+        run: cd clean && wasm-pack build --release --target web --out-dir ../app/src/clean-wasm && node ../scripts/wasm-hash.mjs write
       - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
         with: { node-version: 22 }
       - name: App tests, golden LA cases (qa/golden), typecheck, build, lint
