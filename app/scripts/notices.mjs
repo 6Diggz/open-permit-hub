@@ -1,5 +1,5 @@
 // Builds public/THIRD_PARTY_NOTICES.txt (shipped in the site and in every handoff ZIP).
-// Run: node scripts/notices.mjs   (needs app node_modules and `cargo metadata` in ../clean)
+// Run: node scripts/notices.mjs   (needs app node_modules and cargo in ../clean). It then runs the root scripts/notices.mjs for the crates.
 import { readFileSync, writeFileSync, readdirSync, existsSync } from 'node:fs';
 import { execSync } from 'node:child_process';
 import { join } from 'node:path';
@@ -20,10 +20,7 @@ function walk(name) {
   Object.keys(j.dependencies ?? {}).forEach(walk);
 }
 Object.keys(pkg.dependencies).forEach(walk);
-try {
-  const meta = JSON.parse(execSync('cargo metadata --format-version 1', { cwd: join(app, '..', 'clean'), stdio: ['ignore', 'pipe', 'ignore'] }).toString());
-  out.push('== Rust crates compiled into cleanfix_bg.wasm ==');
-  meta.packages.filter(p => p.name !== 'cleanfix').sort((a, b) => a.name.localeCompare(b.name)).forEach(p => out.push(`${p.name} ${p.version}: ${p.license}`));
-} catch { out.push('== Rust crates: see clean/Cargo.lock =='); }
 writeFileSync(join(app, 'public', 'THIRD_PARTY_NOTICES.txt'), out.join('\n') + '\n');
-console.log('wrote public/THIRD_PARTY_NOTICES.txt', out.length, 'lines');
+console.log('wrote npm part of public/THIRD_PARTY_NOTICES.txt', out.length, 'lines');
+// lead-04: one entry point. The root script appends every Rust crate with its own license files (a summary line is not enough).
+execSync('node scripts/notices.mjs', { cwd: join(app, '..'), stdio: 'inherit' });
