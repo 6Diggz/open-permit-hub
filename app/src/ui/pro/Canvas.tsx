@@ -302,32 +302,33 @@ export const Canvas = forwardRef<CanvasApi, CanvasProps>(function Canvas(P0, ref
 });
 
 /** Paper space: a 36" x 24" sheet with border, title block and a scaled viewport onto the model. Paper is always white. */
-function SheetFrame({ p, es, sheet, def, d, layers, colors, lwt, k, issues }: { p: Project; es: boolean; sheet: SheetId; def: { sc: { label: string; k: number }; model: { x: number; y: number; w: number; h: number }; vp: { x: number; y: number; w: number; h: number } }; d: Drawing; layers: Record<string, LayerState>; colors: Record<string, number>; lwt: boolean; k: number; issues: Issue[] }) {
+function SheetFrame({ p, es, sheet, def, d, layers, colors, lwt, issues }: { p: Project; es: boolean; sheet: SheetId; def: { sc: { label: string; k: number }; model: { x: number; y: number; w: number; h: number }; vp: { x: number; y: number; w: number; h: number } }; d: Drawing; layers: Record<string, LayerState>; colors: Record<string, number>; lwt: boolean; k?: number; issues: Issue[] }) {
   const title = sheet === 'a1' ? (es ? 'PLANO DEL SITIO' : 'SITE PLAN') : sheet === 'a2' ? (es ? 'PLANTA' : 'FLOOR PLAN') : (es ? 'MARCAS DE REVISIÓN' : 'REVIEW MARKUP');
-  const no = sheet === 'a1' ? 'A-1' : sheet === 'a2' ? 'A-2' : 'G-2'; const mmPerUnit = def.model.w / def.vp.w; const kModel = k / mmPerUnit; const h = def.sc.k * 25.4 * (3 / 32);
-  const tb = 30; const row = (y: number, label: string, value: string) => <g><text x={tb + 0.15} y={y} fontSize={0.09} className="pp-l">{label}</text><text x={tb + 0.15} y={y + 0.25} fontSize={0.14} className="pp-v">{value}</text></g>;
+  const no = sheet === 'a1' ? 'A-1' : sheet === 'a2' ? 'A-2' : 'G-2'; const h = def.sc.k * 25.4 * (3 / 32);
+  const tb = 30; const row = (y: number, label: string, value: string) => <g><line x1={tb} y1={y - 0.3} x2={35.5} y2={y - 0.3} className="pp-thin" vectorEffect="non-scaling-stroke" /><text x={tb + 0.2} y={y} fontSize={0.13} className="pp-l">{label}</text><text x={tb + 0.2} y={y + 0.42} fontSize={0.24} className="pp-v">{value}</text></g>;
   const open = issues.filter(i => i.n);
   return <g className="paper">
     <rect x={0} y={0} width={36} height={24} className="pp-sheet" />
     <rect x={0.5} y={0.5} width={35} height={23} className="pp-border" vectorEffect="non-scaling-stroke" />
     <line x1={tb} y1={0.5} x2={tb} y2={23.5} className="pp-border" vectorEffect="non-scaling-stroke" />
     <svg x={def.vp.x} y={def.vp.y} width={def.vp.w} height={def.vp.h} viewBox={`${def.model.x} ${def.model.y} ${def.model.w} ${def.model.h}`} className="pp-vp">
-      <Graphics d={d} layers={sheet === 'g2' ? layers : { ...layers, 'G-ANNO-REDL': { on: false, locked: false } }} lwt={lwt} k={kModel} />
+      <Graphics d={d} layers={sheet === 'g2' ? layers : { ...layers, 'G-ANNO-REDL': { on: false, locked: false } }} lwt={lwt} k={Infinity} />
       <CadGraphics ents={p.cad?.ents ?? []} layers={layers} colors={colors} lwt={lwt} h={h} />
       {sheet === 'g2' && open.map(i => i.at && <g key={i.id} className={i.status === 'FAIL' ? 'pin fix' : 'pin need'}><circle cx={i.at.x} cy={-i.at.y} r={def.sc.k * 25.4 * 0.16} /><text x={i.at.x} y={-i.at.y} fontSize={def.sc.k * 25.4 * 0.17} textAnchor="middle" dominantBaseline="central">{i.n}</text></g>)}
       {sheet === 'g2' && p.markup.pins.map(x => <g key={x.id} className={x.status === 'open' ? 'pin rev' : 'pin done'}><circle cx={x.x} cy={-x.y} r={def.sc.k * 25.4 * 0.16} /><text x={x.x} y={-x.y} fontSize={def.sc.k * 25.4 * 0.14} textAnchor="middle" dominantBaseline="central">R{x.n}</text></g>)}
     </svg>
-    <text x={def.vp.x} y={def.vp.y + def.vp.h + 0.55} fontSize={0.22} className="pp-v b">{title}</text>
-    <text x={def.vp.x} y={def.vp.y + def.vp.h + 0.85} fontSize={0.13} className="pp-l">{(es ? 'ESCALA: ' : 'SCALE: ') + def.sc.label}</text>
-    {row(1.0, es ? 'PROYECTO' : 'PROJECT', (p.name || '').slice(0, 34))}
-    {row(1.7, es ? 'DIRECCIÓN' : 'ADDRESS', (p.site.address || (es ? 'Sin dirección' : 'No address yet')).slice(0, 34))}
-    {row(2.4, 'APN', p.site.apn || '—')}
-    {row(3.1, es ? 'ZONA' : 'ZONE', p.site.zone || '—')}
-    {row(3.8, es ? 'PREPARADO POR' : 'PREPARED BY', p.people.preparerName || (es ? 'Sin nombre' : 'Not named yet'))}
-    {sheet === 'g2' && <g>{[...open.slice(0, 18).map(i => `${i.n}. ${i.r.rule.id} ${i.r.rule.title[es ? 'es' : 'en']}`), ...p.markup.pins.slice(0, 12).map(x => `R${x.n}. ${x.comment || '—'}`)].map((s, i) => <text key={i} x={tb + 0.15} y={5 + i * 0.3} fontSize={0.12} className="pp-v">{s.slice(0, 52)}</text>)}</g>}
-    <text x={tb + 0.15} y={19.6} fontSize={0.1} className="pp-l">{es ? 'BORRADOR. REVISIÓN POR SOFTWARE, NO DE LA CIUDAD.' : 'DRAFT. SOFTWARE CHECK, NOT A CITY REVIEW.'}</text>
+    <circle cx={def.vp.x + 0.35} cy={def.vp.y + def.vp.h + 0.55} r={0.3} className="pp-border" vectorEffect="non-scaling-stroke" /><text x={def.vp.x + 0.35} y={def.vp.y + def.vp.h + 0.55} fontSize={0.22} textAnchor="middle" dominantBaseline="central" className="pp-v b">1</text>
+    <text x={def.vp.x + 0.85} y={def.vp.y + def.vp.h + 0.55} fontSize={0.3} className="pp-v b">{title}</text>
+    <text x={def.vp.x + 0.85} y={def.vp.y + def.vp.h + 0.9} fontSize={0.18} className="pp-l">{(es ? 'ESCALA: ' : 'SCALE: ') + def.sc.label}</text>
+    {row(1.1, es ? 'PROYECTO' : 'PROJECT', (p.name || '').slice(0, 34))}
+    {row(2.0, es ? 'DIRECCIÓN' : 'ADDRESS', (p.site.address || (es ? 'Sin dirección' : 'No address yet')).slice(0, 34))}
+    {row(2.9, 'APN', p.site.apn || '—')}
+    {row(3.8, es ? 'ZONA' : 'ZONE', p.site.zone || '—')}
+    {row(4.7, es ? 'PREPARADO POR' : 'PREPARED BY', p.people.preparerName || (es ? 'Sin nombre' : 'Not named yet'))}
+    {sheet === 'g2' && <g>{[...open.slice(0, 18).map(i => `${i.n}. ${i.r.rule.id} ${i.r.rule.title[es ? 'es' : 'en']}`), ...p.markup.pins.slice(0, 12).map(x => `R${x.n}. ${x.comment || '—'}`)].map((s, i) => <text key={i} x={tb + 0.2} y={6 + i * 0.36} fontSize={0.16} className="pp-v">{s.slice(0, 44)}</text>)}</g>}
+    <text x={tb + 0.2} y={20.7} fontSize={0.15} className="pp-l">{es ? 'BORRADOR. REVISIÓN POR SOFTWARE, NO DE LA CIUDAD.' : 'DRAFT. SOFTWARE CHECK, NOT A CITY REVIEW.'}</text>
     <line x1={tb} y1={21.2} x2={35.5} y2={21.2} className="pp-border" vectorEffect="non-scaling-stroke" />
-    <text x={tb + 0.15} y={21.55} fontSize={0.09} className="pp-l">{es ? 'HOJA' : 'SHEET'}</text>
+    <text x={tb + 0.2} y={21.6} fontSize={0.13} className="pp-l">{es ? 'HOJA' : 'SHEET'}</text>
     <text x={tb + 0.15} y={23.1} fontSize={1.2} className="pp-v b">{no}</text>
   </g>;
 }

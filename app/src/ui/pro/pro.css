@@ -217,3 +217,4 @@
 [dir="rtl"] .pw-modbar { right: auto; left: 8px; } [dir="rtl"] .pw-hud { left: auto; right: 10px; }
 [dir="rtl"] .pw-panel { right: auto; left: 340px; }
 .ms svg * { pointer-events: none; } /* hit testing is done in code (view.ts), so the browser never hit-tests thousands of paths */
+.ms .paper .pp-thin { stroke: #c4c7cc; stroke-width: 1; }
