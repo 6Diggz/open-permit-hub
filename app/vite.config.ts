@@ -22,6 +22,10 @@ function serviceWorker(): Plugin {
     transformIndexHtml: { order: 'post', handler: html => html.replace('<meta charset="UTF-8" />', `<meta charset="UTF-8" />\n    <meta http-equiv="Content-Security-Policy" content="${CSP}" />\n    <meta name="referrer" content="no-referrer" />`) },
     closeBundle() {
       for (const [f, body] of Object.entries(rulePages())) { mkdirSync(dirname(join(outDir, f)), { recursive: true }); writeFileSync(join(outDir, f), body); }
+      // r6ux-07 guard: the landing page may preload only the runtime and the one landing chunk, never a lazy screen's code.
+      const pre = [...readFileSync(join(outDir, 'index.html'), 'utf8').matchAll(/rel="modulepreload"[^>]*href="\.\/assets\/([^"]+)"/g)].map(m => m[1]);
+      const bad = pre.filter(f => !/^(rolldown-runtime|index)-/.test(f));
+      if (bad.length || pre.length > 2) throw new Error(`landing page preloads lazy chunks: ${pre.join(', ')}`);
       const files = walk(outDir).map(f => relative(outDir, f).split('\\').join('/'));
       const sw = buildServiceWorker(files, readFileSync(join(outDir, 'index.html'), 'utf8'));
       writeFileSync(join(outDir, 'sw.js'), sw.source);
@@ -30,9 +34,20 @@ function serviceWorker(): Plugin {
   };
 }
 
+/** Ids statically reachable from src/main.tsx (computed once per chunking pass). */
+let landingSet: Set<string> | null = null, landingCtx: unknown = null;
+function landing(ctx: { getModuleInfo(id: string): { importedIds: readonly string[] } | null }): Set<string> {
+  if (landingSet && landingCtx === ctx) return landingSet;
+  const seen = new Set<string>(), root = join(process.cwd(), 'src', 'main.tsx').split('\\').join('/'), todo = [root];
+  while (todo.length) { const id = todo.pop()!; if (seen.has(id)) continue; seen.add(id); for (const d of ctx.getModuleInfo(id)?.importedIds ?? []) todo.push(d); }
+  landingCtx = ctx; return landingSet = seen;
+}
+
 // https://vite.dev/config/
 export default defineConfig({
   plugins: [react(), serviceWorker()], base: './',
   // The pdf.js worker ships as .mjs; emit it as .js so every static host sends a JavaScript MIME type (module workers require one).
-  build: { rolldownOptions: { output: { assetFileNames: (a: { names?: string[]; name?: string }) => ((a.names?.[0] ?? a.name ?? '').endsWith('.mjs') ? 'assets/[name]-[hash].js' : 'assets/[name]-[hash][extname]') } } },
+  // r6ux-07: everything the landing page imports statically goes in ONE chunk, so the landing page loads one JS file and
+  // never modulepreloads code that only lazy screens (field mode, PDFs, plan check) share with it.
+  build: { rolldownOptions: { output: { codeSplitting: { groups: [{ name: (id: string, ctx: { getModuleInfo(id: string): { importedIds: readonly string[] } | null }) => landing(ctx).has(id) ? 'index' : null }] }, assetFileNames: (a: { names?: string[]; name?: string }) => ((a.names?.[0] ?? a.name ?? '').endsWith('.mjs') ? 'assets/[name]-[hash].js' : 'assets/[name]-[hash][extname]') } } },
 })
