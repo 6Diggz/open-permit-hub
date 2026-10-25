@@ -34,7 +34,7 @@ jobs:
         run: cd app && npx playwright install --with-deps chromium && node e2e/e2e.mjs && node e2e/feat.mjs && node e2e/a11y.mjs && node e2e/cadviz.mjs
       - name: MCP server (typecheck, fresh build of dist, self-test incl. dist-matches-src, end-to-end garage conversion, agent tests)
         run: cd mcp && npm ci && npm run typecheck && npm test && cd ../app && npx vitest run --root ../mcp/test
-      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with: { name: web-build, path: app/dist }
   audit:
     # Known-vulnerability check of the Rust crates (reported on every push; it does not hold back a site deploy).
