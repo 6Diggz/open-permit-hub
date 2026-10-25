@@ -14,14 +14,20 @@ jobs:
         with: { tool: "wasm-pack@0.15.0" }
       - name: Rust tests
         run: cd clean && cargo test --release
+      - uses: taiki-e/install-action@1e29709c0ec63babbe8f266397a465f29a825f91 # v2
+        with: { tool: "cargo-deny@0.18.3" }
+      - name: Rust crate licenses (allowlist)
+        run: cd clean && cargo deny check licenses
       - name: Build the CAD WebAssembly
         run: cd clean && wasm-pack build --release --target web --out-dir ../app/src/clean-wasm
       - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
         with: { node-version: 22 }
       - name: App tests, typecheck, build, lint
         run: cd app && npm ci && npx vitest run && npm run build && npx oxlint
-      - name: No GPL code in the web bundle
-        run: cd app && npx license-checker --production --excludePackages app@0.0.0 --failOn "GPL;AGPL;LGPL" --summary
+      - name: Only allowed licenses in the web bundle (allowlist; catches every GPL/AGPL/LGPL variant)
+        run: cd app && node ../scripts/license-gate.mjs
+      - name: Third-party notices carry every crate's license text and are up to date
+        run: node scripts/notices.mjs --check
       - name: Bundle size budget (main JS under 3 MB)
         run: cd app && test $(du -cb dist/assets/index-*.js | tail -1 | cut -f1) -lt 3000000
       - name: Browser tests (390 and 1440 wide, offline, deploy update, accessibility)

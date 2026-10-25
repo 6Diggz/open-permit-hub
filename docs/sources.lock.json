@@ -1,3 +1,124 @@
 {
- "ladbs-corr-lst-20a": { "url": "https://dbs.lacity.gov/sites/default/files/efs/forms/pc17/PC.STR.Corr.Lst.20A.pdf", "sha256": "dbcfc5c9f66729a7ad9889494f5155b67e816ed67c7201a08fa8a250124a2678", "checked": "2026-10-24", "rev": "10/01/2025", "codes": "2023 LABC/LARC" }
+ "ladbs-corr-lst-20a": {
+  "url": "https://dbs.lacity.gov/sites/default/files/efs/forms/pc17/PC.STR.Corr.Lst.20A.pdf",
+  "sha256": "dbcfc5c9f66729a7ad9889494f5155b67e816ed67c7201a08fa8a250124a2678",
+  "checked": "2026-10-24",
+  "rev": "10/01/2025",
+  "codes": "2023 LABC/LARC",
+  "type": "pdf"
+ },
+ "hcd-adu-handbook": {
+  "url": "https://www.hcd.ca.gov/sites/default/files/docs/policy-and-research/adu-handbook-update.pdf",
+  "type": "pdf",
+  "sha256": "ec499e12c08974d8e25af352539b23afc8c26bc7dd200453bd35796de3188e6a",
+  "checked": "2026-10-25"
+ },
+ "ladbs-adu-page": {
+  "url": "https://dbs.lacity.gov/adu",
+  "type": "html",
+  "sha256": "6c4f69df78fbfaf81ce03577993cd776892d8603db388a952dd4030c6a5f4cea",
+  "checked": "2026-10-25"
+ },
+ "ladbs-standard-plans": {
+  "url": "https://dbs.lacity.gov/standard-plan-program",
+  "type": "html",
+  "sha256": "02064c6e303955352bd400fd0dabb0e30866e841195439db083e72b97ebc917e",
+  "checked": "2026-10-25"
+ },
+ "gov-65590": {
+  "url": "https://leginfo.legislature.ca.gov/faces/codes_displaySection.xhtml?lawCode=GOV&sectionNum=65590.",
+  "type": "html",
+  "sha256": null,
+  "checked": null
+ },
+ "gov-66314": {
+  "url": "https://leginfo.legislature.ca.gov/faces/codes_displaySection.xhtml?lawCode=GOV&sectionNum=66314.",
+  "type": "html",
+  "sha256": null,
+  "checked": null
+ },
+ "gov-66321": {
+  "url": "https://leginfo.legislature.ca.gov/faces/codes_displaySection.xhtml?lawCode=GOV&sectionNum=66321.",
+  "type": "html",
+  "sha256": null,
+  "checked": null
+ },
+ "gov-66323": {
+  "url": "https://leginfo.legislature.ca.gov/faces/codes_displaySection.xhtml?lawCode=GOV&sectionNum=66323.",
+  "type": "html",
+  "sha256": null,
+  "checked": null
+ },
+ "gov-66332": {
+  "url": "https://leginfo.legislature.ca.gov/faces/codes_displaySection.xhtml?lawCode=GOV&sectionNum=66332.",
+  "type": "html",
+  "sha256": null,
+  "checked": null
+ },
+ "gov-66311.5": {
+  "url": "https://leginfo.legislature.ca.gov/faces/codes_displaySection.xhtml?lawCode=GOV&sectionNum=66311.5.",
+  "type": "html",
+  "sha256": null,
+  "checked": null
+ },
+ "ed-17620": {
+  "url": "https://leginfo.legislature.ca.gov/faces/codes_displaySection.xhtml?lawCode=EDC&sectionNum=17620.",
+  "type": "html",
+  "sha256": null,
+  "checked": null
+ },
+ "bp-5536.2": {
+  "url": "https://leginfo.legislature.ca.gov/faces/codes_displaySection.xhtml?lawCode=BPC&sectionNum=5536.2.",
+  "type": "html",
+  "sha256": null,
+  "checked": null
+ },
+ "bp-5537": {
+  "url": "https://leginfo.legislature.ca.gov/faces/codes_displaySection.xhtml?lawCode=BPC&sectionNum=5537.",
+  "type": "html",
+  "sha256": null,
+  "checked": null
+ },
+ "bp-6737.1": {
+  "url": "https://leginfo.legislature.ca.gov/faces/codes_displaySection.xhtml?lawCode=BPC&sectionNum=6737.1.",
+  "type": "html",
+  "sha256": null,
+  "checked": null
+ },
+ "bp-7044": {
+  "url": "https://leginfo.legislature.ca.gov/faces/codes_displaySection.xhtml?lawCode=BPC&sectionNum=7044.",
+  "type": "html",
+  "sha256": null,
+  "checked": null
+ },
+ "lamc-chapter-1": {
+  "url": "https://codelibrary.amlegal.com/codes/los_angeles/latest/lamc/0-0-0-108557",
+  "type": "html",
+  "sha256": null,
+  "checked": null
+ },
+ "lacounty-rebuild": {
+  "url": "https://recovery.lacounty.gov/rebuilding/policies-interpretations-exemptions",
+  "type": "html",
+  "sha256": null,
+  "checked": null
+ },
+ "aalrr-sb543": {
+  "url": "https://www.aalrr.com/newsroom-alerts-4196",
+  "type": "html",
+  "sha256": "3244930eff04732688e95d5e9f7e5abb36e72ae431ef661d01952dd7522a7d7c",
+  "checked": "2026-10-25"
+ },
+ "colma-ab2533": {
+  "url": "https://www.colma.ca.gov/ab-2533",
+  "type": "html",
+  "sha256": "ccaa1244a6dbb9bf385f1c8e3b5aa46908869cea881591aa4fd7f06d7727efa1",
+  "checked": "2026-10-25"
+ },
+ "ladbs-home": {
+  "url": "https://dbs.lacity.gov",
+  "type": "link",
+  "sha256": null,
+  "checked": null
+ }
 }

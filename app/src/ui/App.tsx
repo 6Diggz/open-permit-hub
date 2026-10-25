@@ -320,7 +320,7 @@ function GarageStep({ p, update }: { p: Project; update: U }) {
         {(['wood', 'masonry', 'concrete', 'unknown'] as const).map(c => <button key={c} aria-pressed={a.garageConstruction === c} onClick={() => update(d => { d.adu.garageConstruction = c; })}>{c === 'unknown' ? tr(LANG, 'unknown') : (c === 'wood' ? L("Wood frame") : c === 'masonry' ? L("Brick or block") : L("Concrete"))}</button>)}
       </div><span className="help">{L("Wood-frame is common. Brick, block (CMU) and concrete garages need a licensed architect or engineer.")}</span></div>}
     {a.mode === 'youadu' && <div><button className="btn" onClick={() => { const r = autoFit(p); setScanMsg(r.why); if (r.footprint) update(d => { d.adu.footprint = r.footprint!; }); }}>{L("Fit it on my lot")}</button> <span role="status" className="help">{scanMsg}</span></div>}
-    {a.mode === 'youadu' && <p className="lead"><a href="https://dbs.lacity.gov/services/plan-review-permitting/standard-plan-program" target="_blank" rel="noreferrer">{L("See the LA Standard Plan list")}</a>. {L("Enter the footprint from the plan sheet below.")}</p>}
+    {a.mode === 'youadu' && <p className="lead"><a href="https://dbs.lacity.gov/standard-plan-program" target="_blank" rel="noreferrer">{L("See the LA Standard Plan list")}</a>. {L("Enter the footprint from the plan sheet below.")}</p>}
     <div className="grid2">
       <Len always id="gw" range={RANGES.building} label={L("Outside width")} mm={fb.maxX - fb.minX} onChange={v => resize(v, null)} />
       <Len always id="gd" range={RANGES.building} label={L("Outside depth")} mm={fb.maxY - fb.minY} onChange={v => resize(null, v)} />

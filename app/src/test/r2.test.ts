@@ -280,3 +280,21 @@ describe('Clean and Fix headline', () => {
     expect(lossHeadline({ ...base, lost: 0, changed: 2 }).mustAccept).toBe(true);
   });
 });
+
+// @ts-expect-error plain JS module outside the app
+import { allowed } from '../../../scripts/license-gate.mjs';
+describe('license gate', () => {
+  it('appsec-r2-02 GPL variants fail; allowed expressions pass', () => {
+    for (const l of ['GPL-3.0-only', 'GPL-2.0', 'AGPL-3.0', 'LGPL-2.1-or-later', 'GPL-3.0-or-later', 'MIT AND GPL-2.0', 'UNKNOWN', '', 'Custom: see LICENSE']) expect(allowed(l), l).toBe(false);
+    for (const l of ['MIT', '(MIT AND Zlib)', 'MIT OR GPL-3.0-only', 'Apache-2.0 WITH LLVM-exception', '0BSD', 'OFL-1.1', 'MIT/Apache-2.0', '(BSD-3-Clause OR GPL-2.0)']) expect(allowed(l), l).toBe(true);
+  });
+});
+
+import lockJson from '../../../docs/sources.lock.json';
+describe('rules watch', () => {
+  it('OUT2-05 every URL a rule cites is watched in docs/sources.lock.json', () => {
+    const watched = new Set(Object.values(lockJson as Record<string, { url: string }>).map(s => s.url));
+    const cited = [...new Set(RULES.flatMap(r => r.cites.map(c => c.url).filter(Boolean)))] as string[];
+    expect(cited.filter(u => !watched.has(u))).toEqual([]);
+  });
+});

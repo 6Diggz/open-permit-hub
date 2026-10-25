@@ -17,7 +17,8 @@ const info = (en: string, es: string, nextEn?: string, nextEs?: string, values?:
 const yes = (v: Tri) => v === 'yes', no = (v: Tri) => v === 'no';
 const conv = (p: Project) => p.adu.mode === 'conversion';
 const all = () => true;
-const GOV = 'https://california.public.law/codes/ca_gov_code_section_';
+/** Official state text (leginfo). The old public.law links 404 for the renumbered ADU sections (66314 and up). */
+const GOV = 'https://leginfo.legislature.ca.gov/faces/codes_displaySection.xhtml?lawCode=GOV&sectionNum=';
 
 const safeName = (s: string) => s.replace(/[<>\r\n`]/g, ' ').slice(0, 40);
 const sane = (v: number | null, lo: number, hi: number) => v != null && Number.isFinite(v) && v >= lo && v <= hi;
@@ -115,7 +116,7 @@ export const RULES: Rule[] = [
 
   { id: 'GAR-01', version: '1', module: 'zoning', severity: 'critical', kind: 'city', effectiveFrom: EFF, applies: conv,
     title: t('Garage path: attached or detached, inside the existing walls', 'Camino del garaje: adjunto o separado, dentro de los muros existentes'),
-    cites: [{ code: 'Gov. Code §66323(a)(1)(A); LADBS sheet II-C (detached) and II-G (attached)', url: GOV + '66323', verified: true }],
+    cites: [{ code: 'Gov. Code §66323(a)(1)(A); LADBS sheet II-C (detached) and II-G (attached)', url: GOV + '66323.', verified: true }],
     check: p => {
       const a = p.adu;
       if (a.garageAttachment === 'unknown') return unk('We don\'t know if the garage is attached to the house or detached.', 'No sabemos si el garaje está adjunto a la casa o separado.', 'Pick attached or detached. The city uses a different checklist for each (sheet II-C or II-G).', 'Elija adjunto o separado. La ciudad usa una lista distinta para cada uno (hoja II-C o II-G).');
@@ -127,7 +128,7 @@ export const RULES: Rule[] = [
 
   { id: 'MIX-01', version: '1', module: 'core', severity: 'critical', kind: 'city', effectiveFrom: EFF, applies: conv,
     title: t('Main house and units already on the lot', 'Casa principal y unidades que ya hay en el lote'),
-    cites: [{ code: 'LADBS sheet II-C (conversion per Gov. Code §66323(a)(1) for an existing single-family dwelling only); II-C.1, II-C.5 (unit mix)', url: SHEET_URL, verified: true }, { code: 'Gov. Code §66323(a)(1) (one ADU and one JADU per single-family lot)', url: GOV + '66323', verified: true }],
+    cites: [{ code: 'LADBS sheet II-C (conversion per Gov. Code §66323(a)(1) for an existing single-family dwelling only); II-C.1, II-C.5 (unit mix)', url: SHEET_URL, verified: true }, { code: 'Gov. Code §66323(a)(1) (one ADU and one JADU per single-family lot)', url: GOV + '66323.', verified: true }],
     check: p => {
       const s = p.site;
       if (s.mainBuilding === 'unknown') return unk('We don\'t know what the main building is.', 'No sabemos qué es el edificio principal.', 'Pick single-family house, duplex or apartments. The garage path (sheet II-C) is only for a lot with one existing single-family house.', 'Elija casa unifamiliar, dúplex o apartamentos. El camino del garaje (hoja II-C) es solo para un lote con una casa unifamiliar existente.');
@@ -140,7 +141,7 @@ export const RULES: Rule[] = [
 
   { id: 'SCP-01', version: '2', module: 'zoning', severity: 'critical', kind: 'city', effectiveFrom: EFF, applies: conv,
     title: t('Added area: 150 sq ft max, only for getting in and out', 'Área agregada: máximo 150 pies², solo para entrar y salir'),
-    cites: [{ code: 'Gov. Code §66323(a)(1)(A) (150 sq ft expansion for ingress and egress); LADBS sheet II-C.3, II-C.4', url: GOV + '66323', verified: true }],
+    cites: [{ code: 'Gov. Code §66323(a)(1)(A) (150 sq ft expansion for ingress and egress); LADBS sheet II-C.3, II-C.4', url: GOV + '66323.', verified: true }],
     check: p => {
       const add = p.adu.addedAreaSqFt;
       if (add <= 0) return pass('No new floor area is added.', 'No se agrega área nueva.');
@@ -154,7 +155,7 @@ export const RULES: Rule[] = [
 
   { id: 'SET-01', version: '2', module: 'zoning', severity: 'critical', kind: 'city', effectiveFrom: EFF, applies: conv,
     title: t('Setbacks for a converted existing structure', 'Retiros para una estructura existente convertida'),
-    cites: [{ code: 'Gov. Code §66314(d)(7) (4 ft side/rear applies only to ADUs not converted from an existing structure)', url: GOV + '66314', verified: true }, { code: 'Gov. Code §66332 / AB 2533 (unpermitted ADUs built before 2020)', url: GOV + '66332', verified: true }],
+    cites: [{ code: 'Gov. Code §66314(d)(7) (4 ft side/rear applies only to ADUs not converted from an existing structure)', url: GOV + '66314.', verified: true }, { code: 'Gov. Code §66332 / AB 2533 (unpermitted ADUs built before 2020)', url: GOV + '66332.', verified: true }],
     check: p => {
       const a = p.adu;
       if (yes(a.existingStructurePermitted)) return pass('The garage was built with a permit. Converting it in place needs no extra setback.', 'El garaje tiene permiso. Convertirlo no requiere retiro adicional.');
@@ -165,7 +166,7 @@ export const RULES: Rule[] = [
 
   { id: 'ADD-01', version: '1', module: 'zoning', severity: 'critical', kind: 'city', effectiveFrom: EFF, applies: p => conv(p) && p.adu.addedAreaSqFt > 0,
     title: t('Setbacks for the added entry area', 'Retiros del área de entrada agregada'),
-    cites: [{ code: 'Gov. Code §66323(a)(1)(A) (entry expansion must keep side and rear setbacks sufficient for fire and safety)', url: GOV + '66323', verified: true }, { code: 'LADBS sheet II-D.4 (4 ft side and rear setback for addition portions of a new detached State ADU; applied to a II-C entry addition here as the likely plan-check standard)', url: SHEET_URL, verified: false }],
+    cites: [{ code: 'Gov. Code §66323(a)(1)(A) (entry expansion must keep side and rear setbacks sufficient for fire and safety)', url: GOV + '66323.', verified: true }, { code: 'LADBS sheet II-D.4 (4 ft side and rear setback for addition portions of a new detached State ADU; applied to a II-C entry addition here as the likely plan-check standard)', url: SHEET_URL, verified: false }],
     check: p => {
       const d = p.adu.addedSetbackMm;
       if (!isNum(d)) return unk(`Adds ${p.adu.addedAreaSqFt} sq ft, but we don't know how close the added part is to a side or rear line.`, `Agrega ${p.adu.addedAreaSqFt} pies², pero no sabemos qué tan cerca está la parte agregada de un lindero lateral o trasero.`, 'Measure from the added part to the closest side or rear line and enter it on the Garage step.', 'Mida desde la parte agregada al lindero lateral o trasero más cercano e ingréselo en el paso Garaje.');
@@ -175,7 +176,7 @@ export const RULES: Rule[] = [
 
   { id: 'SET-02', version: '2', module: 'zoning', severity: 'critical', kind: 'city', effectiveFrom: EFF, applies: p => !conv(p),
     title: t('New ADU: 4 ft side and rear setbacks', 'ADU nuevo: retiros de 4 pies laterales y traseros'),
-    cites: [{ code: 'Gov. Code §66314 (max 4 ft side and rear; state law controls over the 5 ft on older LADBS sheets)', url: GOV + '66314', verified: true }],
+    cites: [{ code: 'Gov. Code §66314 (max 4 ft side and rear; state law controls over the 5 ft on older LADBS sheets)', url: GOV + '66314.', verified: true }],
     check: p => {
       const { lot, streetEdge, lotUncertaintyMm } = p.site; const fp = p.adu.footprint;
       if (!polyInside(fp, lot)) return fail('Part of the ADU is outside the lot lines.', 'Parte del ADU está fuera del lote.', 'Move the ADU fully inside the lot.', 'Mueva el ADU dentro del lote.');
@@ -193,7 +194,7 @@ export const RULES: Rule[] = [
     check: p => { const g = gap(p.adu.footprint, p.site.primary); return g === 0 ? fail('The ADU overlaps the main house on the plan.', 'El ADU se superpone con la casa.', 'Move the ADU so it does not touch the house, or design it as attached.', 'Mueva el ADU.') : info(`Gap to the main house: ${fmtFtIn(g)}.`, `Espacio a la casa: ${fmtFtIn(g)}.`, g < ft(10) ? 'Close buildings may need fire-rated walls facing each other. Your preparer confirms.' : undefined, 'Edificios cercanos pueden requerir muros resistentes al fuego.'); } },
 
   { id: 'HGT-01', version: '2', module: 'zoning', severity: 'major', kind: 'city', effectiveFrom: EFF, applies: p => !conv(p),
-    title: t('Height of a detached ADU', 'Altura de un ADU separado'), cites: [{ code: 'Gov. Code §66321(b)(4) (16 ft; 18 ft within a half-mile walk of a major transit stop or a high-quality transit corridor, (b)(4)(B); +2 ft to match roof pitch)', url: GOV + '66321', verified: true }],
+    title: t('Height of a detached ADU', 'Altura de un ADU separado'), cites: [{ code: 'Gov. Code §66321(b)(4) (16 ft; 18 ft within a half-mile walk of a major transit stop or a high-quality transit corridor, (b)(4)(B); +2 ft to match roof pitch)', url: GOV + '66321.', verified: true }],
     check: p => {
       const tr = p.site.flags.transitHalfMile;
       if (tr === 'unknown') return unk('We need to know if the lot is within a half-mile walk of a major transit stop or a high-quality transit corridor.', 'Necesitamos saber si el lote está a media milla caminando de una parada de transporte principal o de un corredor de transporte de alta calidad.', 'Check walking distance (not straight-line) to the nearest major transit stop or frequent bus corridor.', 'Revise la distancia caminando a la parada principal o corredor de autobús frecuente más cercano.');
@@ -272,7 +273,7 @@ export const RULES: Rule[] = [
     } },
 
   { id: 'SPK-01', version: '2', module: 'fire', severity: 'major', kind: 'city', hs: true, effectiveFrom: EFF, applies: all,
-    title: t('Fire sprinklers', 'Rociadores contra incendios'), cites: [{ code: 'LADBS sheet III-E.4 (sprinklers required for the ADU if the existing dwelling has them)', url: SHEET_URL, verified: true }, { code: 'Gov. Code §66314(d)(12) (not required when the main house does not need them)', url: GOV + '66314', verified: true }],
+    title: t('Fire sprinklers', 'Rociadores contra incendios'), cites: [{ code: 'LADBS sheet III-E.4 (sprinklers required for the ADU if the existing dwelling has them)', url: SHEET_URL, verified: true }, { code: 'Gov. Code §66314(d)(12) (not required when the main house does not need them)', url: GOV + '66314.', verified: true }],
     check: p => { const f = p.site.flags.primarySprinklered; return f === 'unknown' ? unk('We don\'t know if the main house has sprinklers.', 'No sabemos si la casa tiene rociadores.', 'Check the main house for sprinkler heads.', 'Revise si la casa principal tiene cabezas de rociadores.') : yes(f) ? (yes(p.adu.sprinklered) ? pass('Main house has sprinklers and so does the ADU.', 'La casa principal tiene rociadores y el ADU también.') : fail('The main house has sprinklers, so the ADU needs them too (LADBS sheet III-E.4).', 'La casa tiene rociadores; el ADU también los necesita (hoja III-E.4).', 'Add sprinklers to the ADU plan. A bigger water meter may be needed.', 'Agregue rociadores al plano del ADU. Puede necesitar un medidor de agua más grande.')) : pass('Not required: the main house has no sprinklers (Gov. Code §66314(d)(12)). Adding them is optional and can help with fire access.', 'No requerido: la casa no tiene rociadores (Código de Gobierno §66314(d)(12)). Agregarlos es opcional y puede ayudar con el acceso de bomberos.'); } },
 
   { id: 'ACC-01', version: '2', module: 'fire', severity: 'major', kind: 'city', hs: true, effectiveFrom: EFF, applies: all,
@@ -291,7 +292,7 @@ export const RULES: Rule[] = [
     } },
 
   { id: 'HAZ-01', version: '2', module: 'hazards', severity: 'critical', kind: 'city', hs: true, effectiveFrom: EFF, applies: all,
-    title: t('Hillside and very high fire zone', 'Ladera y zona de muy alto riesgo de incendio'), cites: [{ code: 'LAMC 12.22 A.33 (HCD found parts noncompliant, 11/19/2024: contested)', verified: true }, { code: 'Gov. Code §66323(a) (conversions inside an existing accessory structure: ministerial approval)', url: GOV + '66323', verified: true }],
+    title: t('Hillside and very high fire zone', 'Ladera y zona de muy alto riesgo de incendio'), cites: [{ code: 'LAMC 12.22 A.33 (HCD found parts noncompliant, 11/19/2024: contested)', verified: true }, { code: 'Gov. Code §66323(a) (conversions inside an existing accessory structure: ministerial approval)', url: GOV + '66323.', verified: true }],
     check: p => { const { hillside, vhfhsz, slopeOver10 } = p.site.flags; if ([hillside, vhfhsz, slopeOver10].includes('unknown')) return unk('Hillside, fire zone or slope not confirmed.', 'Ladera, zona de incendio o pendiente sin confirmar.', 'Check ZIMAS for "Hillside Area" and "Very High Fire Hazard Severity Zone".', 'Busque en ZIMAS "Hillside Area" y "Very High Fire Hazard Severity Zone".'); if (yes(hillside) && yes(vhfhsz) && conv(p)) return info('Lot is in both Hillside and Very High Fire zones. A conversion inside an existing garage must be approved ministerially by state law (Gov. Code §66323(a)); LA\'s hillside limit targets new ADUs.', 'Lote en ladera y zona de fuego muy alto. El estado exige aprobar en forma ministerial una conversión dentro de un garaje existente (Código de Gobierno §66323(a)); el límite de LA apunta a ADU nuevos.', 'Expect fire-access and hazard review notes (hose pull, sprinklers, brush clearance). Your preparer confirms.', 'Espere notas de acceso de bomberos y riesgos (manguera, rociadores, limpieza de maleza). Su preparador confirma.'); if (yes(hillside) && yes(vhfhsz)) return fail('Lot is in both Hillside and Very High Fire zones. LA limits ADUs here, though the state says parts of that limit don\'t comply (contested).', 'El lote está en zona de Ladera y de Muy Alto Riesgo de Incendio. LA limita los ADU aquí, aunque el estado dice que partes de ese límite no cumplen (disputado).', 'Talk to LADBS or a land-use attorney before designing.', 'Hable con LADBS o un abogado de uso de suelo antes de diseñar.'); if (yes(slopeOver10) || yes(hillside)) return info('Hillside lot: engineering needed. Automatic fitting is off.', 'Lote en ladera: se necesita ingeniería. El ajuste automático está apagado.', 'Get a soils report and an engineer. Draft sheets still work.', 'Obtenga un informe de suelos y un ingeniero. Las hojas de borrador siguen funcionando.'); return pass('Not in Hillside + Very High Fire zones.', 'Fuera de las zonas de Ladera y de Muy Alto Riesgo de Incendio.'); } },
 
   { id: 'HAZ-02', version: '1', module: 'hazards', severity: 'major', kind: 'city', effectiveFrom: EFF, applies: all,
@@ -299,7 +300,7 @@ export const RULES: Rule[] = [
     check: p => p.site.flags.hpoz === 'yes' ? info('Exterior changes need HPOZ approval, which can take up to 75 days.', 'Cambios exteriores requieren aprobación HPOZ.', 'Contact the HPOZ planner early.', 'Contacte al planificador HPOZ.') : p.site.flags.hpoz === 'unknown' ? unk('Not known if the lot is in an HPOZ.', 'No se sabe si el lote está en un HPOZ.', 'Check ZIMAS for "HPOZ".', 'Busque "HPOZ" en ZIMAS.') : pass('Not in a historic district.', 'No está en distrito histórico.') },
 
   { id: 'HAZ-03', version: '2', module: 'hazards', severity: 'major', kind: 'city', effectiveFrom: EFF, applies: all,
-    title: t('Coastal zone and Mello Act', 'Zona costera y Ley Mello'), cites: [{ code: 'Gov. Code §65590(b) (structures under 3 units exempt); City Planning decides', url: GOV + '65590', verified: true }],
+    title: t('Coastal zone and Mello Act', 'Zona costera y Ley Mello'), cites: [{ code: 'Gov. Code §65590(b) (structures under 3 units exempt); City Planning decides', url: GOV + '65590.', verified: true }],
     check: p => p.site.flags.coastal === 'yes' ? info('Coastal zone: a coastal permit step applies. Small lots (under 3 units) are usually exempt from Mello Act replacement rules.', 'Zona costera.', 'Ask City Planning for the Mello exemption check first.', 'Pida a Planificación la revisión de exención.') : p.site.flags.coastal === 'unknown' ? unk('Not known if the lot is in the coastal zone.', 'No se sabe si el lote está en la zona costera.', 'Check ZIMAS for "Coastal Zone".', 'Busque "Coastal Zone" en ZIMAS.') : pass('Not in the coastal zone.', 'Fuera de la zona costera.') },
 
   { id: 'HAZ-04', version: '2', module: 'hazards', severity: 'major', kind: 'city', hs: true, effectiveFrom: EFF, applies: all,
@@ -307,7 +308,7 @@ export const RULES: Rule[] = [
     check: p => p.site.flags.methane === 'yes' ? info('Methane zone: new trenches or footings may require gas mitigation (a membrane and vents).', 'Zona de metano: zanjas o cimientos nuevos pueden requerir mitigación de gas (una membrana y ventilas).', 'Budget for mitigation and ask LADBS if your scope triggers it.', 'Presupueste la mitigación y pregunte a LADBS si su obra la activa.') : p.site.flags.methane === 'unknown' ? unk('Not known if the lot is in a methane zone.', 'No se sabe si el lote está en zona de metano.', 'Check ZIMAS for "Methane Hazard Site".', 'Busque en ZIMAS "Methane Hazard Site".') : pass('Not in a methane zone.', 'No está en zona de metano.') },
 
   { id: 'HAZ-05', version: '1', module: 'hazards', severity: 'critical', kind: 'city', hs: true, effectiveFrom: EFF, applies: all,
-    title: t('Fire rebuild area (Palisades / Eaton)', 'Área de reconstrucción por incendio'), cites: [{ code: 'State and LA emergency orders for 2025 burn areas', url: 'https://recovery.lacounty.gov/rebuilding/rebuild-policies-interpretations-and-exemptions', verified: true }],
+    title: t('Fire rebuild area (Palisades / Eaton)', 'Área de reconstrucción por incendio'), cites: [{ code: 'State and LA emergency orders for 2025 burn areas', url: 'https://recovery.lacounty.gov/rebuilding/policies-interpretations-exemptions', verified: true }],
     suspendsAutoPass: p => p.site.flags.fireRebuild === 'yes',
     check: p => p.site.flags.fireRebuild === 'unknown' ? unk('We don\'t know if the lot is in a 2025 burn area.', 'No sabemos si el lote está en un área de incendio 2025.', 'Check the LA County rebuild map for your address.', 'Revise el mapa de reconstrucción.') : p.site.flags.fireRebuild === 'yes' ? info('This lot is in a 2025 burn area. Special rebuild rules and emergency orders apply. Automatic passes are off.', 'Área de incendio 2025: reglas especiales.', 'Use the official rebuild path and talk to the rebuild center.', 'Use el camino oficial.') : pass('Not in a 2025 burn area.', 'Fuera del área.') },
 
@@ -379,7 +380,7 @@ export const RULES: Rule[] = [
 
   { id: 'PRK-01', version: '1', module: 'zoning', severity: 'minor', kind: 'info', effectiveFrom: EFF, applies: conv,
     title: t('No replacement parking for the garage', 'Sin reemplazo de estacionamiento por el garaje'),
-    cites: [{ code: 'Gov. Code §66314(d)(11) (garage converted to an ADU: city may not require replacement parking)', url: GOV + '66314', verified: true }, { code: 'SB 1211 (2024): extends this to uncovered spaces', verified: false }],
+    cites: [{ code: 'Gov. Code §66314(d)(11) (garage converted to an ADU: city may not require replacement parking)', url: GOV + '66314.', verified: true }, { code: 'SB 1211 (2024): extends this to uncovered spaces', verified: false }],
     check: () => pass('Converting the garage does not require replacing its parking spaces.', 'Convertir el garaje no requiere reemplazar sus espacios de estacionamiento.') },
 
   { id: 'LEG-01', version: '1', module: 'core', severity: 'critical', kind: 'city', effectiveFrom: EFF, applies: p => p.adu.legalization,

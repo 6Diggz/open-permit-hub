@@ -1,11 +1,16 @@
 name: Rule sources watch
-# Weekly: has the LADBS correction sheet changed? Each December: open the new-laws checklist for January 1.
+# Weekly: has any source the rules cite changed (LADBS sheet, state law sections, HCD handbook, LADBS pages)?
+# Each December: open the new-laws checklist for January 1.
+# Also runs when the watch itself changes, so a broken watch shows up red right away.
 on:
   schedule:
     - cron: "17 15 * * 1"
     - cron: "23 15 1 12 *"
   workflow_dispatch:
-permissions: { contents: read, issues: write }
+  push:
+    branches: [main]
+    paths: [".github/workflows/rules-watch.yml", "scripts/rules-watch.mjs", "docs/sources.lock.json"]
+permissions: { contents: write, issues: write, actions: write }
 jobs:
   watch:
     runs-on: ubuntu-latest
@@ -13,19 +18,46 @@ jobs:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
       - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
         with: { node-version: 22 }
+      - name: Make sure the issue label exists
+        env: { GH_TOKEN: "${{ github.token }}" }
+        run: gh label create rules --color 0e8a16 --description "Rule pack review" --force
       - name: Check sources and verbatim text
         id: w
         run: |
           sudo apt-get install -y poppler-utils >/dev/null
-          node scripts/rules-watch.mjs > watch.md || echo "changed=1" >> "$GITHUB_OUTPUT"
-          cat watch.md
-      - name: Open an issue when a source changed
+          node scripts/rules-watch.mjs --write > watch.md || echo "changed=1" >> "$GITHUB_OUTPUT"
+          test -s unreachable.txt && echo "unreachable=1" >> "$GITHUB_OUTPUT" || true
+          cat watch.md >> "$GITHUB_STEP_SUMMARY"; cat watch.md
+      - name: Save first-time source baselines
+        # A source added with "sha256": null gets its hash on the first successful fetch.
+        if: github.event_name != 'pull_request'
+        run: |
+          if ! git diff --quiet docs/sources.lock.json; then
+            git config user.name "github-actions[bot]"; git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+            git commit -m "rules-watch: record source baselines [skip ci]" docs/sources.lock.json && (git push || echo "::warning::could not push the new baselines")
+          fi
+      - name: Open an issue when a source changed (once, not every week)
         if: steps.w.outputs.changed == '1'
         env: { GH_TOKEN: "${{ github.token }}" }
         run: |
-          gh issue create --title "Rule source changed: review the rule pack" --body-file watch.md --label rules || gh issue create --title "Rule source changed: review the rule pack" --body-file watch.md
+          T="Rule source changed: review the rule pack"
+          if [ -z "$(gh issue list --state open --search "in:title \"$T\"" --json number --jq '.[0].number')" ]; then gh issue create --title "$T" --body-file watch.md --label rules; else echo "issue already open"; fi
+      - name: Open an issue when sources can't be checked automatically (once)
+        if: steps.w.outputs.unreachable == '1'
+        env: { GH_TOKEN: "${{ github.token }}" }
+        run: |
+          T="Some rule sources can't be checked automatically"
+          if [ -z "$(gh issue list --state open --search "in:title \"$T\"" --json number --jq '.[0].number')" ]; then
+            { echo "These sources blocked the automatic check (bot wall or outage). Check them by hand at each rule pack review:"; echo; sed 's/^/- /' unreachable.txt; } > unreachable.md
+            gh issue create --title "$T" --body-file unreachable.md --label rules
+          else echo "issue already open"; fi
       - name: New-laws checklist (December)
         if: github.event.schedule == '23 15 1 12 *'
         env: { GH_TOKEN: "${{ github.token }}" }
         run: |
-          gh issue create --title "New California ADU laws start January 1: review the rule pack" --body "Check the HCD ADU Handbook update and new chaptered bills, update app/src/rules, bump PACK.version, verifiedOn and reviewBy in app/src/rules/pack.ts, and note it in CHANGELOG.md."
+          gh issue create --label rules --title "New California ADU laws start January 1: review the rule pack" --body "Check the HCD ADU Handbook update and new chaptered bills, update app/src/rules, bump PACK.version, verifiedOn and reviewBy in app/src/rules/pack.ts, and note it in CHANGELOG.md. Until then the app marks every check as needing a rules update after January 1 (REV-01)."
+      - name: Keep the schedule alive
+        # GitHub turns off scheduled workflows after 60 days with no repository activity. Re-enabling this workflow
+        # through the API on every run keeps it on even when nobody commits.
+        env: { GH_TOKEN: "${{ github.token }}" }
+        run: gh api -X PUT "repos/${{ github.repository }}/actions/workflows/rules-watch.yml/enable"
