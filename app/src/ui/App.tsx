@@ -102,7 +102,7 @@ export default function App() {
     <div className="app"><AskHost />
       <nav className="rail" aria-label={L("Steps")}>
         <p className="brand">{tr(lang, 'app')}</p>
-        <p className="brand-sub">LA City · {PACK.version}</p>
+        <p className="brand-sub">LA City · {PACK.version} · {lang === 'es' ? 'reglas revisadas el' : 'rules checked'} {PACK.verifiedOn}</p>
         {steps.map((s, i) => (
           <button key={s} className="step" aria-current={step === i ? 'step' : undefined} onClick={() => setStep(i)}>
             <span className="n" aria-hidden>{i + 1}</span>{s}<span className="dot" style={{ background: stepDot(i) }} aria-hidden />
