@@ -9,3 +9,6 @@
 - R3: Lane B finished 21 items in about 70 min, about 3x lane A's early rate. Splitting by file area works. Seat tests that point at fixtures outside the repo, or at local-only tools (pymupdf), broke CI. Seats must vendor fixtures and use repo helpers only.
 - R4: Re-deriving the previous round's rule changes found 1 regression and an overstating plain answer. Every new user-facing claim ("Likely yes") needs a dedicated adversarial seat. Golden suite grew 13 to 49 cases.
 - R4: Round 3's font fix silently broke the 'fi' ligature in PDF text. Add a text-layer round-trip test whenever fonts or exports change.
+- R4: A process trap (the notices script) was hit twice by different agents. When two agents trip on the same tool, fix the tool so the wrong path can't be taken.
+- R5: Two of the biggest round-5 findings were repeat leaks (plain-answer gate, overclaiming). Root cause: allowlists and parallel per-feature logic. Default to deny-by-default gates and one shared verdict object read by every surface, plus property and consistency tests.
+- R5: A python http.server keeps serving a deleted folder's old files. Copy dist first, then start the server, and restart it after a re-copy.

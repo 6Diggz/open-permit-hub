@@ -37,4 +37,5 @@ Publish/update an Artifact page "Overnight Report": rounds run, findings per rou
 | R1 | 110 | 5 | 24 | 72 | 84 done | 28/29 after |
 | R2 | 55 | 3 | 16 | 40 | 45 done | 25/29 (3 regressions queued) |
 | R3 | 80 | 1 | 13 | 55 | 74 done, 3 partial, 3 deferred | 28/29 (only Terms) |
-| R4 | 53 | 1 | 7 | 31 | fixing | - |
+| R4 | 53 | 1 | 7 | 31 | 24 fixed + 14 by MCP lane; 16 low-sev open | 28/29 (only Terms) |
+| R5 | 39 | 0 | 11 | 24 | fixing | - |
