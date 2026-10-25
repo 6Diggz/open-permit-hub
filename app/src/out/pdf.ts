@@ -28,12 +28,11 @@ function wrap(t: string, f: PDFFont, size: number, max: number): string[] {
 const setLang = (doc: PDFDocument, lang: string) => doc.catalog.set(PDFName.of('Lang'), PDFString.of(lang));
 
 /** ARCH D (24x36) sheet with true-scale site plan, scale bar, north arrow, title block. */
-async function sitePlanSheet(doc: PDFDocument, p: Project, kind: Kind) {
+async function sitePlanSheet(doc: PDFDocument, p: Project, kind: Kind, sheets: string[]) {
   const W = 36 * PT_PER_IN, H = 24 * PT_PER_IN; const pg = doc.addPage([W, H]);
   const f = await doc.embedFont(StandardFonts.Helvetica), fb = await doc.embedFont(StandardFonts.HelveticaBold);
   pg.drawRectangle({ x: 36, y: 36, width: W - 72, height: H - 72, borderColor: INK, borderWidth: 1.5 });
-  const tbW = 4.5 * PT_PER_IN; const tbX = W - 36 - tbW;
-  pg.drawLine({ start: { x: tbX, y: 36 }, end: { x: tbX, y: H - 36 }, thickness: 1.2, color: INK });
+  const tbX = W - 36 - TB_W;
   // drawing area
   const areaW = tbX - 36 - 72, areaH = H - 72 - 144;
   const bb = bbox(p.site.lot); const wFt = (bb.maxX - bb.minX) / MM_PER_FT, hFt = (bb.maxY - bb.minY) / MM_PER_FT;
@@ -63,24 +62,55 @@ async function sitePlanSheet(doc: PDFDocument, p: Project, kind: Kind) {
       pg.drawText(`Scale 1/4" = 1'-0"   ${fmtSqFt(area(p.adu.footprint))} outside   ${p.adu.interiorLivableSqFt ?? '-'} sq ft livable`, { x: bx, y: by - 38, size: 10, font: f, color: INK }); } }
   // scale bar (true size) + north arrow
   const sbY = 60, sbX = 72; const seg = s * PT_PER_IN * 10; for (let i = 0; i < 4; i++) pg.drawRectangle({ x: sbX + i * seg, y: sbY, width: seg, height: 6, color: i % 2 ? rgb(1, 1, 1) : INK, borderColor: INK, borderWidth: 0.6 });
-  pg.drawText(`0     10     20     30     40 ft      Scale ${scaleName(s)} on 24x36 sheet`, { x: sbX, y: sbY + 12, size: 9, font: f, color: INK });
-  pg.drawLine({ start: { x: tbX - 60, y: H - 140 }, end: { x: tbX - 60, y: H - 90 }, thickness: 2, color: INK }); pg.drawText('N', { x: tbX - 64, y: H - 84, size: 14, font: fb, color: INK });
+  // Each number sits on its own tick (one string drifted: "40" printed at the 7 ft mark).
+  for (let i = 0; i <= 4; i++) { const t = String(i * 10); pg.drawText(t, { x: sbX + i * seg - f.widthOfTextAtSize(t, 9) / 2, y: sbY + 12, size: 9, font: f, color: INK }); }
+  pg.drawText(`FEET      Scale ${scaleName(s)} on 24x36 sheet`, { x: sbX + 4 * seg + 18, y: sbY + 12, size: 9, font: f, color: INK });
+  northArrow(pg, tbX - 70, H - 125, p.site.northDeg, f, fb);
   // title block
   const rows: [string, string][] = [
     ['Project', p.name], ['Address', p.site.address || '-'], ['APN', p.site.apn || '-'], ...(p.site.zone ? [['Zone', p.site.zone] as [string, string]] : []), ...(p.site.lotSource === 'gis' ? [['Lot lines', 'From the LA City parcel map. Verify on site.'] as [string, string]] : []), ['Scope', p.adu.mode === 'conversion' ? 'Convert existing detached garage to ADU' : 'Detached ADU (YOU-ADU plan site fit)'],
     ['ADU footprint', fmtSqFt(area(p.adu.footprint))], ['Owner', p.people.ownerName || '-'], ['Prepared by', `${p.people.preparerName || '-'} (${p.people.preparerRole})`],
     ['License', p.people.preparerLicense || 'n/a'], ...(p.people.engineerName ? [['Engineer (non-conventional parts)', p.people.engineerName] as [string, string]] : []),
-    ['Rule pack', `${PACK_ID} (checked ${PACK.verifiedOn})`], ['Sheet', 'A-1 Site plan'], ['Date', new Date(Date.now() - new Date().getTimezoneOffset() * 60000).toISOString().slice(0, 10)],
-  ];
-  let ty = H - 72; pg.drawText('SITE PLAN', { x: tbX + 14, y: ty, size: 20, font: fb, color: INK }); ty -= 34;
-  for (const [a, b] of rows) { pg.drawText(a, { x: tbX + 14, y: ty, size: 8, font: f, color: MUTE }); ty -= 13; for (const l of wrap(safe(b), f, 11, tbW - 28)) { pg.drawText(l, { x: tbX + 14, y: ty, size: 11, font: fb, color: INK }); ty -= 14; } ty -= 8; }
-  const note = `Prepared by the person named above using Open Permit Hub software. The software is not the preparer. Not reviewed or approved by any agency. Verify all dimensions in the field.${missingGlyphNote(p, false, true) ? ' ' + missingGlyphNote(p, false, true) : ''}`;
-  sigBlock(pg, tbX + 14, 210, tbW - 28, f, p);
-  ty = 150; for (const l of wrap(note, f, 9, tbW - 28)) { pg.drawText(l, { x: tbX + 14, y: ty, size: 9, font: f, color: INK }); ty -= 12; }
+    ['Rule pack', `${PACK_ID} (checked ${PACK.verifiedOn})`],   ];
+  // Project data (LADBS item I.C.8): lot size, occupancy, type of construction, stories, height, fire zone, sprinklers.
+  const yn = (v: string) => v === 'yes' ? 'Yes' : v === 'no' ? 'No' : 'Not answered';
+  rows.push(['Lot area', fmtSqFt(area(p.site.lot))], ['Occupancy', 'R-3 (dwelling unit; preparer to confirm)'],
+    ['Construction type', p.adu.garageConstruction === 'wood' ? 'Type V-B wood frame (preparer to confirm)' : 'Preparer to state'],
+    ['Stories', p.adu.mode === 'conversion' ? '1 (existing garage)' : 'Preparer to state'], ['ADU height', p.adu.heightMm ? fmtFtIn(p.adu.heightMm) : '-'],
+    ['Very High Fire Hazard Severity Zone', yn(p.site.flags.vhfhsz)], ['Sprinklers', yn(p.adu.sprinklered)], ['Sheet index', sheets.join('; ')]);
+  titleBlock(pg, p, 'SITE PLAN', 'A-1 Site plan', rows, f, fb);
   if (kind === 'draft') pg.drawText('DRAFT - NOT FOR SUBMITTAL', { x: W * 0.2, y: H * 0.25, size: 96, font: fb, color: rgb(0.85, 0.2, 0.15), opacity: 0.13, rotate: degrees(28) });
   if (kind === 'precheck') pg.drawText('Pre-check copy - not a submittal', { x: 44, y: H - 50, size: 10, font: fb, color: RED });
   exampleBanner(pg, p, fb, H);
   return pg;
+}
+
+const TB_W = 4.5 * PT_PER_IN;
+const today = () => new Date(Date.now() - new Date().getTimezoneOffset() * 60000).toISOString().slice(0, 10);
+/** The right-hand title block every plan sheet carries (LADBS item I.C.1: each sheet signed): project, people, sheet number, date, signature line. */
+function titleBlock(pg: PDFPage, p: Project, title: string, sheet: string, extra: [string, string][] | null, f: PDFFont, fb: PDFFont) {
+  const { width: W, height: H } = pg.getSize(); const tbX = W - 36 - TB_W, tbW = TB_W;
+  pg.drawLine({ start: { x: tbX, y: 36 }, end: { x: tbX, y: H - 36 }, thickness: 1.2, color: INK });
+  const rows: [string, string][] = extra ?? [['Project', p.name], ['Address', p.site.address || '-'], ['APN', p.site.apn || '-'], ['Owner', p.people.ownerName || '-'],
+    ['Prepared by', `${p.people.preparerName || '-'} (${p.people.preparerRole})`], ['License', p.people.preparerLicense || 'n/a'], ['Rule pack', `${PACK_ID} (checked ${PACK.verifiedOn})`]];
+  rows.push(['Sheet', sheet], ['Date', today()]);
+  let ty = H - 72; pg.drawText(title, { x: tbX + 14, y: ty, size: 20, font: fb, color: INK }); ty -= 34;
+  for (const [a, b] of rows) { pg.drawText(a, { x: tbX + 14, y: ty, size: 9, font: f, color: MUTE }); ty -= 13; for (const l of wrap(safe(b), f, 11, tbW - 28)) { pg.drawText(l, { x: tbX + 14, y: ty, size: 11, font: fb, color: INK }); ty -= 14; } ty -= 7; }
+  const note = `Prepared by the person named above using Open Permit Hub software. The software is not the preparer. Not reviewed or approved by any agency. Verify all dimensions in the field.${missingGlyphNote(p, false, true) ? ' ' + missingGlyphNote(p, false, true) : ''}`;
+  sigBlock(pg, tbX + 14, 210, tbW - 28, f, p);
+  ty = 150; for (const l of wrap(note, f, 9, tbW - 28)) { pg.drawText(l, { x: tbX + 14, y: ty, size: 9, font: f, color: INK }); ty -= 12; }
+  return tbX;
+}
+/** North arrow with an arrowhead, turned to the project's true north (degrees clockwise from sheet-up). Unknown north is said, not guessed. */
+export function northArrow(pg: PDFPage, cx: number, cy: number, deg: number | null, f: PDFFont, fb: PDFFont) {
+  const r = 28, a = ((deg ?? 0) * Math.PI) / 180; const ux = Math.sin(a), uy = Math.cos(a);
+  const tip = { x: cx + ux * r, y: cy + uy * r }, tail = { x: cx - ux * r, y: cy - uy * r };
+  pg.drawCircle({ x: cx, y: cy, size: r + 6, borderColor: INK, borderWidth: 0.8 });
+  pg.drawLine({ start: tail, end: tip, thickness: 2, color: INK });
+  const hx = -uy, hy = ux; // arrowhead: two short strokes back from the tip
+  for (const sgn of [1, -1]) pg.drawLine({ start: tip, end: { x: tip.x - ux * 12 + hx * 6 * sgn, y: tip.y - uy * 12 + hy * 6 * sgn }, thickness: 2, color: INK });
+  pg.drawText('N', { x: cx + ux * (r + 16) - 5, y: cy + uy * (r + 16) - 5, size: 14, font: fb, color: INK });
+  if (deg == null) pg.drawText('North not set: check before submittal', { x: cx - 80, y: cy - r - 24, size: 9, font: f, color: RED });
 }
 
 /** Signature and date lines for the person who prepared the plans (B&P §5536.2 asks the preparer to sign plans made for others). Layout only. */
@@ -91,8 +121,8 @@ function sigBlock(pg: PDFPage, x: number, y: number, w: number, f: PDFFont, p: P
   const dw = 90;
   pg.drawLine({ start: { x, y }, end: { x: x + w - dw - 12, y }, thickness: 0.8, color: INK });
   pg.drawLine({ start: { x: x + w - dw, y }, end: { x: x + w, y }, thickness: 0.8, color: INK });
-  let ly = y - 11; for (const l of wrap(safe(sigLabel(p)), f, 8, w - dw - 12)) { pg.drawText(l, { x, y: ly, size: 8, font: f, color: MUTE }); ly -= 10; }
-  pg.drawText('Date', { x: x + w - dw, y: y - 11, size: 8, font: f, color: MUTE });
+  let ly = y - 12; for (const l of wrap(safe(sigLabel(p)), f, 9, w - dw - 12)) { pg.drawText(l, { x, y: ly, size: 9, font: f, color: MUTE }); ly -= 11; }
+  pg.drawText('Date', { x: x + w - dw, y: y - 12, size: 9, font: f, color: MUTE });
 }
 
 /** Sheet A-2: floor plan data from the Rooms step (ADU outline at 1/4" = 1'-0", window schedule with escape tags, alarms, areas). */
@@ -111,8 +141,8 @@ async function floorPlanSheet(doc: PDFDocument, p: Project, kind: Kind) {
       else { const L = o.widthMm * k; pg.drawLine({ start: a, end: { x: a.x + (-w.uy) * L, y: a.y + w.ux * L }, thickness: 0.8, color: INK }); } }
     const bb = bbox(r.poly); const c = P({ x: (bb.minX + bb.maxX) / 2, y: (bb.minY + bb.maxY) / 2 }); const z = roomSize(r);
     const nm = safe((r.name || 'ROOM').toUpperCase()).slice(0, 24); pg.drawText(nm, { x: c.x - fb.widthOfTextAtSize(nm, 10) / 2, y: c.y + 4, size: 10, font: fb, color: INK });
-    const dm = `${fmtFtIn(z.w)} x ${fmtFtIn(z.d)}`; pg.drawText(dm, { x: c.x - f.widthOfTextAtSize(dm, 8) / 2, y: c.y - 8, size: 8, font: f, color: INK });
-    const ar = fmtSqFt(roomArea(r)) + (z.taped ? ' (tape)' : ''); pg.drawText(ar, { x: c.x - f.widthOfTextAtSize(ar, 8) / 2, y: c.y - 18, size: 8, font: f, color: MUTE });
+    const dm = `${fmtFtIn(z.w)} x ${fmtFtIn(z.d)}`; pg.drawText(dm, { x: c.x - f.widthOfTextAtSize(dm, 9) / 2, y: c.y - 9, size: 9, font: f, color: INK });
+    const ar = fmtSqFt(roomArea(r)) + (z.taped ? ' (tape)' : ''); pg.drawText(ar, { x: c.x - f.widthOfTextAtSize(ar, 9) / 2, y: c.y - 20, size: 9, font: f, color: MUTE });
   }
   pg.drawText(p.adu.rooms.length ? 'FLOOR PLAN' : 'FLOOR PLAN (OUTLINE)', { x: ox, y: oy - 30, size: 16, font: fb, color: INK });
   pg.drawText(`Scale 1/4" = 1'-0"   Outside ${fmtFtIn(ab.maxX - ab.minX)} x ${fmtFtIn(ab.maxY - ab.minY)} (${fmtSqFt(area(p.adu.footprint))})   Livable ${p.adu.interiorLivableSqFt ?? '-'} sq ft   Ceiling ${p.adu.ceilingHeightMm != null ? fmtFtIn(p.adu.ceilingHeightMm) : '-'}`, { x: ox, y: oy - 48, size: 11, font: f, color: INK });
@@ -137,6 +167,7 @@ async function floorPlanSheet(doc: PDFDocument, p: Project, kind: Kind) {
   for (const [a, b] of rows) { pg.drawText(a, { x: x0, y, size: 10, font: f, color: MUTE }); pg.drawText(b, { x: x0 + 250, y, size: 10, font: fb, color: INK }); y -= 15; }
   pg.drawText(safe(`A-2 Floor plan data   ${p.site.address || p.name}   ${PACK_ID}`), { x: 60, y: 54, size: 10, font: f, color: INK });
   exampleBanner(pg, p, fb, H);
+  titleBlock(pg, p, 'FLOOR PLAN', 'A-2 Floor plan data', null, f, fb);
   if (kind === 'draft') pg.drawText('DRAFT - NOT FOR SUBMITTAL', { x: W * 0.2, y: H * 0.25, size: 96, font: fb, color: rgb(0.85, 0.2, 0.15), opacity: 0.13, rotate: degrees(28) });
 }
 
@@ -145,7 +176,8 @@ async function markupSheet(doc: PDFDocument, p: Project) {
   const W = 36 * PT_PER_IN, H = 24 * PT_PER_IN; const f = await doc.embedFont(StandardFonts.Helvetica), fb = await doc.embedFont(StandardFonts.HelveticaBold);
   const newPage = (cont: boolean) => { const pg = doc.addPage([W, H]); pg.drawRectangle({ x: 36, y: 36, width: W - 72, height: H - 72, borderColor: INK, borderWidth: 1.5 });
     pg.drawText(cont ? 'REVIEW MARKUP (CONTINUED)' : 'REVIEW MARKUP', { x: 60, y: H - 80, size: 20, font: fb, color: INK });
-    pg.drawText(safe(`G-2 Review markup   ${p.site.address || p.name}   APN ${p.site.apn || '-'}   Notes travel in the .permitpack file.`), { x: 60, y: 54, size: 10, font: f, color: INK }); return pg; };
+    pg.drawText(safe(`G-2 Review markup   ${p.site.address || p.name}   APN ${p.site.apn || '-'}   Notes travel in the .permitpack file.`), { x: 60, y: 54, size: 10, font: f, color: INK });
+    titleBlock(pg, p, 'REVIEW MARKUP', cont ? 'G-2 Review markup (continued)' : 'G-2 Review markup', null, f, fb); return pg; };
   let pg = newPage(false);
   // Plan with pins, fitted into the left 40%.
   const bb = bbox(p.site.lot); const aw = W * 0.38, ah = H - 220; const k = Math.min(aw / (bb.maxX - bb.minX), ah / (bb.maxY - bb.minY)); const ox = 72, oy = 110;
@@ -155,8 +187,8 @@ async function markupSheet(doc: PDFDocument, p: Project) {
   for (const x of p.markup.pins) { const c = x.status === 'open' ? RED : GREEN; pg.drawCircle({ x: X(x.x), y: Yp(x.y), size: 9, color: c, borderColor: rgb(1, 1, 1), borderWidth: 1 }); const t = String(x.n); pg.drawText(t, { x: X(x.x) - fb.widthOfTextAtSize(t, 9) / 2, y: Yp(x.y) - 3, size: 9, font: fb, color: rgb(1, 1, 1) }); }
   const open = p.markup.pins.filter(x => x.status === 'open').length;
   pg.drawText(`${p.markup.pins.length} notes: ${open} open, ${p.markup.pins.length - open} resolved`, { x: ox, y: oy - 30, size: 11, font: fb, color: INK });
-  let x0 = W * 0.47, y = H - 120; const colW = W - 72 - x0 - 24;
-  const ensure = (need: number) => { if (y - need < 80) { pg = newPage(true); x0 = 60; y = H - 120; } };
+  const tbX = W - 36 - TB_W; let x0 = W * 0.47, y = H - 120; let colW = tbX - x0 - 24;
+  const ensure = (need: number) => { if (y - need < 80) { pg = newPage(true); x0 = 60; y = H - 120; colW = tbX - x0 - 24; } };
   pg.drawText('NOTES', { x: x0, y, size: 14, font: fb, color: INK }); y -= 20;
   for (const x of [...p.markup.pins].sort((a, b) => a.n - b.n)) {
     const lines = wrap(safe(x.comment || '(no text)'), f, 10, colW - 60); ensure(16 + lines.length * 13);
@@ -180,7 +212,10 @@ function exampleBanner(pg: PDFPage, p: Project, fb: PDFFont, H: number) {
   const miss = [!p.confirmed?.lot && 'LOT SIZE', !p.confirmed?.house && 'HOUSE SIZE AND POSITION', !p.confirmed?.adu && 'GARAGE SIZE AND POSITION'].filter(Boolean);
   if (miss.length) pg.drawText(safe(`EXAMPLE SIZES - NOT MEASURED: ${miss.join(', ')}`), { x: 44, y: H - 66, size: 12, font: fb, color: RED });
 }
-export async function sheetsPDF(p: Project, kind: Kind) { const d = await PDFDocument.create(); d.setTitle(`${p.name} - site plan`); setLang(d, p.people.language === 'es' ? 'es-US' : 'en-US'); await sitePlanSheet(d, p, kind); await floorPlanSheet(d, p, kind); if (p.markup.pins.length || p.markup.responses.length) await markupSheet(d, p); return d.save(); }
+export async function sheetsPDF(p: Project, kind: Kind) { const d = await PDFDocument.create(); d.setTitle(`${p.name} - site plan`); setLang(d, p.people.language === 'es' ? 'es-US' : 'en-US'); const g2 = p.markup.pins.length > 0 || p.markup.responses.length > 0;
+  await sitePlanSheet(d, p, kind, sheetList(p)); await floorPlanSheet(d, p, kind); if (g2) await markupSheet(d, p); return d.save(); }
+/** The sheets site-plan.pdf holds, in order (also listed in the handoff README). */
+export const sheetList = (p: Project) => ['A-1 Site plan', 'A-2 Floor plan data', ...(p.markup.pins.length || p.markup.responses.length ? ['G-2 Review markup'] : [])];
 
 const STAT: Record<string, [string, string, ReturnType<typeof rgb>]> = {
   PASS: ['Pass', 'Cumple', GREEN], FAIL: ['Fix', 'Corregir', RED], UNKNOWN: ['Need info', 'Falta info', AMBER], NOT_CHECKED: ['NOT CHECKED', 'NO REVISADO', MUTE], INFO: ['Note', 'Nota', MUTE],

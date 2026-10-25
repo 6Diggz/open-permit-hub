@@ -52,3 +52,28 @@ export const scoreLine = (r: Readiness, es = false) => {
     ? `${r.checked} de ${r.total} puntos de la hoja de correcciones de LADBS están listos. Quedan ${left}: ${r.failing} por corregir, ${r.needsAnswer} preguntas sin responder (muchas son para su preparador) y ${r.docsMissing} documentos por adjuntar. Otros ${r.mayApply} pueden aplicar: pregunte a su preparador`
     : `${r.checked} of ${r.total} LADBS correction-sheet items are done. ${left} left: ${r.failing} to fix, ${r.needsAnswer} questions to answer (many are for your preparer) and ${r.docsMissing} documents to attach. ${r.mayApply} more may apply: ask your preparer`;
 };
+
+export type PlainVerdict = 'likely-yes' | 'likely-no' | 'unsure';
+/**
+ * The homeowner's question in one short sentence: "Can I turn my garage into an ADU?". Never stronger than the checks:
+ * "likely yes" needs LA City, a known residential zone, the four map overlays answered "no" and no failing check.
+ * It always says how many checks ran and how many questions are left, and that it is not a city answer.
+ */
+export function plainAnswer(p: Project, rep: Report): { verdict: PlainVerdict; en: string; es: string } {
+  const c = rep.counts; const fails = rep.results.filter(r => r.status === 'FAIL' && !r.dismissed).length;
+  const checks = c.PASS + c.INFO, left = c.UNKNOWN;
+  const what = p.adu.mode === 'conversion' ? { en: 'this garage', es: 'este garaje' } : { en: 'this lot', es: 'este lote' };
+  if (rep.overall === 'NOT_SUPPORTED' || p.site.jurisdiction !== 'la-city')
+    return { verdict: 'unsure', en: `Not sure: this tool's rules cover the City of Los Angeles only, so it cannot say if ${what.en} can become an ADU yet.`, es: `No se sabe: las reglas de esta herramienta son solo para la Ciudad de Los Ángeles, así que no puede decir aún si ${what.es} puede ser una ADU.` };
+  if (fails > 0)
+    return { verdict: 'likely-no', en: `Not as entered: ${fails} check${fails === 1 ? '' : 's'} found a problem to fix before ${what.en} can become an ADU; ${left} questions left.`, es: `No como está: ${fails} revisión(es) encontraron un problema que corregir antes de que ${what.es} pueda ser una ADU; quedan ${left} preguntas.` };
+  const f = p.site.flags; const zone = p.site.zone.trim().toUpperCase();
+  const residential = /^(\[?Q\]?|\(T\)|\(Q\))*\s*(R[1-5SAEWDU]|RD|RE|RS|RA|RW|RU|RZ|A[12]|R\d)/.test(zone);
+  const special = (['hillside', 'vhfhsz', 'hpoz', 'coastal', 'fireRebuild'] as const).filter(k => f[k] === 'yes');
+  const unknownMap = (['hillside', 'vhfhsz', 'hpoz', 'coastal'] as const).filter(k => f[k] === 'unknown');
+  if (!residential || special.length || unknownMap.length)
+    return { verdict: 'unsure', en: `Maybe: no blockers found in ${checks} checks, but ${!zone ? 'the zone is not known' : !residential ? `zone ${zone.slice(0, 20)} is not a plain residential zone` : special.length ? 'this lot is in a special area with extra review' : 'some map questions are not answered'}; ${left} questions left.`,
+      es: `Tal vez: no se encontraron bloqueos en ${checks} revisiones, pero ${!zone ? 'no se sabe la zona' : !residential ? `la zona ${zone.slice(0, 20)} no es residencial simple` : special.length ? 'este lote está en un área especial con revisión extra' : 'faltan preguntas del mapa'}; quedan ${left} preguntas.` };
+  return { verdict: 'likely-yes', en: `Likely yes, ${what.en} can become an ADU: no blockers found in ${checks} checks; ${left} questions left for you or your preparer.`,
+    es: `Probablemente sí, ${what.es} puede ser una ADU: no se encontraron bloqueos en ${checks} revisiones; quedan ${left} preguntas para usted o su preparador.` };
+}

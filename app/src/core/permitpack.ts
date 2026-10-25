@@ -67,6 +67,7 @@ export function migrate(raw: any): Project {
   a.panelAmps = fix('panel size', a.panelAmps, x => isNum(x) && x >= 0 && x <= 10000, null);
   a.bedrooms = fix('bedrooms', a.bedrooms, x => Number.isInteger(x) && x >= 0 && x <= 20, base.adu.bedrooms);
   s.lotUncertaintyMm = fix('lot line uncertainty', s.lotUncertaintyMm, len, base.site.lotUncertaintyMm);
+  s.northDeg = fix('north direction', s.northDeg, x => isNum(x) && x >= 0 && x < 360, null);
   s.primaryHeightMm = fix('house height', s.primaryHeightMm, len, base.site.primaryHeightMm);
   s.existingAdus = numOrNull(s.existingAdus, 100); s.existingJadus = numOrNull(s.existingJadus, 100);
   s.address = str(s.address); s.apn = str(s.apn, 40);

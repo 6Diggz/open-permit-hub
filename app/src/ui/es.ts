@@ -419,5 +419,16 @@ export const ES = {
 "Turn the \"fire\" checks back on. Safety checks can't be off when you export.": "Vuelva a activar las revisiones de \"incendio\". Las revisiones de seguridad no pueden estar apagadas al exportar.",
 "Turn the \"egress\" checks back on. Safety checks can't be off when you export.": "Vuelva a activar las revisiones de \"salida\". Las revisiones de seguridad no pueden estar apagadas al exportar.",
 "Turn the \"structural\" checks back on. Safety checks can't be off when you export.": "Vuelva a activar las revisiones de \"estructura\". Las revisiones de seguridad no pueden estar apagadas al exportar.",
-"Check this number: it is larger than any lot or building.": "Revise este número: es más grande que cualquier lote o edificio."
+"Check this number: it is larger than any lot or building.": "Revise este número: es más grande que cualquier lote o edificio.",
+"Closest match in the city list:": "Coincidencia más cercana en la lista de la ciudad:",
+"No parcel in the city map has this exact address (it may be a vacant lot, or the parcel is listed under another address), so the lot shape and map questions were not filled. Enter them by hand.": "Ninguna parcela del mapa de la ciudad tiene esta dirección exacta (puede ser un lote vacío, o la parcela está con otra dirección), así que no se llenaron la forma del lote ni las preguntas del mapa. Escríbalas a mano.",
+"This is a condo or multi-unit parcel, so no APN or lot shape was filled. Use the APN on your own property tax bill, and ask the HOA about the lot.": "Esta es una parcela de condominio o de varias unidades, así que no se llenó el APN ni la forma del lote. Use el APN de su propia factura de impuestos y pregunte a la asociación (HOA) sobre el lote.",
+"This lot uses the new Downtown zoning (Chapter 1A). The rules in this tool may not cover it: check with City Planning.": "Este lote usa la nueva zonificación del Centro (Capítulo 1A). Las reglas de esta herramienta pueden no cubrirla: consulte con Planificación de la Ciudad.",
+"This lot touches more than one zone. Check ZIMAS to see which part the garage is in.": "Este lote toca más de una zona. Revise ZIMAS para ver en qué parte está el garaje.",
+"The city's street list has this house number only with a different street direction (N, S, E or W). That is a different house. Check the address. You can enter the lot by hand below.": "La lista de calles de la ciudad tiene este número solo con otra dirección de calle (N, S, E u O). Es otra casa. Revise la dirección. Puede ingresar el lote a mano abajo.",
+"house outline": "contorno de la casa",
+"garage outline": "contorno del garaje",
+"2025 burn area": "área de incendio 2025",
+"Downtown zoning": "zonificación del Centro",
+"house and garage outlines": "contornos de casa y garaje"
 } as const;

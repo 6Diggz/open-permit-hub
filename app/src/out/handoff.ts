@@ -2,7 +2,7 @@ import { zipSync, strToU8 } from 'fflate';
 import type { Project } from '../core/model';
 import type { Report } from '../rules/engine';
 import { toDXF } from './dxf';
-import { reportPDF, sheetsPDF } from './pdf';
+import { reportPDF, sheetsPDF, sheetList } from './pdf';
 import { reportHTML } from './reporthtml';
 import { takeoff, takeoffCSV } from './takeoff';
 import { serialize } from '../core/permitpack';
@@ -16,12 +16,14 @@ export async function handoffZip(p: Project, rep: Report): Promise<Uint8Array> {
   const pick = (s: string) => rd.items.filter(x => x.state === s);
   const readme = [`Handoff packet: ${p.name}`, '', 'For the preparer of record. Finalize, verify in the field, and submit through ePlanLA yourself.',
     `Rule pack: ${PACK_ID} (rules checked ${PACK.verifiedOn}). LADBS sheet ${PACK.sheet.form} Rev ${PACK.sheet.rev} cites ${PACK.sheet.codes}.`,
-    'Contents: site-plan.pdf (true scale, 24x36: A-1 site plan, A-2 floor plan data), site-plan.dxf (DXF 2018, units inches), check-report-en.pdf, check-report-es.pdf, check-report-en.html and check-report-es.html (screen-reader friendly), materials.csv, project.permitpack, THIRD_PARTY_NOTICES.txt', '',
+    `Contents: site-plan.pdf (true scale, 24x36: ${sheetList(p).join(', ')}), site-plan.dxf (DXF 2018, units inches), check-report-en.pdf, check-report-es.pdf, check-report-en.html and check-report-es.html (screen-reader friendly), materials.csv, project.permitpack, THIRD_PARTY_NOTICES.txt`, '',
     `LADBS correction sheet ${PACK.sheet.form} Rev ${PACK.sheet.rev}: ${scoreLine(rd)}`, '',
     'Documents still missing:', ...pick('docsMissing').map(x => `- ${x.item.id} ${x.item.summary.en}`), '',
     'May apply: ask your preparer (depends on grading, shared driveways, lifts and other facts this app does not ask about):', ...pick('mayApply').map(x => `- ${x.item.id} ${x.item.summary.en}`), '',
     'Sheet items to fix or answer:', ...rd.items.filter(x => x.state === 'failing' || x.state === 'needsAnswer').map(x => `- ${x.item.id} [${x.why}] ${x.item.summary.en}`), '',
-    'Red cards (must resolve before submittal):', ...rep.results.filter(r => r.status === 'FAIL' || (r.status === 'UNKNOWN' && r.rule.kind === 'city')).map(r => `- ${r.rule.id} ${r.rule.title.en}: ${r.next?.en ?? r.msg.en}`)].join('\r\n');
+    'Red cards (must resolve before submittal):', ...rep.results.filter(r => r.status === 'FAIL' || (r.status === 'UNKNOWN' && r.rule.kind === 'city')).map(r => `- ${r.rule.id} ${r.rule.title.en}: ${r.next?.en ?? r.msg.en}`),
+    ...(p.markup.pins.length ? ['', `Review notes (sheet G-2): ${p.markup.pins.filter(x => x.status === 'open').length} open`, ...[...p.markup.pins].sort((a, b) => a.n - b.n).map(x => `- ${x.n} [${x.status === 'open' ? 'OPEN' : 'RESOLVED'}] ${x.author || '-'}: ${x.comment.replace(/[\r\n]+/g, ' ').slice(0, 500)}`)] : []),
+    ...(p.markup.responses.length ? ['', 'Correction responses:', ...p.markup.responses.map(r => `- ${r.ref} [${r.done ? 'DONE' : 'OPEN'}] ${r.text.replace(/[\r\n]+/g, ' ').slice(0, 300)} -> ${r.response.replace(/[\r\n]+/g, ' ').slice(0, 500) || '(no response yet)'}`)] : [])].join('\r\n');
   return zipSync({
     'README.txt': strToU8(readme),
     'site-plan.pdf': await sheetsPDF(p, 'handoff'),

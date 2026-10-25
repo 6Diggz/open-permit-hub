@@ -18,7 +18,7 @@ import { ReviewStep } from './Review';
 import { fromMap, unmark, type MapField } from '../io/parcel-apply';
 import { ask, AskHost } from './Ask';
 import { autoFit } from '../rules/fit';
-import { readiness, scoreLine, applies as itemApplies } from '../rules/readiness';
+import { readiness, scoreLine, plainAnswer, applies as itemApplies } from '../rules/readiness';
 import { CATALOG, RULE_ITEMS } from '../rules/ladbs-adu-2025';
 import { citeText } from '../rules/cites-es';
 import { tr, type Lang } from './i18n';
@@ -162,7 +162,7 @@ export default function App() {
       </main>
 
       <aside className="side" aria-label={L("Check results")} tabIndex={0}>
-        <InspectionCard report={report} lang={lang} appDate={p.applicationDate} score={scoreLine(readiness(p, report), lang === 'es')} />
+        <InspectionCard report={report} lang={lang} appDate={p.applicationDate} score={scoreLine(readiness(p, report), lang === 'es')} plain={plainAnswer(p, report)[lang === 'es' ? 'es' : 'en']} />
         <ResultList results={report.results} lang={lang} />
       </aside>
     </div>
@@ -480,13 +480,14 @@ function SheetItems({ p, update, report, lang }: { p: Project; update: U; report
   </>;
 }
 
-function InspectionCard({ report, lang, score, appDate = null, example }: { report: Report; lang: Lang; score?: string; appDate?: string | null; example?: boolean }) {
+function InspectionCard({ report, lang, score, appDate = null, example, plain }: { report: Report; lang: Lang; score?: string; appDate?: string | null; example?: boolean; plain?: string }) {
   const es = lang === 'es';
   const v = { READY_FOR_PREPARER: es ? 'Listo para su preparador' : 'Ready for your preparer', FIX_ISSUES: es ? 'Hay cosas que corregir' : 'Some things need fixing', INCOMPLETE: es ? 'Falta información' : 'Some answers are missing', NOT_SUPPORTED: es ? 'Dirección no soportada' : 'Address not supported yet' }[report.overall];
   const c = report.counts; const fr = rulesLine(appDate, report.pack, es);
   return <section className="card" aria-live="polite">
     {example ? <h2 className="card-h">{es ? 'Resultado de ejemplo (lote de demostración, no es su proyecto)' : 'Example result (demo lot, not your project)'}</h2> : <h3>{es ? 'Tarjeta de revisión' : 'Check card'}</h3>}
     <div className="verdict">{v}</div>
+    {plain && <p className="sub" data-testid="plain-answer"><strong>{plain}</strong></p>}
     <div className="sub">{es ? 'Revisión por software, no de la ciudad' : 'Software check, not a city review'} · {fr.text}</div>
     {score && <div className="sub">{es ? 'Puntos de la hoja: ' : 'Sheet items: '}{score}</div>}
     <div className="sub" style={{ marginBottom: 4 }}>{es ? 'Revisiones de reglas' : 'Rule checks'}</div>

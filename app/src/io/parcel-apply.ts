@@ -1,10 +1,10 @@
 import type { Project } from '../core/model';
-import { bbox, rect, polyInside, type Poly } from '../core/geom';
+import { bbox, rect, polyInside, area, type Poly } from '../core/geom';
 import { ft } from '../core/units';
 import type { ParcelFill } from './parcel';
 
 /** Field keys tagged "from parcel map, verify on site" until the user edits them. */
-export type MapField = 'lot' | 'apn' | 'zone' | 'jurisdiction' | 'hillside' | 'vhfhsz' | 'coastal' | 'hpoz';
+export type MapField = 'lot' | 'apn' | 'zone' | 'jurisdiction' | 'hillside' | 'vhfhsz' | 'coastal' | 'hpoz' | 'house' | 'garage' | 'burn';
 
 /** The user changed a field: it is theirs now, not the map's. */
 export function unmark(d: Project, k: MapField) { if (d.site.parcel) d.site.parcel.fromMap = d.site.parcel.fromMap.filter(x => x !== k); }
@@ -31,6 +31,15 @@ export function applyParcel(p: Project, f: ParcelFill): { next: Project; filled:
     if (!d.confirmed.adu || !polyInside(d.adu.footprint, f.lot)) { const fb = bbox(d.adu.footprint); const w = Math.min(fb.maxX - fb.minX, Math.max(ft(8), W - ft(8))), h = Math.min(fb.maxY - fb.minY, Math.max(ft(8), D * 0.3));
       d.adu.footprint = fitInside(rect(b.minX + (W - w) / 2, b.maxY - h - Math.min(ft(5), D * 0.04), w, h), f.lot); }
   }
+  if (f.lot && f.lot.length >= 3 && typeof f.northDeg === 'number' && Number.isFinite(f.northDeg)) d.site.northDeg = f.northDeg;
+  // Building outlines from the city map (LARIAC aerial survey): the largest is the house; the garage is the largest
+  // remaining outline of garage size (150-1,000 sq ft). Values the user already typed are kept.
+  const bl = (f.lot ? f.buildings ?? [] : []).filter(b => b.length >= 3 && polyInside(b, d.site.lot));
+  const sq = (b: Poly) => area(b) / 92903.04;
+  const house = bl.find(b => sq(b) >= 300); const garage = bl.find(b => b !== house && sq(b) >= 150 && sq(b) <= 1000);
+  if (house && !p.confirmed.house) { d.site.primary = house; filled.push('house'); }
+  if (garage && !p.confirmed.adu) { d.adu.footprint = garage; filled.push('garage'); }
+  if (f.palisades === 'yes' || (f.palisades === 'no' && f.jurisdiction === 'la-city')) { d.site.flags.fireRebuild = f.palisades; filled.push('burn'); }
   if (f.apn) { d.site.apn = f.apn; filled.push('apn'); }
   if (f.zone) { d.site.zone = f.zone; filled.push('zone'); }
   if (f.jurisdiction !== 'unknown') { d.site.jurisdiction = f.jurisdiction; filled.push('jurisdiction'); }

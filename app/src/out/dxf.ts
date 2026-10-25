@@ -46,6 +46,12 @@ export function sitePlanSpec(p: Project): SitePlanSpec {
   }
   // Review pins (G-ANNO-REDL): "[n] comment" at the pin.
   for (const x of p.markup.pins) s.texts.push({ layer: 'G-ANNO-REDL', x: IN(x.x), y: IN(x.y), h: 8, text: `[${x.n}${x.status === 'resolved' ? ' RESOLVED' : ''}] ${x.comment}`.slice(0, 250) });
+  // North arrow (closed arrow outline + "N"), turned to true north: degrees clockwise from the drawing's +Y.
+  { const lb = bbox(lot); const cx = IN(lb.maxX) + 72, cy = IN(lb.maxY) - 48, r = 30, an = ((p.site.northDeg ?? 0) * Math.PI) / 180;
+    const ux = Math.sin(an), uy = Math.cos(an), hx = -uy, hy = ux; const P = (f: number, g: number) => [+(cx + ux * f + hx * g).toFixed(4), +(cy + uy * f + hy * g).toFixed(4)];
+    s.outlines.push({ layer: 'G-ANNO-TEXT', pts: [P(r, 0), P(-r, 10), P(-r * 0.55, 0), P(-r, -10)] });
+    const t = P(r + 14, 0); s.texts.push({ layer: 'G-ANNO-TEXT', x: t[0] - 4, y: t[1] - 4, h: 10, text: 'N' });
+    if (p.site.northDeg == null) s.texts.push({ layer: 'G-ANNO-TEXT', x: cx - 40, y: cy - r - 20, h: 6, text: 'NORTH NOT SET - CHECK BEFORE SUBMITTAL' }); }
   const se = p.site.streetEdge, a = lot[se], b = lot[(se + 1) % lot.length];
   const street = streetName(p.site.address);
   s.texts.push({ layer: 'G-ANNO-TEXT', x: IN((a.x + b.x) / 2) - 60, y: IN((a.y + b.y) / 2) - 90, h: 14, text: street ? `STREET: ${street.toUpperCase()}` : 'STREET' });

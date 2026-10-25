@@ -38,6 +38,8 @@ export interface Project {
     lotSource: 'manual' | 'gis' | 'survey'; lotUncertaintyMm: number;
     lot: Poly; streetEdge: number; // index of lot edge facing street
     /** Other lot edges on a street or alley (a corner lot's side street, a rear alley). */ streetEdges?: number[];
+    /** Degrees clockwise from sheet-up to true north (null = not known yet). Set from the parcel map, or by the user. */
+    northDeg: number | null;
     /** Zoning from the city map (e.g. R1-1), or typed by the user. */
     zone: string;
     parcel: ParcelInfo | null;
@@ -127,7 +129,7 @@ export function blankProject(): Project {
     format: FORMAT, version: FORMAT_VERSION, id: uid(), createdAt: now, updatedAt: now,
     name: 'My garage conversion', applicationDate: null, rulePack: PACK_ID,
     site: {
-      address: '', apn: '', jurisdiction: 'unknown', lotSource: 'manual', lotUncertaintyMm: ft(2),
+      address: '', apn: '', jurisdiction: 'unknown', lotSource: 'manual', lotUncertaintyMm: ft(2), northDeg: null,
       lot: rect(0, 0, ft(50), ft(130)), streetEdge: 0, zone: '', parcel: null, mainBuilding: 'unknown', existingAdus: null, existingJadus: null,
       primary: rect(ft(10), ft(20), ft(30), ft(45)), primaryHeightMm: ft(16), otherBuildings: 'unknown', otherBuildingGapMm: null,
       flags: { hillside: 'unknown', vhfhsz: 'unknown', hpoz: 'unknown', coastal: 'unknown', methane: 'unknown', fireRebuild: 'unknown', transitHalfMile: 'unknown', easementsKnown: 'unknown', anyUnitRented: 'unknown', primarySprinklered: 'unknown', slopeOver10: 'unknown', dwpEasement10ft: 'unknown' },
