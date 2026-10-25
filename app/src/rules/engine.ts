@@ -1,6 +1,7 @@
 import type { Project } from '../core/model';
 import { SAFETY_MODULES } from '../core/model';
 import { withRooms } from '../core/rooms';
+import { CATALOG } from './ladbs-adu-2025';
 
 export type Status = 'PASS' | 'FAIL' | 'UNKNOWN' | 'NOT_CHECKED' | 'INFO';
 export type L = { en: string; es: string };
@@ -82,27 +83,53 @@ export function validateCitations(text: string, rules: Rule[]): string[] {
   return [...new Set([...text.matchAll(/\b([A-Za-z]{2,6}-\d{1,4}[a-z]?)\b/g)].map(m => m[1].toUpperCase()))].filter(id => !ids.has(id) && !NOT_IDS.test(id));
 }
 
-/** Code-section references (LAMC 12.22 A.33, Gov. Code §66314(d)(7), LARC R310.2, B&P §5537 ...), normalized for comparison. */
-const FAM = String.raw`(LAMC|LABC|LARC|CRC|CBC|CFC|CPC|CEC|Gov\.?\s*Code|GC|B\s*&\s*P|HSC|Ed\.?\s*Code|Health\s*(?:and|&)\s*Safety\s*Code)`;
-const SEC = String.raw`(?:§\s*)?([A-Z]?\d+(?:\.\d+)*(?:\([a-z0-9]+\))*(?:\s+[A-Z]\.\d+(?:\([a-z0-9]+\))*)?)`;
+/** Code-section references (LAMC 12.22 A.33, Gov. Code §66314(d)(7), LARC R310.2, B&P §5537 ...), normalized for comparison.
+ *  Spelled-out names count too ("Government Code section 66314", "Los Angeles Municipal Code 12.22", "Residential Code R310.2"),
+ *  so an invented section written in words is caught like an abbreviated one (r4agent-02). Longest names first. */
+const FAM = String.raw`(L\.?\s*A\.?\s*M\.?\s*C\.?|LABC|LARC|LAFC|CRC|CBC|CFC|CPC|CEC|Gov\.?\s*Code|GC|B\s*&\s*P(?:\s*Code)?|HSC|H\s*&\s*S(?:\s*Code)?|Ed\.?\s*Code|Health\s*(?:and|&)\s*Safety\s*Code|`
+  + String.raw`(?:(?:City\s+of\s+)?(?:Los\s+Angeles|L\.?\s*A\.?)\s+)?Municipal\s+Code|(?:(?:California|Cal\.?|CA|Los\s+Angeles|L\.?\s*A\.?)\s+)?(?:Residential|Building|Fire|Plumbing|Electrical)\s+Code|`
+  + String.raw`(?:California\s+)?Government\s+Code|(?:California\s+)?Business\s+(?:and|&)\s+Professions\s+Code|(?:California\s+)?Education\s+Code)`;
+const SEC = String.raw`(?:(?:sections?|secs?\.?|§)\s*)?(?:§\s*)?([A-Z]?\d+(?:\.\d+)*(?:\([a-z0-9]+\))*(?:\s+[A-Z]\.\d+(?:\([a-z0-9]+\))*)?)`;
 /** A section in a list after the family name must look like one (R310.2, 98.0605), not a bare number like "3 ft". */
 const LSEC = String.raw`(?:§\s*)?((?:[A-Z]\d+(?:\.\d+)*|\d+\.\d+(?:\.\d+)*)(?:\([a-z0-9]+\))*)(?![\w.])`;
-const famKey = (f: string) => { const k = f.replace(/[\s.]/g, '').toUpperCase(); return k === 'GOVCODE' || k === 'GC' ? 'GOV' : k === 'B&P' ? 'BP' : k.startsWith('HEALTH') ? 'HSC' : k === 'EDCODE' ? 'ED' : k; };
+/** One key per code family: the LA and California editions of the same model code compare as one ("LARC R310.2" = "CRC R310.2"). */
+const famKey = (f: string) => {
+  const w = f.replace(/\s+/g, ' ').trim().toUpperCase(); const k = w.replace(/[\s.]/g, '');
+  if (/MUNICIPAL CODE$/.test(w) || k === 'LAMC') return 'LAMC';
+  if (/RESIDENTIAL CODE$/.test(w) || k === 'LARC' || k === 'CRC') return 'RC';
+  if (/BUILDING CODE$/.test(w) || k === 'LABC' || k === 'CBC') return 'BC';
+  if (/FIRE CODE$/.test(w) || k === 'LAFC' || k === 'CFC') return 'FC';
+  if (/PLUMBING CODE$/.test(w) || k === 'CPC') return 'PC';
+  if (/ELECTRICAL CODE$/.test(w)) return 'EC';
+  if (/GOVERNMENT CODE$/.test(w) || k === 'GOVCODE' || k === 'GC') return 'GOV';
+  if (/PROFESSIONS CODE$/.test(w) || k.startsWith('B&P')) return 'BP';
+  if (k.startsWith('HEALTH') || k.startsWith('H&S') || k === 'HSC') return 'HSC';
+  if (/EDUCATION CODE$/.test(w) || k === 'EDCODE') return 'ED';
+  return k;
+};
+/** Reversed form: "Section 12.22 A.33 of the LA code", "R310.9 of the residential code". */
+const REV = String.raw`(?:(?:sections?|secs?\.?|§)\s*)?((?:[A-Z]\d+|\d+)(?:\.\d+)*(?:\([a-z0-9]+\))*(?:\s+[A-Z]\.\d+(?:\([a-z0-9]+\))*)?)\s+of\s+the\s+((?:(?:California|Los\s+Angeles|L\.?\s*A\.?|city(?:'s)?|state)\s+)?(?:residential|building|fire|plumbing|electrical|municipal|government|LA|L\.A\.|city)(?:\s+code)?)\b`;
+const revFam = (f: string) => { const w = f.toUpperCase(); return /RESIDENTIAL/.test(w) ? 'RC' : /BUILDING/.test(w) ? 'BC' : /FIRE/.test(w) ? 'FC' : /PLUMBING/.test(w) ? 'PC' : /ELECTRICAL/.test(w) ? 'EC' : /GOVERNMENT|STATE/.test(w) ? 'GOV' : 'LAMC'; };
 export function extractCodeRefs(text: string): string[] {
-  const out: string[] = [];
+  const out: string[] = []; const spans: [number, number][] = [];
   const norm = (s: string) => s.replace(/\s+/g, ' ').toUpperCase();
-  for (const m of text.matchAll(new RegExp(FAM + String.raw`\s*` + SEC, 'gi'))) {
-    const fam = famKey(m[1]); out.push(`${fam} ${norm(m[2])}`);
+  for (const m of text.matchAll(new RegExp(String.raw`\b` + FAM + String.raw`[\s,]*` + SEC, 'gi'))) {
+    const fam = famKey(m[1]); out.push(`${fam} ${norm(m[2])}`); let end = (m.index ?? 0) + m[0].length;
     // Lists after one family name: "LARC R310.1, R310.2", "LAMC 98.0602 and 98.0605"
-    const more = new RegExp(String.raw`\s*(?:,|/|and|or|&)\s*` + LSEC, 'giy'); more.lastIndex = (m.index ?? 0) + m[0].length;
-    for (let n = more.exec(text); n; n = more.exec(text)) out.push(`${fam} ${norm(n[1])}`);
+    const more = new RegExp(String.raw`\s*(?:,|/|and|or|&)\s*` + LSEC, 'giy'); more.lastIndex = end;
+    for (let n = more.exec(text); n; n = more.exec(text)) { out.push(`${fam} ${norm(n[1])}`); end = more.lastIndex; }
+    spans.push([m.index ?? 0, end]);
   }
+  const free = (a: number, b: number) => !spans.some(([x, y]) => a < y && b > x);
+  for (const m of text.matchAll(new RegExp(REV, 'gi'))) { const a = m.index ?? 0; if (!free(a, a + m[0].length)) continue; out.push(`${revFam(m[2])} ${norm(m[1])}`); spans.push([a, a + m[0].length]); }
+  // A bare residential-code section (R310.9) with no family name is still a code citation: check it as residential code.
+  for (const m of text.matchAll(/\bR\d{3}(?:\.\d+)+(?:\([a-z0-9]+\))*/gi)) { const a = m.index ?? 0; if (free(a, a + m[0].length)) out.push(`RC ${norm(m[0])}`); }
   return out;
 }
-/** Every code section any rule in the pack cites (with its parents, so "Gov. Code 66314" matches "§66314(d)(7)"). */
-export function knownCodeRefs(rules: Rule[]): Set<string> {
+/** Every code section any rule in the pack cites, plus any the LADBS sheet catalog names (with parents, so "Gov. Code 66314" matches "§66314(d)(7)"). */
+export function knownCodeRefs(rules: Rule[], extra: string[] = CATALOG.map(i => i.summary.en)): Set<string> {
   const k = new Set<string>();
-  for (const r of rules) for (const c of r.cites) for (const ref of extractCodeRefs(c.code)) {
+  for (const ref of [...rules.flatMap(r => r.cites.flatMap(c => extractCodeRefs(c.code))), ...extra.flatMap(extractCodeRefs)]) {
     k.add(ref); let x = ref; for (;;) { const y = x.replace(/(\s+[A-Z]\.\d+(\([A-Z0-9]+\))*|\([A-Z0-9]+\))$/, ''); if (y === x) break; k.add(y); x = y; }
   }
   return k;
