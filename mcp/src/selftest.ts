@@ -1,7 +1,7 @@
 // MCP self-test: real assertions, exits 1 on any failure. Runs the built server over stdio in a temp folder.
 import { Client } from '@modelcontextprotocol/sdk/client/index.js';
 import { StdioClientTransport } from '@modelcontextprotocol/sdk/client/stdio.js';
-import { writeFileSync, existsSync, readFileSync, mkdtempSync, mkdirSync, symlinkSync, readdirSync, lstatSync } from 'node:fs';
+import { writeFileSync, existsSync, readFileSync, mkdtempSync, mkdirSync, symlinkSync, readdirSync, lstatSync, linkSync } from 'node:fs';
 import { createHash } from 'node:crypto';
 import { join, resolve } from 'node:path';
 import { tmpdir } from 'node:os';
@@ -62,6 +62,13 @@ const mr = await call('run_checks', { path: 'many.permitpack' }); ok(mr.isError 
 ok((await call('propose_edit', { path, changes: [{ field: 'adu.height', value: '99999999999' }] })).isError === true, 'absurd height refused');
 ok((await call('propose_edit', { path, changes: [{ field: 'adu.width', value: '1/0"' }] })).isError === true, 'divide-by-zero length refused');
 ok((await call('propose_edit', { path, changes: [{ field: 'adu.width', value: 'banana' }] })).isError === true, 'bad input handled');
+// qa2-04: a hard link to a file outside root is refused (realpath can't see hard links)
+try { linkSync(join(outside, 'secret.permitpack'), join(root, 'hard.permitpack')); const h = await call('run_checks', { path: 'hard.permitpack' }); ok(h.isError === true && /hard link/.test(h.content[0].text), 'hard link to a file outside root refused'); } catch (e) { ok(false, 'hard link test could not run: ' + (e as Error).message); }
+// appsec-r2-05: proposals hold no project copy; a file changed after the preview is not applied from the old copy
+writeFileSync(join(root, 'chg.permitpack'), serialize(p));
+const pr3 = t(await call('propose_edit', { path: 'chg.permitpack', changes: [{ field: 'adu.height', value: "14'" }] }));
+const q = demoProject(); q.name = 'changed'; writeFileSync(join(root, 'chg.permitpack'), serialize(q));
+const ap3 = await call('apply_edit', { proposal_id: pr3.proposal_id }); ok(/changed after the preview/.test(ap3.content[0].text) && !existsSync(join(root, 'chg.edited.permitpack')), 'apply_edit refuses when the file changed after the preview');
 // appsec-02: citations
 const cc = t(await call('check_citations', { text: 'Per SET-02 and FAKE-99 your plan passes.' })); ok(cc.ok === false && cc.invalid_ids.includes('FAKE-99'), 'invented rule id caught');
 const cc2 = t(await call('check_citations', { text: 'Per LAMC 12.22 A.99(z) and Gov. Code 99999 this plan passes.' })); ok(cc2.ok === false && cc2.unknown_codes.length === 2, 'invented code sections caught');
