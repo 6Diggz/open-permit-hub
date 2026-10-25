@@ -201,7 +201,10 @@ s.registerTool('propose_edit', { title: 'Propose edit (short form)', description
 
 s.registerTool('apply_edit', { title: 'Apply edit', description: 'Apply a previewed proposal. A working copy made by this server is updated in place; any other file gets a new -edited copy next to it (the original is never changed, links are never followed). Applying the same proposal again returns the same file. Ask the user before applying.', annotations: { readOnlyHint: false, destructiveHint: false, idempotentHint: true, openWorldHint: false },
   inputSchema: { proposal_id: z.string().max(64), as_copy: z.boolean().optional().describe('true: always write a new copy, even for a working copy.') } },
-  safe(async ({ proposal_id, as_copy }) => ok(await apply(proposal_id, as_copy))));
+  safe(async ({ proposal_id, as_copy }) => ok(await applyOnce(proposal_id, as_copy))));
+/** r5mcp-02: concurrent applies of one proposal share one write (idempotentHint must hold under concurrency too). */
+const inflight = new Map<string, Promise<Awaited<ReturnType<typeof apply>>>>();
+function applyOnce(id: string, asCopy?: boolean) { const k = `${id}|${!!asCopy}`; let q = inflight.get(k); if (!q) { q = apply(id, asCopy).finally(() => inflight.delete(k)); inflight.set(k, q); } return q; }
 
 // ---------- parcel ----------
 /** Recorded answers for tests and demos (same format as app/src/test/fixtures/parcel). Never reaches the network. */

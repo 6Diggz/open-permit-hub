@@ -34,6 +34,8 @@ export async function handoffZip(p: Project, rep: Report): Promise<Uint8Array> {
     ...(p.markup.responses.length ? ['', 'Correction responses:', ...p.markup.responses.map(r => `- ${r.ref} [${r.done ? 'DONE' : 'OPEN'}] ${r.text.replace(/[\r\n]+/g, ' ').slice(0, 300)} -> ${r.response.replace(/[\r\n]+/g, ' ').slice(0, 500) || '(no response yet)'}`)] : [])].join('\r\n');
   return zipSync({
     'README.txt': strToU8(readme),
+    // r4reach-03: a short Spanish readme for the owner (the sheets stay in English for the city).
+    ...(p.people.language === 'es' ? { 'LEAME.txt': strToU8([`Paquete para el preparador: ${p.name}`, '', `Respuesta: ${v.plain.es}`, '', `Hoja de correcciones LADBS ${PACK.sheet.form} Rev ${PACK.sheet.rev}: ${v.score.es}`, '', 'Los planos (site-plan.pdf, site-plan.dxf) van en inglés porque la ciudad los revisa en inglés.', 'El informe en español es check-report-es.pdf y check-report-es.html. README.txt (en inglés) es para su preparador.'].join('\r\n')) } : {}),
     'site-plan.pdf': await sheetsPDF(p, 'handoff'),
     'site-plan.dxf': await toDXF(p),
     'check-report-en.pdf': await reportPDF(p, rep, 'en'),

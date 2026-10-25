@@ -41,6 +41,7 @@ export const ES_FEAT = {
 "Save the visit with photos (.permitpack)": "Guardar la visita con fotos (.permitpack)",
 "Appears addressed": "Parece cubierto",
 "Mentioned": "Mencionado",
+"Tip: in Safari tap Share, then Add to Home Screen. Projects in a Home Screen app are kept; Safari can clear them after 7 days without a visit. Still save a backup.": "Consejo: en Safari toque Compartir y luego Agregar a inicio. Los proyectos en una app de la pantalla de inicio se conservan; Safari puede borrarlos después de 7 días sin visitas. Aun así, guarde una copia.",
 "This item fails the app's checks": "Este punto no cumple las revisiones de la app",
 "Say why it passes in the field. The reason is printed on the visit record.": "Diga por qué cumple en campo. El motivo se imprime en el registro de la visita.",
 "Mark Pass": "Marcar Cumple",

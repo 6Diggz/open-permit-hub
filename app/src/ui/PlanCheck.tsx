@@ -32,7 +32,7 @@ export function PlanCheckPanel({ onNotes }: { /** Adds review notes for the item
       const lib = await loadPdfJs(); const bytes = new Uint8Array(await f.arrayBuffer());
       const { pages, total } = await extractPages(bytes, lib, (page, of) => { if (!s.cancelled) setPh({ k: 'reading', page, of, name: f.name }); }, s);
       if (s.cancelled) return;
-      setPh({ k: 'done', r: analyze(pages), name: f.name, total });
+      setPh({ k: 'done', r: analyze(pages, total), name: f.name, total });
     } catch (e) {
       if (s.cancelled) return;
       const code = (e as { code?: string }).code;

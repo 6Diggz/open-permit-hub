@@ -28,8 +28,8 @@ jobs:
         run: cd app && node ../scripts/license-gate.mjs
       - name: Third-party notices carry every crate's license text and are up to date
         run: node scripts/notices.mjs --check
-      - name: Bundle size budget (main JS under 3 MB)
-        run: cd app && test $(du -cb dist/assets/index-*.js | tail -1 | cut -f1) -lt 3000000
+      - name: Bundle size budget (main JS under 800 KB; it is about 570 KB)
+        run: cd app && test $(du -cb dist/assets/index-*.js | tail -1 | cut -f1) -lt 800000
       - name: Browser tests (390 and 1440 wide, offline, deploy update, accessibility)
         run: cd app && npx playwright install --with-deps chromium && node e2e/e2e.mjs && node e2e/feat.mjs
       - name: MCP server (typecheck, fresh build of dist, self-test incl. dist-matches-src, end-to-end garage conversion, agent tests)

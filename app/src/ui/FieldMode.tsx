@@ -61,12 +61,12 @@ export function FieldMode({ p, update, onBack, download }: { p: Project; update:
     for (const x of INSP_ITEMS) { const pid = result(p.inspection, x.id).photo; if (!pid) continue; const b = await getPhoto(pid); if (b) out[pid] = new Uint8Array(await b.arrayBuffer()); else missing++; }
     return { out, missing }; };
   const savePDF = async () => { setBusy('pdf'); setMsg('');
-    try { const { out, missing } = await photoBytes(); const { inspectionPDF } = await import('../out/inspectpdf'); download(`${slug(p)}-site-visit-${ins.date}.pdf`, await inspectionPDF(p, out, lang) as BlobPart, 'application/pdf');
+    try { const { out, missing } = await photoBytes(); const { inspectionPDF } = await import('../out/inspectpdf'); download(`${slug(p)}-${es ? 'visita-obra' : 'site-visit'}-${ins.date}.pdf`, await inspectionPDF(p, out, lang) as BlobPart, 'application/pdf');
       setMsg(L('Saved to your downloads.') + (missing ? ` ${missing} ${L('photos were not on this device and are listed as missing.')}` : '')); }
     catch { setMsg(L('The record could not be made. Try again.')); } finally { setBusy(null); } };
   const savePack = async () => { setBusy('pack'); setMsg('');
     try { const { out } = await photoBytes(); const urls: Record<string, string> = {}; for (const [k, v] of Object.entries(out)) urls[k] = await toDataUrl(new Blob([v as BlobPart], { type: 'image/jpeg' }));
-      const { text, left } = inspectionPack(serialize(p), urls, MAX_PACK_BYTES); download(`${slug(p)}-site-visit.permitpack`, text, 'application/json');
+      const { text, left } = inspectionPack(serialize(p), urls, MAX_PACK_BYTES); download(`${slug(p)}-${es ? 'visita-obra' : 'site-visit'}.permitpack`, text, 'application/json');
       setMsg(L('Saved to your downloads.') + (left.length ? ` ${left.length} ${L('photos did not fit in the file. They are in the PDF record.')}` : '')); }
     catch { setMsg(L('The file could not be made. Try again.')); } finally { setBusy(null); } };
   const clearAll = async () => {
@@ -80,7 +80,7 @@ export function FieldMode({ p, update, onBack, download }: { p: Project; update:
     <div className="toolbar fm-bar">
       <button type="button" className="btn" onClick={onBack}>{L('Back to the project')}</button>
       <span className="grow" />
-      <span className="fm-count" role="status">{t.total - t.open} / {t.total} {L('checked')}{t.fail ? ` · ${t.fail} ${L('fail')}` : ''}</span>
+      <span className="fm-count" role="status">{t.total - t.open} / {t.total} {L('checked')}{t.fail ? ` · ${t.fail} ${es && t.fail === 1 ? 'no cumple' : L('fail')}` : ''}</span>
     </div>
     <main className="form fm-main" id="main">
       <h2 ref={head} tabIndex={-1}>{L('Site visit')}</h2>

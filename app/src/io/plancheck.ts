@@ -99,6 +99,7 @@ const KIND: [SheetKind, RegExp][] = [
 ];
 const SHEET_ID = /\b((?:A|AS|S|G|T|E|M|P|C|GN|SP|D)\s?-?\s?\d{1,2}(?:\.\d{1,2})?[A-Z]?)\b/;
 const SCALE = /\bscale\s*:?\s*((?:\d+\/\d+|\d+(?:\.\d+)?)\s*"?\s*=\s*\d+\s*'?\s*-?\s*\d*\s*"?|n\.?t\.?s\.?|not to scale|as noted)/i;
+const BARE_SCALE = /^\s*((?:\d+\/\d+|\d+(?:\.\d+)?)\s*"\s*=\s*1\s*'\s*-?\s*0\s*"?)\s*$/;
 const NTS = /\b(n\.t\.s\.|not to scale)\b/i;
 
 // ---- title block ----
@@ -128,7 +129,7 @@ const NEG = /\b(not provided|not shown|not included|n\/a|none|tbd|t\.b\.d\.|not 
 export const negated = (t: string) => NEG.test(t.replace(/\bno gas\b/gi, ''));
 const clip = (s: string, n = 90) => (s.length > n ? s.slice(0, n - 1) + '…' : s);
 
-export function analyze(pagesIn: PageText[]): PlanCheck {
+export function analyze(pagesIn: PageText[], totalPages = pagesIn.length): PlanCheck {
   const pages = pagesIn.map(p => ({ page: p.page, lines: p.lines.map(normalize).filter(Boolean) }));
   const chars = pages.reduce((n, p) => n + p.lines.join(' ').length, 0);
   const textPages = pages.filter(p => p.lines.join(' ').length >= 40).length;
@@ -153,6 +154,7 @@ export function analyze(pagesIn: PageText[]): PlanCheck {
         kinds.add(k);
       }
       const s = l.match(SCALE); if (s) scales.push(normalize(s[1])); else if (NTS.test(l)) scales.push('NTS');
+      else if (BARE_SCALE.test(l)) scales.push(normalize(l.match(BARE_SCALE)![1])); // r5plan-08: Revit/ArchiCAD view scale with no word SCALE
     });
     return { page: p.page, id, kinds: [...kinds], scales: [...new Set(scales)].slice(0, 4), chars: p.lines.join(' ').length };
   });
@@ -282,6 +284,9 @@ export function analyze(pagesIn: PageText[]): PlanCheck {
   // read from the text passes the rule (ceiling, escape window, code edition); partial, negated and conflict are never high.
   const VALUE_OK = new Set(['III.G.1', 'III.F.1', 'III.F.2', 'N.4', 'I.C.2', 'I.C.8']);
   items.forEach(i => { if (i.confidence === 'high' && (i.state !== 'addressed' || !VALUE_OK.has(i.id))) i.confidence = 'medium'; });
+  // r5plan-10: pages past the read limit were never read; a missing item may be on them (Title 24 sheets are often last).
+  const last = pagesIn.length ? Math.max(...pagesIn.map(q => q.page)) : 0;
+  if (totalPages > last) items.forEach(i => { if (i.state === 'missing') i.why = { en: `${i.why.en} Pages ${last + 1} to ${totalPages} were not read.`, es: `${i.why.es} No se leyeron las páginas ${last + 1} a ${totalPages}.` }; });
   const order = CATALOG.map(c => c.id); items.sort((a, b) => order.indexOf(a.id) - order.indexOf(b.id));
   return { pages: pages.length, textPages, chars, scanned: pages.length > 0 && textPages < Math.ceil(pages.length / 2), sheets, title, codes: { editions, sections }, dims: { setbacks, ceilings, windows }, items };
 }

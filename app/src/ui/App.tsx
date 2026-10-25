@@ -83,6 +83,9 @@ export default function App() {
   useEffect(() => { const on = () => { if (document.visibilityState === 'hidden') flushSave(); }; window.addEventListener('pagehide', flushSave); document.addEventListener('visibilitychange', on);
     return () => { flushSave(); window.removeEventListener('pagehide', flushSave); document.removeEventListener('visibilitychange', on); }; }, []); // eslint-disable-line react-hooks/exhaustive-deps
   useEffect(() => { navigator.storage?.persist?.().catch(() => {}); }, []);
+  // r4reach-13: Safari on iPhone can clear a site's saved projects after 7 days unvisited; Home Screen apps are exempt. Say so once.
+  const [homeTip, setHomeTip] = useState(() => { try { const ios = /iPhone|iPad|iPod/.test(navigator.userAgent) && !(navigator as Navigator & { standalone?: boolean }).standalone; return ios && !localStorage.getItem('opa.homeTip'); } catch { return false; } });
+  const hideTip = () => { setHomeTip(false); try { localStorage.setItem('opa.homeTip', '1'); } catch { /* storage blocked */ } };
   useEffect(() => { document.documentElement.lang = lang; const sk = document.querySelector('a[href="#main"]'); if (sk) sk.textContent = lang === 'es' ? 'Saltar al contenido' : 'Skip to content'; }, [lang]);
   // Another tab saved this project: say so now, before this tab's next save is refused.
   useEffect(() => { const id = p?.id; if (!id) return; const on = (e: StorageEvent) => { if (e.key === store.keyOf(id) && e.newValue) setSaveState('conflict'); }; window.addEventListener('storage', on); return () => window.removeEventListener('storage', on); }, [p?.id]);
@@ -147,6 +150,7 @@ export default function App() {
           </select>
         </div>
         {/* r5whole-06: on a phone the check card is far below the form; the plain answer is shown at the top too. */}
+        {homeTip && <div className="banner" role="status">{L("Tip: in Safari tap Share, then Add to Home Screen. Projects in a Home Screen app are kept; Safari can clear them after 7 days without a visit. Still save a backup.")} <button className="btn quiet" onClick={hideTip}>{L("OK")}</button></div>}
         {verdict && <p className="banner mobile-only" style={{ margin: '8px 16px 0' }}>{verdict.plain[lang === 'es' ? 'es' : 'en']}</p>}
         {saveState === 'blocked' && <div className="banner warn" role="alert">{L("Not saved: storage is blocked. Export a backup.")}</div>}
         {saveState === 'conflict' && <div className="banner warn" role="alert">{L("This project changed in another tab. Pick which copy to keep.")}{' '}
@@ -254,7 +258,7 @@ function Welcome({ lang, setLang, onStart, onOpen, onClean, onPick, field }: { f
       <p style={{ marginTop: 28 }}><button className="btn quiet" onClick={onClean}>{es ? 'Para dibujantes: limpiar un archivo DWG o DXF' : 'For drafters: clean and fix a DWG or DXF file'}</button></p>
       <p className="help" style={{ fontSize: '.82rem' }}>{es ? 'Código abierto (Apache-2.0).' : 'Open source (Apache-2.0).'} <a href="./THIRD_PARTY_NOTICES.txt">{es ? 'Avisos de terceros' : 'Third-party notices'}</a> · <a href="https://github.com/6Diggz/open-permit-hub" target="_blank" rel="noreferrer">{es ? 'Código fuente' : 'Source code'}</a> · {es ? 'Reglas' : 'Rules'} {PACK_ID}, {es ? 'revisadas el' : 'checked'} {PACK.verifiedOn}</p>
     </div>
-    <div className="sample" aria-label={L("Example result from the demo lot")}><InspectionCard example report={sample} lang={lang} /><ResultList results={sample.results.filter(r => r.status === 'FAIL').slice(0, 1)} lang={lang} /></div>
+    <div className="sample" aria-label={L("Example result from the demo lot")}><InspectionCard example report={sample} lang={lang} /><ResultList results={sample.results.filter(r => r.status === 'FAIL').slice(0, 1)} lang={lang} compact /></div>
     </main>
   );
 }
@@ -465,6 +469,7 @@ function ExportStep({ p, update, report, lang }: { p: Project; update: U; report
     <p className="help" style={{ color: 'var(--pencil)', fontSize: '.82rem' }}>{L("The sheets print the preparer's name and role. This app is a tool; it is not the preparer of your plans.")}</p>
     <h2>{L("Download")}</h2>
     <p className="lead">{L("Nothing here is a permit. Your preparer finalizes the handoff packet and submits it to the city.")}</p>
+    {es && <p className="help">Los planos (hojas A-1, A-2, G-2) y el archivo DXF van en inglés porque la ciudad los revisa en inglés. El paquete incluye LEAME.txt en español.</p> /* r4reach-03 */}
     {blockers.length > 0 && <div className="banner warn" role="alert"><strong>{L("The handoff packet is locked:")}</strong><ul style={{ margin: '4px 0 0' }}>{blockers.map(b => <li key={b}>{L(b)}</li>)}</ul>{L("Draft sheets and the check report still work.")}</div>}
     {missing && <div className="banner warn" role="status">{missing}</div>}
     <div className="mods" style={{ gridTemplateColumns: 'repeat(auto-fit,minmax(240px,1fr))', display: 'grid' }}>
@@ -535,13 +540,13 @@ function InspectionCard({ report, lang, score, appDate = null, example, plain, l
     {example ? <h2 className="card-h">{es ? 'Resultado de ejemplo (lote de demostración, no es su proyecto)' : 'Example result (demo lot, not your project)'}</h2> : <h3>{es ? 'Tarjeta de revisión' : 'Check card'}</h3>}
     <div className="verdict">{v}</div>
     {plain && <p className="sub" data-testid="plain-answer"><strong>{plain}</strong></p>}
-    <div className="sub">{es ? 'Revisión por software, no de la ciudad' : 'Software check, not a city review'} · {fr.text}</div>
+    <div className="sub">{es ? 'Revisión por software, no de la ciudad' : 'Software check, not a city review'} · {example ? (es ? `reglas de LA al ${PACK.verifiedOn}` : `LA rules as of ${PACK.verifiedOn}`) /* r4cold-07 */ : fr.text}</div>
     {score && <div className="sub">{es ? 'Puntos de la hoja: ' : 'Sheet items: '}{score}</div>}
     <div className="sub" style={{ marginBottom: 4 }}>{es ? 'Revisiones de reglas' : 'Rule checks'}</div>
     <div className="punch"><div><b>{c.FAIL}</b>{es ? 'Corregir' : 'Fix'}</div><div><b>{c.UNKNOWN}</b>{es ? 'Falta info' : 'Need info'}</div><div><b>{c.PASS}</b>{es ? 'Cumple' : 'Pass'}</div><div><b>{c.NOT_CHECKED}</b>{es ? 'Apagado' : 'Off'}</div></div>
   </section>;
 }
-function ResultList({ results, lang }: { results: Result[]; lang: Lang }) {
+function ResultList({ results, lang, compact }: { results: Result[]; lang: Lang; compact?: boolean }) {
   const es = lang === 'es';
   const order = ['FAIL', 'UNKNOWN', 'NOT_CHECKED', 'INFO', 'PASS'];
   const label = { FAIL: es ? 'Corregir' : 'Fix', UNKNOWN: es ? 'Falta info' : 'Need info', PASS: es ? 'Cumple' : 'Pass', NOT_CHECKED: es ? 'No revisado' : 'Not checked', INFO: es ? 'Nota' : 'Note' };
@@ -550,7 +555,9 @@ function ResultList({ results, lang }: { results: Result[]; lang: Lang }) {
       <div className="head"><span className="tag">{label[r.status]}</span><span className="title">{r.rule.title[lang]}</span></div>
       <p>{r.msg[lang]}</p>{r.next && <p className="next"><strong>{es ? 'Siguiente: ' : 'Next: '}</strong>{r.next[lang]}</p>}
       {r.dismissed && <p className="pending">{es ? 'Descartado' : 'Dismissed'}: {r.dismissed}</p>}
-      <p className="cite">{r.rule.id} · {r.rule.cites.map(c => citeText(c, es)).join('; ')}{RULE_ITEMS[r.rule.id]?.length ? ` · ${es ? 'hoja LADBS' : 'LADBS sheet'} ${RULE_ITEMS[r.rule.id].join(', ')}` : ''}{r.rule.cites.some(c => !c.verified) && <span className="pending"> · {es ? 'cita en verificación' : 'citation being verified'}</span>}</p>
+      {(() => { const cite = <p className="cite">{r.rule.id} · {r.rule.cites.map(c => citeText(c, es)).join('; ')}{RULE_ITEMS[r.rule.id]?.length ? ` · ${es ? 'hoja LADBS' : 'LADBS sheet'} ${RULE_ITEMS[r.rule.id].join(', ')}` : ''}{r.rule.cites.some(c => !c.verified) && <span className="pending"> · {es ? 'cita en verificación' : 'citation being verified'}</span>}</p>;
+        // r4cold-07: the landing example keeps its sources one tap away instead of a citation wall.
+        return compact ? <details><summary className="cite">{es ? 'Fuentes' : 'Sources'}</summary>{cite}</details> : cite; })()}
     </li>)}</ul>;
 }
 
@@ -575,7 +582,7 @@ function Projects({ lang, onPick, onNew }: { lang: Lang; onPick: (id: string) =>
         : <button className="btn quiet" style={{ flex: 1, textAlign: 'left', border: 0 }} onClick={() => onPick(e.id)}><strong>{(e.name === 'My garage conversion' || e.name === 'Mi conversión de garaje') && e.address.trim() ? e.address.split(',')[0] : e.name}</strong>{e.demo ? (es ? ' (ejemplo)' : ' (demo)') : ''}<br /><span style={{ fontSize: '.82rem', color: 'var(--pencil)' }}>{e.address || (es ? 'Sin dirección' : 'No address yet')} · {new Date(e.updatedAt).toLocaleDateString()}</span></button>}
       <button className="btn quiet" onClick={() => { setRenaming(e.id); setName(e.name); }}>{es ? 'Renombrar' : 'Rename'}</button>
       <button className="btn quiet" onClick={() => { try { store.duplicate(e.id); } catch { /* damaged */ } setItems(store.list()); }}>{es ? 'Duplicar' : 'Duplicate'}</button>
-      <button className="btn quiet" onClick={async () => { if (await ask({ title: es ? '¿Borrar este proyecto?' : 'Delete this project?', body: es ? `"${e.name}" se borra de este dispositivo. Guarde una copia antes si la necesita.` : `"${e.name}" is removed from this device. Save a backup first if you need it.`, confirm: es ? 'Borrar' : 'Delete', cancel: es ? 'Cancelar' : 'Cancel', danger: true })) { store.remove(e.id); setItems(store.list()); } }}>{es ? 'Borrar' : 'Delete'}</button>
+      <button className="btn quiet" onClick={async () => { if (await ask({ title: es ? '¿Borrar este proyecto?' : 'Delete this project?', body: es ? `"${e.name}" se borra de este dispositivo. Guarde una copia antes si la necesita.` : `"${e.name}" is removed from this device. Save a backup first if you need it.`, confirm: es ? 'Borrar' : 'Delete', cancel: es ? 'Cancelar' : 'Cancel', danger: true })) { /* r5field-07: the visit photos go with the project */ let ids: string[] = []; try { ids = Object.values(store.open(e.id).inspection?.items ?? {}).map(r => r.photo).filter((x): x is string => !!x); } catch { /* damaged project: nothing to clean */ } store.remove(e.id); setItems(store.list()); if (ids.length) void import('../core/photos').then(m => ids.forEach(id => void m.delPhoto(id))); } }}>{es ? 'Borrar' : 'Delete'}</button>
     </li>)}</ul>
   </section>;
 }

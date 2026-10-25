@@ -32,10 +32,12 @@ Each axis is its own small module the pack composes. A rule names the axis it be
 2. Unknown never shows as PASS; health-and-safety items can't be dismissed.
 3. Each rule has a pass test and a fail test; each pack has golden projects (see `WAITING_ON_PEOPLE.md`).
 4. Spanish for every user-facing string, checked by test.
+5. A pack may declare a "conflicts with state law" status for a local rule that HCD (or a court) found out of line; the check then uses the state rule and cites the finding.
 
 ## Order
 1. Split the state rules out of `la-city.ts` into `state-ca.ts` (no behavior change; tests prove it).
-2. LA County unincorporated (largest "Los Angeles" mailing-address confusion).
-3. Long Beach (IB-013 preparer rules), Pasadena, then San Diego.
+2. Long Beach first: it has no local ADU ordinance, so its pack is the state base plus Long Beach building and fire review, the Coastal (Admin LCDP) and historic (COA) steps, and the IB-PZ-001 numbers (rear 4 ft measured to the alley centerline, Parking Exempt Area 21.41.175, car share). Its rules are close to `state-ca.ts`, so it is the smallest second pack.
+3. LA County unincorporated second (largest "Los Angeles" mailing-address confusion). HCD's letter of Dec 1, 2025 (`los-angeles-county-adu-findings-120125.pdf`) found County ordinance 2025-0029 out of line with state law on front-setback siting (22.140.640 G.1.c.i, G.1.f.7.a), attached ADU height (G.1.b.iii; state law allows 25 ft, Gov. Code §66321(b)(4)(D)), unit counts (Table 22.140.640-A) and subjective "character-defining features" (G.1.f.2.i). Where HCD found a conflict, the County pack applies state law, cites the HCD letter, and marks the rule with a "conflicts with state law" status instead of the County number.
+4. Pasadena, then San Diego.
 
 Status: design only. Building a second pack needs a maintainer who knows that city's plan check.
