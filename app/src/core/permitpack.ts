@@ -64,6 +64,19 @@ export function migrate(raw: any): Project {
   s.existingAdus = numOrNull(s.existingAdus, 100); s.existingJadus = numOrNull(s.existingJadus, 100);
   s.address = str(s.address); s.apn = str(s.apn, 40);
   for (const k of Object.keys(base.site.flags) as (keyof typeof base.site.flags)[]) s.flags[k] = tri(s.flags[k]);
+  s.otherBuildings = tri(s.otherBuildings); s.otherBuildingGapMm = fix('distance to other buildings', s.otherBuildingGapMm, len, null);
+  s.jurisdictionConfirmed = s.jurisdictionConfirmed === true;
+  if (!['la-city', 'la-county', 'other', 'unknown'].includes(s.jurisdiction)) s.jurisdiction = 'unknown';
+  a.garageConstruction = (['wood', 'masonry', 'concrete', 'unknown'] as const).includes(a.garageConstruction) ? a.garageConstruction : 'unknown';
+  a.ratedEaveUndersidePlanned = tri(a.ratedEaveUndersidePlanned);
+  // People and dates: every field typed and capped (a non-string name crashed the PDF export).
+  const pe = out.people;
+  pe.ownerName = str(pe.ownerName, 120); pe.preparerName = str(pe.preparerName, 120); pe.engineerName = str(pe.engineerName, 120); pe.preparerLicense = str(pe.preparerLicense, 40);
+  if (!['owner', 'drafter', 'contractor', 'architect', 'engineer'].includes(pe.preparerRole)) pe.preparerRole = 'owner';
+  if (pe.language !== 'en' && pe.language !== 'es') pe.language = 'en';
+  out.applicationDate = typeof out.applicationDate === 'string' && /^\d{4}-\d{2}-\d{2}$/.test(out.applicationDate) ? out.applicationDate : null;
+  out.rulePack = str(out.rulePack, 40);
+  if (out.dismissed.length > 300) out.dismissed = out.dismissed.slice(0, 300);
   // Windows: cap the count, sanitize every number.
   if (!Array.isArray(a.windows)) a.windows = [];
   if (a.windows.length > MAX_WINDOWS) { a.windows = a.windows.slice(0, MAX_WINDOWS); notes.push(`windows over ${MAX_WINDOWS}`); }
@@ -113,12 +126,20 @@ export function parsePackText(text: string): any {
   try { return JSON.parse(text); } catch { throw new Error('This file is damaged or is not a permit pack.'); }
 }
 export const isEncrypted = (j: any) => !!j && typeof j === 'object' && j.format === 'permitpack-encrypted';
+const B64 = /^[A-Za-z0-9+/]+={0,2}$/;
+const b64len = (v: any) => (typeof v === 'string' && v.length % 4 === 0 && B64.test(v) ? (v.length / 4) * 3 - (v.endsWith('==') ? 2 : v.endsWith('=') ? 1 : 0) : -1);
+/** A locked pack whose header is broken is damaged, not locked: say so before asking for a passphrase. */
+export function lockedHeaderProblem(j: any): string | null {
+  if (j.v !== 1 && j.v !== 2) return typeof j.v === 'number' && j.v > 2 ? `This locked pack was made by a newer version (v${j.v}). Update the app to open it.` : 'This locked pack is damaged: its header is broken.';
+  if (j.kdf !== KDF) return typeof j.kdf === 'string' && j.kdf.startsWith('PBKDF2') ? 'This locked pack uses a lock this version does not know. Update the app to open it.' : 'This locked pack is damaged: its header is broken.';
+  if (b64len(j.salt) !== 16 || b64len(j.iv) !== 12 || b64len(j.ct) < 17) return 'This locked pack is damaged: its header is broken.';
+  return null;
+}
 
 export async function openPack(text: string, pass?: string): Promise<Project> {
   const j = parsePackText(text);
   if (isEncrypted(j)) {
-    if (j.v !== 1 && j.v !== 2) throw new Error(`This locked pack was made by a newer version (v${j.v}). Update the app to open it.`);
-    if (j.kdf !== KDF) throw new Error('This locked pack uses a lock this version does not know. Update the app to open it.');
+    const bad = lockedHeaderProblem(j); if (bad) throw new Error(bad);
     if (!pass) throw new Error('This pack is locked. Enter its passphrase.');
     let pt: ArrayBuffer;
     try {
@@ -137,6 +158,19 @@ export async function openPack(text: string, pass?: string): Promise<Project> {
  */
 export async function readPackFile(text: string, askPass: () => Promise<string | null>): Promise<Project | null> {
   const j = parsePackText(text);
-  if (isEncrypted(j)) { const pass = await askPass(); if (!pass) return null; return openPack(text, pass); }
+  if (isEncrypted(j)) { const bad = lockedHeaderProblem(j); if (bad) throw new Error(bad); const pass = await askPass(); if (!pass) return null; return openPack(text, pass); }
   return openPack(text);
+}
+
+/** One file holding every project on this device ("Back up all projects"). Each project inside is checked by migrate on open. */
+export const BUNDLE = 'permitpack-bundle';
+export const serializeAll = (ps: Project[]) => JSON.stringify({ format: BUNDLE, v: 1, savedAt: new Date().toISOString(), projects: ps.map(p => JSON.parse(serialize(p))) }, null, 1);
+/** Returns the projects in a backup-all file, or null when the text is not one. Damaged entries are skipped and counted. */
+export function readBundle(text: string): { projects: Project[]; skipped: number } | null {
+  const j = parsePackText(text);
+  if (!j || typeof j !== 'object' || j.format !== BUNDLE) return null;
+  if (!Array.isArray(j.projects)) throw new Error('This backup file is damaged.');
+  const projects: Project[] = []; let skipped = 0;
+  for (const x of j.projects.slice(0, 500)) { try { projects.push(migrate(x)); } catch { skipped++; } }
+  return { projects, skipped };
 }

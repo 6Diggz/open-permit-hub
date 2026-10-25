@@ -30,7 +30,9 @@ export function readiness(p: Project, rep: Report): Readiness {
     if (rs.length) {
       if (rs.some(r => r.status === 'FAIL' && !r.dismissed)) return { item, state: 'failing' as ItemState, why: 'a check fails' };
       if (rs.some(r => r.status === 'UNKNOWN' || r.status === 'NOT_CHECKED')) return { item, state: (item.mode === 'doc' ? 'docsMissing' : 'needsAnswer') as ItemState, why: 'needs an answer' };
-      return { item, state: (item.mode === 'auto' ? 'autoPassed' : 'covered') as ItemState, why: 'checked' };
+      // Only a PASS is an automatic pass. A note (INFO) from a health-and-safety rule still needs a preparer's answer; other notes count as covered.
+      if (rs.some(r => r.status === 'INFO' && r.rule.hs && !r.dismissed)) return { item, state: 'needsAnswer' as ItemState, why: 'a safety note to confirm' };
+      return { item, state: (item.mode === 'auto' && rs.every(r => r.status === 'PASS') ? 'autoPassed' : 'covered') as ItemState, why: 'checked' };
     }
     if (item.mode === 'doc') return { item, state: (p.docs[item.id] ? 'covered' : item.garageRelevant ? 'docsMissing' : 'mayApply') as ItemState, why: p.docs[item.id] ? 'attached' : item.garageRelevant ? 'not attached' : 'may apply: ask your preparer' };
     const a = p.sheet[item.id];
@@ -42,6 +44,10 @@ export function readiness(p: Project, rep: Report): Readiness {
   return { total: items.length, checked: covered + autoPassed, covered, autoPassed, failing: n('failing'), needsAnswer: n('needsAnswer'), docsMissing: n('docsMissing'), mayApply: n('mayApply'), items };
 }
 
-export const scoreLine = (r: Readiness, es = false) => es
-  ? `${r.checked} de ${r.total} puntos de la hoja revisados (${r.autoPassed} automáticos, ${r.covered} cubiertos, ${r.needsAnswer} sin respuesta, ${r.docsMissing} documentos faltan, ${r.mayApply} pueden aplicar, ${r.failing} por corregir)`
-  : `${r.checked} of ${r.total} sheet items checked (${r.autoPassed} auto-passed, ${r.covered} covered, ${r.needsAnswer} need an answer, ${r.docsMissing} docs missing, ${r.mayApply} may apply, ${r.failing} to fix)`;
+/** One plain-language line: what is done, what is left, and who does it. */
+export const scoreLine = (r: Readiness, es = false) => {
+  const left = r.needsAnswer + r.docsMissing + r.failing;
+  return es
+    ? `${r.checked} de ${r.total} puntos de la hoja de correcciones de LADBS están listos. Quedan ${left}: ${r.failing} por corregir, ${r.needsAnswer} preguntas sin responder (muchas son para su preparador) y ${r.docsMissing} documentos por adjuntar. Otros ${r.mayApply} pueden aplicar: pregunte a su preparador`
+    : `${r.checked} of ${r.total} LADBS correction-sheet items are done. ${left} left: ${r.failing} to fix, ${r.needsAnswer} questions to answer (many are for your preparer) and ${r.docsMissing} documents to attach. ${r.mayApply} more may apply: ask your preparer`;
+};

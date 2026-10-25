@@ -13,8 +13,12 @@ self.addEventListener('fetch', e => {
   const req = e.request; if (req.method !== 'GET') return;
   const url = new URL(req.url); if (url.origin !== location.origin) return;
   if (req.mode === 'navigate') {
-    // Network first for the page itself, so a new deploy is picked up; the cached page keeps working offline.
-    e.respondWith(fetch(req).then(r => { if (r.ok) { const copy = r.clone(); caches.open(C).then(c => c.put('./index.html', copy)); } return r; }).catch(() => caches.match('./index.html', { cacheName: C }).then(h => h || caches.match('./'))));
+    // Network first, so a new deploy is picked up. Nothing is written to the cache here: the app shell comes only from
+    // this worker's own precache, so a rule page (or a newer deploy's index.html) can never replace it.
+    // Offline: the page's own precached copy (rule pages), else the app shell, but only for the app's own routes.
+    const scope = new URL('./', self.registration ? self.registration.scope : location.href).pathname;
+    const p = url.pathname; const appRoute = p === scope || p === scope + 'index.html';
+    e.respondWith(fetch(req).catch(() => caches.match(req, { cacheName: C, ignoreSearch: true }).then(h => h || (appRoute ? caches.match('./index.html', { cacheName: C }).then(x => x || caches.match('./', { cacheName: C })) : Response.error()))));
     return;
   }
   e.respondWith(caches.match(req, { cacheName: C, ignoreSearch: true }).then(hit => hit || fetch(req).then(r => { if (r.ok && url.pathname.includes('/assets/')) { const copy = r.clone(); caches.open(C).then(c => c.put(req, copy)); } return r; })));

@@ -30,6 +30,12 @@ export interface Project {
       transitHalfMile: Tri; easementsKnown: Tri; anyUnitRented: Tri; primarySprinklered: Tri;
       slopeOver10: Tri; dwpEasement10ft: Tri;
     };
+    /** Other buildings on the lot besides the main house (second garage, shed, workshop). Each sets an assumed line halfway (sheet III-D.1). */
+    otherBuildings: Tri;
+    /** Closest distance from the ADU to any of those other buildings. */
+    otherBuildingGapMm: number | null;
+    /** The user checked ZIMAS and the lot is in LA City (needed when the address names another city). */
+    jurisdictionConfirmed?: boolean;
   };
   adu: {
     mode: Mode; footprint: Poly; heightMm: number; interiorLivableSqFt: number | null;
@@ -53,6 +59,10 @@ export interface Project {
     panelAmps: number | null; separateGasMeter: Tri;
     /** Setbacks as written on the floor plan sheet, to compare with the site plan. */
     floorPlanSideSetbackMm: number | null; floorPlanRearSetbackMm: number | null;
+    /** Wall construction of the existing garage. B&P §5537(a) exempts wood-frame only; masonry/concrete needs an architect or engineer. */
+    garageConstruction: 'wood' | 'masonry' | 'concrete' | 'unknown';
+    /** 1-hour rated eave underside where an eave is 2-5 ft from the line (LARC Table R302.1(1)). Separate from the wall rating. */
+    ratedEaveUndersidePlanned: Tri;
   };
   /** Answers to correction-sheet "ask" items: yes = shown on plans / handled, no = not yet, na = does not apply. */
   sheet: Record<string, 'yes' | 'no' | 'na'>;
@@ -95,7 +105,7 @@ export function blankProject(): Project {
     site: {
       address: '', apn: '', jurisdiction: 'unknown', lotSource: 'manual', lotUncertaintyMm: ft(2),
       lot: rect(0, 0, ft(50), ft(130)), streetEdge: 0, mainBuilding: 'unknown', existingAdus: null, existingJadus: null,
-      primary: rect(ft(10), ft(20), ft(30), ft(45)), primaryHeightMm: ft(16),
+      primary: rect(ft(10), ft(20), ft(30), ft(45)), primaryHeightMm: ft(16), otherBuildings: 'unknown', otherBuildingGapMm: null,
       flags: { hillside: 'unknown', vhfhsz: 'unknown', hpoz: 'unknown', coastal: 'unknown', methane: 'unknown', fireRebuild: 'unknown', transitHalfMile: 'unknown', easementsKnown: 'unknown', anyUnitRented: 'unknown', primarySprinklered: 'unknown', slopeOver10: 'unknown', dwpEasement10ft: 'unknown' },
     },
     adu: {
@@ -105,7 +115,7 @@ export function blankProject(): Project {
       roofPitchMatches: 'unknown', windows: [], bedrooms: 1, smokeCoPlanned: 'unknown', allElectric: 'unknown',
       garageAttachment: 'unknown', staysInsideWalls: 'unknown', addedForIngressOnly: 'unknown', legalization: false,
       slabVaporBarrier: 'unknown', openingsNearLine: 'unknown', smokeHardwired: 'unknown', panelAmps: null, separateGasMeter: 'unknown',
-      floorPlanSideSetbackMm: null, floorPlanRearSetbackMm: null,
+      floorPlanSideSetbackMm: null, floorPlanRearSetbackMm: null, garageConstruction: 'unknown', ratedEaveUndersidePlanned: 'unknown',
     },
     sheet: {}, docs: {},
     people: { ownerName: '', preparerRole: 'owner', preparerName: '', preparerLicense: '', language: 'en', engineerName: '' },
@@ -118,9 +128,9 @@ export function blankProject(): Project {
 export function demoProject(): Project {
   const p = blankProject(); p.confirmed = { lot: true, house: true, adu: true };
   p.name = 'Demo lot (not a real address)';
-  p.site.address = '123 Example St (demo)'; p.site.apn = '0000-000-000'; p.site.jurisdiction = 'la-city'; p.site.mainBuilding = 'sfd'; p.site.existingAdus = 0; p.site.existingJadus = 0;
+  p.site.address = '123 Example St (demo)'; p.site.apn = '0000-000-000'; p.site.jurisdiction = 'la-city'; p.site.mainBuilding = 'sfd'; p.site.otherBuildings = 'no'; p.site.existingAdus = 0; p.site.existingJadus = 0;
   p.site.flags = { ...p.site.flags, hillside: 'no', vhfhsz: 'no', hpoz: 'no', coastal: 'no', methane: 'no', fireRebuild: 'no', transitHalfMile: 'no', anyUnitRented: 'no', primarySprinklered: 'no', slopeOver10: 'no', dwpEasement10ft: 'no' };
-  p.adu = { ...p.adu, interiorLivableSqFt: 380, ceilingHeightMm: inch(96), existingStructurePermitted: 'yes', builtBefore2020: 'yes', removesGarageDoorWall: 'yes', ratedWallPlanned: 'unknown', sprinklered: 'no', hosePullFt: 120, smokeCoPlanned: 'yes', allElectric: 'yes', garageAttachment: 'detached', staysInsideWalls: 'yes', smokeHardwired: 'yes', slabVaporBarrier: 'unknown', eaveDepthMm: 0,
+  p.adu = { ...p.adu, interiorLivableSqFt: 380, ceilingHeightMm: inch(96), existingStructurePermitted: 'yes', builtBefore2020: 'yes', removesGarageDoorWall: 'yes', ratedWallPlanned: 'unknown', sprinklered: 'no', hosePullFt: 120, smokeCoPlanned: 'yes', allElectric: 'yes', garageAttachment: 'detached', garageConstruction: 'wood', staysInsideWalls: 'yes', smokeHardwired: 'yes', slabVaporBarrier: 'unknown', eaveDepthMm: 0,
     windows: [{ id: 'w1', room: 'Bedroom', sleeping: true, clearWidthMm: inch(24), clearHeightMm: inch(36), sillMm: inch(40), gradeFloor: true }] };
   p.adu.footprint = [{ x: ft(46), y: ft(108) }, { x: ft(66), y: ft(108) }, { x: ft(66), y: ft(128) }, { x: ft(46), y: ft(128) }].map(q => ({ x: q.x - ft(18), y: q.y }));
   return p;

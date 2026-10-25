@@ -6,6 +6,7 @@ import { CATALOG, CATALOG_COUNT, RULE_ITEMS } from '../rules/ladbs-adu-2025';
 import { readiness, scoreLine } from '../rules/readiness';
 import { ES } from '../ui/es';
 import { ft, inch } from '../core/units';
+import { rect } from '../core/geom';
 import appSrc from '../ui/App.tsx?raw';
 
 const st = (p: Project, id: string) => evaluate(p, RULES, PACK_ID, new Date('2026-10-24')).results.find(r => r.rule.id === id)?.status;
@@ -32,7 +33,7 @@ describe('LADBS catalog', () => {
     expect(r.items.find(x => x.item.id === 'II.C.1')!.why).toBe('does not apply');
     expect(r.items.find(x => x.item.id === 'II.G.1')!.why).not.toBe('does not apply');
     expect(r.total).toBe(CATALOG_COUNT);
-    expect(scoreLine(r)).toMatch(new RegExp(`of ${CATALOG_COUNT} sheet items checked`));
+    expect(scoreLine(r)).toMatch(new RegExp(`of ${CATALOG_COUNT} LADBS correction-sheet items are done`));
   });
   it('answering items raises the score', () => {
     const p = demo(); const a = readiness(p, evaluate(p, RULES, PACK_ID)).checked;
@@ -70,7 +71,7 @@ describe('new auto checks (pass / fail / unknown)', () => {
 
 describe('fees (2026) and AB 2533', () => {
   it('school $0 under 500, impact $0 under 750, never an invented amount', () => {
-    const p = demo(); p.adu.interiorLivableSqFt = 499; let f = feeEstimate(p); expect(f.school.en).toContain('$0'); expect(f.impact.en).toContain('$0');
+    const p = demo(); p.adu.footprint = rect(ft(20), ft(95), ft(30), ft(30)); p.adu.interiorLivableSqFt = 499; let f = feeEstimate(p); expect(f.school.en).toContain('$0'); expect(f.impact.en).toContain('$0');
     p.adu.interiorLivableSqFt = 600; f = feeEstimate(p); expect(f.school.en).toBe('estimate, verify with LADBS'); expect(f.impact.en).toContain('$0');
     p.adu.interiorLivableSqFt = 800; f = feeEstimate(p); expect(f.impact.en).toBe('estimate, verify with LADBS');
     expect(f.outcome.msg.en).not.toMatch(/\$[1-9]/);

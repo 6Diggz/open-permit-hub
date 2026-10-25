@@ -2,7 +2,7 @@ import { PDFDocument, StandardFonts, rgb, degrees, PDFName, PDFString, type PDFP
 import type { Project } from '../core/model';
 import type { Report } from '../rules/engine';
 import { bbox, clearanceToEdge, gap } from '../core/geom';
-import { PACK, PACK_ID, packFreshness } from '../rules/pack';
+import { PACK, PACK_ID, rulesLine } from '../rules/pack';
 import { streetName } from './dxf';
 import { safe, missingGlyphNote } from './glyphs';
 export { missingGlyphNote };
@@ -11,7 +11,7 @@ import { MM_PER_FT, fmtFtIn, fmtSqFt } from '../core/units';
 import { area } from '../core/geom';
 import { readiness, scoreLine } from '../rules/readiness';
 import { RULE_ITEMS } from '../rules/ladbs-adu-2025';
-import { citeEs } from '../rules/cites-es';
+import { citeText } from '../rules/cites-es';
 
 const INK = rgb(0.12, 0.14, 0.18), MUTE = rgb(0.42, 0.45, 0.5), RED = rgb(0.72, 0.16, 0.12), GREEN = rgb(0.1, 0.45, 0.25), AMBER = rgb(0.68, 0.45, 0.02);
 const PT_PER_IN = 72;
@@ -74,10 +74,23 @@ async function sitePlanSheet(doc: PDFDocument, p: Project, kind: Kind) {
   let ty = H - 72; pg.drawText('SITE PLAN', { x: tbX + 14, y: ty, size: 20, font: fb, color: INK }); ty -= 34;
   for (const [a, b] of rows) { pg.drawText(a, { x: tbX + 14, y: ty, size: 8, font: f, color: MUTE }); ty -= 13; for (const l of wrap(safe(b), f, 11, tbW - 28)) { pg.drawText(l, { x: tbX + 14, y: ty, size: 11, font: fb, color: INK }); ty -= 14; } ty -= 8; }
   const note = `Prepared by the person named above using Open Permit Hub software. The software is not the preparer. Not reviewed or approved by any agency. Verify all dimensions in the field.${missingGlyphNote(p, false, true) ? ' ' + missingGlyphNote(p, false, true) : ''}`;
+  sigBlock(pg, tbX + 14, 210, tbW - 28, f, p);
   ty = 150; for (const l of wrap(note, f, 9, tbW - 28)) { pg.drawText(l, { x: tbX + 14, y: ty, size: 9, font: f, color: INK }); ty -= 12; }
   if (kind === 'draft') pg.drawText('DRAFT - NOT FOR SUBMITTAL', { x: W * 0.2, y: H * 0.25, size: 96, font: fb, color: rgb(0.85, 0.2, 0.15), opacity: 0.13, rotate: degrees(28) });
   if (kind === 'precheck') pg.drawText('Pre-check copy - not a submittal', { x: 44, y: H - 50, size: 10, font: fb, color: RED });
   return pg;
+}
+
+/** Signature and date lines for the person who prepared the plans (B&P §5536.2 asks the preparer to sign plans made for others). Layout only. */
+export function sigLabel(p: Project): string {
+  return p.people.preparerRole === 'owner' ? 'Owner signature (plans prepared by the owner)' : `Signature of preparer: ${p.people.preparerName || '-'} (${p.people.preparerRole})${p.people.preparerLicense ? `, license ${p.people.preparerLicense}` : ''}`;
+}
+function sigBlock(pg: PDFPage, x: number, y: number, w: number, f: PDFFont, p: Project) {
+  const dw = 90;
+  pg.drawLine({ start: { x, y }, end: { x: x + w - dw - 12, y }, thickness: 0.8, color: INK });
+  pg.drawLine({ start: { x: x + w - dw, y }, end: { x: x + w, y }, thickness: 0.8, color: INK });
+  let ly = y - 11; for (const l of wrap(safe(sigLabel(p)), f, 8, w - dw - 12)) { pg.drawText(l, { x, y: ly, size: 8, font: f, color: MUTE }); ly -= 10; }
+  pg.drawText('Date', { x: x + w - dw, y: y - 11, size: 8, font: f, color: MUTE });
 }
 
 /** Sheet A-2: floor plan data from the Rooms step (ADU outline at 1/4" = 1'-0", window schedule with escape tags, alarms, areas). */
@@ -120,8 +133,8 @@ export async function reportPDF(p: Project, rep: Report, lang: 'en' | 'es' = p.p
   line(p.name, 20, fb); line(`${p.site.address || '-'}   APN ${p.site.apn || '-'}`, 10, f, MUTE); y -= 6;
   const ov = { READY_FOR_PREPARER: es ? 'Listo para su preparador' : 'Ready for your preparer', FIX_ISSUES: es ? 'Hay cosas que corregir' : 'Issues to fix', INCOMPLETE: es ? 'Incompleto: falta información' : 'Incomplete: information missing', NOT_SUPPORTED: es ? 'Dirección no soportada' : 'Address not supported' }[rep.overall];
   line(ov, 16, fb, rep.overall === 'READY_FOR_PREPARER' ? GREEN : rep.overall === 'FIX_ISSUES' ? RED : AMBER);
-  const fr = packFreshness();
-  line(`${es ? 'Reglas vigentes al' : 'Rules as of'} ${rep.vestDate}   ${rep.pack}   ${es ? fr.reasonEs : fr.reason}`, 9, f, fr.stale ? AMBER : MUTE);
+  const fr = rulesLine(p.applicationDate, rep.pack, es);
+  line(fr.text, 9, f, fr.stale ? AMBER : MUTE);
   line(es ? `Base del código: la hoja LADBS cita ${PACK.sheet.codes}; ciclo estatal ${PACK.stateCycle}. ${PACK.localCycleNote}` : `Code basis: the LADBS sheet cites ${PACK.sheet.codes}; state cycle ${PACK.stateCycle}. ${PACK.localCycleNote}`, 8, f, MUTE);
   line(`${es ? 'Revisiones de reglas' : 'Rule checks'}: ${es ? 'Cumple' : 'Pass'} ${rep.counts.PASS} / ${es ? 'Corregir' : 'Fix'} ${rep.counts.FAIL} / ${es ? 'Falta info' : 'Need info'} ${rep.counts.UNKNOWN} / ${es ? 'No revisado' : 'Not checked'} ${rep.counts.NOT_CHECKED}`, 10, fb, INK);
   line((es ? 'Puntos de la hoja LADBS: ' : 'LADBS sheet items: ') + scoreLine(readiness(p, rep), es) + ` - ${PACK.sheet.form} Rev ${PACK.sheet.rev}`, 10, fb, INK);
@@ -132,7 +145,7 @@ export async function reportPDF(p: Project, rep: Report, lang: 'en' | 'es' = p.p
     const [en, sp, c] = STAT[r.status]; line(`${es ? sp : en}   ${r.rule.id}  ${r.rule.title[lang]}`, 11, fb, c);
     line(r.msg[lang], 10, f, INK, 12); if (r.next) line((es ? 'Siguiente paso: ' : 'Next step: ') + r.next[lang], 10, f, INK, 12);
     if (r.dismissed) line(`${es ? 'Descartado por el usuario' : 'Dismissed by user'}: ${r.dismissed}`, 9, f, AMBER, 12);
-    line(r.rule.cites.map(c2 => (c2.edition ? `[${c2.edition}] ` : '') + (es ? citeEs(c2.code) : c2.code) + (c2.verified ? '' : es ? ' [cita en verificación]' : ' [citation pending verification]')).join('; ') + (RULE_ITEMS[r.rule.id]?.length ? `; ${es ? 'hoja' : 'sheet'} ${RULE_ITEMS[r.rule.id].join(', ')}` : ''), 8, f, MUTE, 12); y -= 6;
+    line(r.rule.cites.map(c2 => citeText(c2, es) + (c2.verified ? '' : es ? ' [cita en verificación]' : ' [citation pending verification]')).join('; ') + (RULE_ITEMS[r.rule.id]?.length ? `; ${es ? 'hoja' : 'sheet'} ${RULE_ITEMS[r.rule.id].join(', ')}` : ''), 8, f, MUTE, 12); y -= 6;
   }
   y -= 6; line(es ? 'Esta herramienta no aprueba planos. Solo la ciudad aprueba. Es gratis; si alguien le cobra por "permisos garantizados", repórtelo.' : 'This tool does not approve plans. Only the city does. It is free; if someone charges you for "guaranteed permits", report it.', 9, f, MUTE);
   return doc.save();

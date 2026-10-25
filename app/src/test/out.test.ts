@@ -20,7 +20,7 @@ describe('outputs', () => {
     const r = await PDFDocument.load(await reportPDF(p, rep, 'es')); expect(r.getPageCount()).toBeGreaterThan(0);
   });
   it('handoff zip has all files', async () => { const z = unzipSync(await handoffZip(p, rep)); expect(Object.keys(z).sort()).toEqual(['README.txt', 'THIRD_PARTY_NOTICES.txt', 'check-report-en.html', 'check-report-en.pdf', 'check-report-es.html', 'check-report-es.pdf', 'materials.csv', 'project.permitpack', 'site-plan.dxf', 'site-plan.pdf']); });
-  it('handoff README shows the sheet score', async () => { const z = unzipSync(await handoffZip(p, rep)); expect(new TextDecoder().decode(z['README.txt'])).toMatch(/\d+ of \d+ sheet items checked/); });
+  it('handoff README shows the sheet score', async () => { const z = unzipSync(await handoffZip(p, rep)); expect(new TextDecoder().decode(z['README.txt'])).toMatch(/\d+ of \d+ LADBS correction-sheet items are done/); });
   it('takeoff is sane for a 20x20 garage', () => { const t = takeoff(p); const dw = t[0].qty; expect(dw).toBeGreaterThan(20); expect(dw).toBeLessThan(45); });
   it('ics has stable UID and 18-month plan check', () => { const i = deadlinesICS(p, '2026-11-01'); expect(i).toContain(`UID:${p.id}-plancheck`); expect(i).toContain('DTSTART;VALUE=DATE:20280501'); });
 });

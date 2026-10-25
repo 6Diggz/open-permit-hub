@@ -231,7 +231,7 @@ export const CATALOG_COUNT = CATALOG.length;
 
 /** Every app rule linked to the sheet item ids it covers. */
 export const RULE_ITEMS: Record<string, string[]> = {
-  'GEO-01': ['I.A.1', 'I.C.7'], 'INP-01': ['I.A.1', 'I.C.7'], 'JUR-01': ['I.C.2'],
+  'GEO-01': ['I.A.1', 'I.C.7'], 'INP-01': ['I.A.1', 'I.C.7'], 'JUR-01': ['I.C.2'], 'REV-01': ['I.A.1'],
   'GAR-01': ['II.C.2', 'II.G.2', 'I.C.10'], 'SCP-01': ['II.C.3', 'II.C.4'], 'MIX-01': ['II.C.1', 'II.C.5', 'II.G.1', 'II.G.3'], 'ADD-01': ['II.C.3', 'II.C.4'],
   'SET-01': ['I.C.10', 'II.K.1'], 'SET-02': ['II.D.4'], 'SET-03': ['I.C.7'], 'SEP-01': ['III.D.1'], 'HGT-01': ['II.D.3'],
   'CEI-01': ['III.G.1', 'III.F.14'], 'EGR-01': ['III.F.1'], 'ALM-01': ['III.E.1', 'III.E.3', 'III.I.9'], 'ALM-02': ['III.E.2'],

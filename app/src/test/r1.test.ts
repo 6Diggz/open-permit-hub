@@ -146,7 +146,7 @@ describe('COR-02 / COR-05 escape windows per sleeping room', () => {
     const p = good(); p.adu.bedrooms = 0; p.adu.windows = [];
     expect(st(p, 'EGR-01')!.status).toBe('UNKNOWN'); expect(ready(p)).not.toBe('READY_FOR_PREPARER');
     p.adu.windows = [w('Main room', 24, 36)]; expect(st(p, 'EGR-01')!.status).toBe('PASS');
-    p.adu.windows = []; p.adu.mainRoomSleeping = 'no'; expect(st(p, 'EGR-01')!.status).toBe('INFO');
+    p.adu.windows = []; p.adu.mainRoomSleeping = 'no'; expect(st(p, 'EGR-01')!.status).toBe('UNKNOWN'); expect(ready(p)).not.toBe('READY_FOR_PREPARER'); // R2-COR-04: was INFO
   });
   it('COR-13 NaN or negative window sizes are never a PASS', () => {
     const p = good(); p.adu.windows = [{ ...w('Bedroom', 24, 36), clearWidthMm: NaN }]; expect(st(p, 'EGR-01')!.status).not.toBe('PASS');

@@ -1,3 +1,5 @@
+import { LA_ED } from './pack';
+import type { Cite } from './engine';
 /** Spanish for the plain-language part of each citation. Code numbers stay as they are. A test fails if a cite is missing here. */
 export const CITES_ES: Record<string, string> = {
   'Data check (not a code rule)': 'Revisión de datos (no es una regla del código)',
@@ -21,7 +23,9 @@ export const CITES_ES: Record<string, string> = {
   'LADBS sheet III-E.4 (sprinklers required for the ADU if the existing dwelling has them)': 'Hoja LADBS III-E.4 (el ADU necesita rociadores si la vivienda existente los tiene)',
   'Gov. Code §66314(d)(12) (not required when the main house does not need them)': 'Código de Gobierno §66314(d)(12) (no se exigen si la casa principal no los necesita)',
   'Fire access review (LA County guideline: 150 ft, 300 ft if sprinklered detached ADU). LAFD verifies in LA City.': 'Revisión de acceso de bomberos (guía del Condado de LA: 150 pies, 300 pies si el ADU separado tiene rociadores). LAFD verifica en la Ciudad de LA.',
-  'B&P §6737.1 and §5537 (conventional wood framing is exempt; non-conventional parts need a licensed engineer)': 'B&P §6737.1 y §5537 (la estructura de madera convencional está exenta; las partes no convencionales necesitan un ingeniero con licencia)',
+  'B&P §5537 (exemption covers conventional wood-frame dwellings and garages only) and §6737.1 (non-conventional parts need a licensed engineer)': 'B&P §5537 (la exención cubre solo viviendas y garajes convencionales de madera) y §6737.1 (las partes no convencionales necesitan un ingeniero con licencia)',
+  'Rule pack review date (state ADU laws change each January 1)': 'Fecha de revisión del paquete de reglas (las leyes estatales de ADU cambian cada 1 de enero)',
+  [`${LA_ED} LA codes (as cited by the LADBS sheet)`]: `Códigos de LA ${LA_ED} (según la hoja de LADBS)`,
   'LAMC 12.22 A.33 (HCD found parts noncompliant, 11/19/2024: contested)': 'LAMC 12.22 A.33 (HCD encontró partes que no cumplen, 19/11/2024: disputado)',
   'Gov. Code §66323(a) (conversions inside an existing accessory structure: ministerial approval)': 'Código de Gobierno §66323(a) (conversiones dentro de una estructura accesoria existente: aprobación ministerial)',
   'LA HPOZ review; draft ADU design standards (6/22/2026)': 'Revisión HPOZ de LA; borrador de normas de diseño de ADU (22/6/2026)',
@@ -51,3 +55,5 @@ export const CITES_ES: Record<string, string> = {
   'LAMC 98.0605 (extensions)': 'LAMC 98.0605 (extensiones)',
 };
 export const citeEs = (code: string) => CITES_ES[code] ?? code;
+/** One way to print a citation everywhere (screen, PDF, HTML): edition label and plain-language part both localized. */
+export const citeText = (c: Cite, es: boolean) => (c.edition ? `[${es ? citeEs(c.edition) : c.edition}] ` : '') + (es ? citeEs(c.code) : c.code);

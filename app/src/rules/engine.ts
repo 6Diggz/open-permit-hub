@@ -15,7 +15,8 @@ export interface Rule {
   /** When true for this project, no other rule may show an automatic PASS. */
   suspendsAutoPass?: (p: Project) => boolean;
   applies: (p: Project) => boolean;
-  check: (p: Project) => Outcome;
+  /** ctx: the evaluation date and the vesting (application) date, both YYYY-MM-DD. */
+  check: (p: Project, ctx?: { today: string; vestDate: string }) => Outcome;
 }
 export interface Result { rule: Rule; status: Status; msg: L; next?: L; values?: Record<string, string | number>; dismissed?: string; unsupported?: boolean }
 export interface Report { results: Result[]; overall: 'READY_FOR_PREPARER' | 'FIX_ISSUES' | 'INCOMPLETE' | 'NOT_SUPPORTED'; counts: Record<Status, number>; vestDate: string; pack: string }
@@ -33,7 +34,7 @@ export function evaluate(p: Project, rules: Rule[], packId: string, today = new 
       continue;
     }
     let o: Outcome;
-    try { o = r.check(p); } catch { o = { status: 'UNKNOWN', msg: { en: 'This check could not run on the data entered.', es: 'Esta revisión no pudo ejecutarse con los datos ingresados.' } }; }
+    try { o = r.check(p, { today: local, vestDate }); } catch { o = { status: 'UNKNOWN', msg: { en: 'This check could not run on the data entered.', es: 'Esta revisión no pudo ejecutarse con los datos ingresados.' } }; }
     const d = p.dismissed.find(x => x.ruleId === r.id);
     results.push({ rule: r, ...o, dismissed: d && canDismiss(r) ? d.reason : undefined });
   }

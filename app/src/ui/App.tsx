@@ -2,10 +2,10 @@ import { useEffect, useMemo, useRef, useState } from 'react';
 import { blankProject, demoProject, isDemo, MODULES, SAFETY_MODULES, uid, type Project, type Tri, type Window } from '../core/model';
 import { History } from '../core/undo';
 import { canDismiss, evaluate, exportBlockers, type Report, type Result } from '../rules/engine';
-import { RULES, PACK_ID } from '../rules/la-city';
-import { PACK, packFreshness } from '../rules/pack';
+import { RULES, PACK_ID, addressCity } from '../rules/la-city';
+import { PACK, packFreshness, rulesLine } from '../rules/pack';
 import { bbox, rect, translate } from '../core/geom';
-import { fmtFtIn, fmtSqFt, ft, parseLength, lengthTooLarge, toFt, RANGES, outOfRange } from '../core/units';
+import { fmtFtIn, fmtSqFt, ft, lengthBlur, lengthTooLarge, toFt, RANGES, outOfRange } from '../core/units';
 import { area } from '../core/geom';
 import { Plan } from './Plan';
 import { CleanFix } from './CleanFix';
@@ -13,12 +13,12 @@ import { ask, AskHost } from './Ask';
 import { autoFit } from '../rules/fit';
 import { readiness, scoreLine, applies as itemApplies } from '../rules/readiness';
 import { CATALOG, RULE_ITEMS } from '../rules/ladbs-adu-2025';
-import { citeEs } from '../rules/cites-es';
+import { citeText } from '../rules/cites-es';
 import { tr, type Lang } from './i18n';
 import { ES } from './es';
 let LANG: Lang = 'en';
 const L = (en: string) => (LANG === 'es' ? (ES as Record<string, string>)[en] ?? en : en);
-import { encryptPack, passphraseProblem, readPackFile, serialize, MAX_PACK_BYTES } from '../core/permitpack';
+import { encryptPack, passphraseProblem, readPackFile, serialize, serializeAll, readBundle, MAX_PACK_BYTES } from '../core/permitpack';
 import { takeoff, takeoffCSV } from '../out/takeoff';
 import { plainWasmError } from '../out/wasm';
 import { missingGlyphNote } from '../out/glyphs';
@@ -60,7 +60,7 @@ export default function App() {
 
   useEffect(() => { if (p) setSaveState(persist(p)); }, [p]);
   useEffect(() => { navigator.storage?.persist?.().catch(() => {}); }, []);
-  useEffect(() => { document.documentElement.lang = lang; }, [lang]);
+  useEffect(() => { document.documentElement.lang = lang; const sk = document.querySelector('a[href="#main"]'); if (sk) sk.textContent = lang === 'es' ? 'Saltar al contenido' : 'Skip to content'; }, [lang]);
   // Another tab saved this project: say so now, before this tab's next save is refused.
   useEffect(() => { const id = p?.id; if (!id) return; const on = (e: StorageEvent) => { if (e.key === store.keyOf(id) && e.newValue) setSaveState('conflict'); }; window.addEventListener('storage', on); return () => window.removeEventListener('storage', on); }, [p?.id]);
   // Browser Back / Forward move between steps; the step lives in the URL so reload keeps it.
@@ -89,7 +89,7 @@ export default function App() {
   const steps: string[] = tr(lang, 'steps');
   const stepDot = (i: number) => { const mod = [['core', 'zoning', 'hazards'], ['zoning', 'fire', 'structural', 'fees'], ['egress'], [], []][i]; const rs = report.results.filter(r => mod.includes(r.rule.module)); return rs.some(r => r.status === 'FAIL') ? 'var(--fix)' : rs.some(r => r.status === 'UNKNOWN') ? 'var(--info-need)' : rs.some(r => r.status === 'NOT_CHECKED') ? 'var(--off)' : rs.some(r => r.status === 'PASS') ? 'var(--pass)' : 'transparent'; };
   const close = () => { setP(null); hist.current = null; history.pushState(null, '', '#projects'); };
-  const fresh = packFreshness();
+  const fresh = packFreshness(new Date(), p.applicationDate);
   const saveText = saveState === 'ok' ? tr(lang, 'saved') : saveState === 'blocked' ? L("Not saved: storage is blocked. Export a backup.") : L("Not saved: this project changed in another tab.");
 
   return (
@@ -150,7 +150,7 @@ export default function App() {
       </main>
 
       <aside className="side" aria-label={L("Check results")} tabIndex={0}>
-        <InspectionCard report={report} lang={lang} score={scoreLine(readiness(p, report), lang === 'es')} />
+        <InspectionCard report={report} lang={lang} appDate={p.applicationDate} score={scoreLine(readiness(p, report), lang === 'es')} />
         <ResultList results={report.results} lang={lang} />
       </aside>
     </div>
@@ -166,13 +166,16 @@ function openNotes(x: Project): string[] {
 }
 
 function Welcome({ lang, setLang, onStart, onOpen, onClean, onPick }: { onPick: (id: string) => void; onClean: () => void; lang: Lang; setLang: (l: Lang) => void; onStart: (demo: boolean) => void; onOpen: (p: Project) => void }) {
-  const [err, setErr] = useState('');
+  const [err, setErr] = useState(''); const [tick, setTick] = useState(0);
   const sample = evaluate(demoProject(), RULES, PACK_ID); const es = lang === 'es';
   const openFile = async (f: File) => {
     setErr('');
     try {
       if (f.size > MAX_PACK_BYTES) throw new Error(es ? 'Este archivo es demasiado grande para ser un paquete.' : 'This file is too large to be a permit pack.');
-      const x = await readPackFile(await f.text(), async () => ((await ask({ title: es ? 'Este paquete está bloqueado' : 'This pack is locked', body: es ? 'Ingrese la frase de acceso que le dieron con el archivo.' : 'Enter the passphrase you were given with the file.', input: 'password', minLength: 1, confirm: es ? 'Abrir' : 'Open', cancel: es ? 'Cancelar' : 'Cancel', labels: { field: es ? 'Frase de acceso' : 'Passphrase', show: es ? 'Mostrar' : 'Show' } })) as string | null));
+      const text = await f.text(); const bundle = readBundle(text);
+      if (bundle) { let n = 0; for (const x of bundle.projects) { if (store.has(x.id)) { x.id = uid(); x.name = `${x.name} ${es ? '(copia abierta)' : '(opened copy)'}`; } if (store.save(x, { force: true }) === 'ok') n++; }
+        setErr(es ? `Se restauraron ${n} proyectos.${bundle.skipped ? ` ${bundle.skipped} estaban dañados.` : ''}` : `Restored ${n} projects.${bundle.skipped ? ` ${bundle.skipped} were damaged.` : ''}`); setTick(t => t + 1); return; }
+      const x = await readPackFile(text, async () => ((await ask({ title: es ? 'Este paquete está bloqueado' : 'This pack is locked', body: es ? 'Ingrese la frase de acceso que le dieron con el archivo.' : 'Enter the passphrase you were given with the file.', input: 'password', minLength: 1, confirm: es ? 'Abrir' : 'Open', cancel: es ? 'Cancelar' : 'Cancel', labels: { field: es ? 'Frase de acceso' : 'Passphrase', show: es ? 'Mostrar' : 'Show' } })) as string | null));
       if (!x) return;
       if (store.has(x.id)) {
         const c = await ask({ title: es ? 'Ya tiene este proyecto' : 'You already have this project', body: es ? `"${x.name}" ya está en este dispositivo. Abrir el archivo como copia aparte guarda las dos versiones.` : `"${x.name}" is already on this device. Opening the file as a separate copy keeps both versions.`, confirm: es ? 'Guardar los dos' : 'Keep both', alt: { label: es ? 'Reemplazar el mío' : 'Replace mine', value: 'replace' }, cancel: es ? 'Cancelar' : 'Cancel' });
@@ -198,11 +201,11 @@ function Welcome({ lang, setLang, onStart, onOpen, onClean, onPick }: { onPick: 
       </div>
       {(err || loadError) && <p role="alert" style={{ color: 'var(--fix)' }}>{err || (es ? `No pudimos abrir su proyecto guardado (${loadError}).` : `We couldn't open your saved project (${loadError}).`)}
         {!err && raw && <> <button className="btn quiet" onClick={() => download('damaged-project.permitpack', raw, 'application/json')}>{es ? 'Descargar la copia guardada' : 'Download the saved copy'}</button></>}</p>}
-      <Projects lang={lang} onPick={onPick} onNew={() => onStart(false)} />
+      <Projects key={tick} lang={lang} onPick={onPick} onNew={() => onStart(false)} />
       <p style={{ marginTop: 28 }}><button className="btn quiet" onClick={onClean}>{es ? 'Para dibujantes: limpiar un archivo DWG o DXF' : 'For drafters: clean and fix a DWG or DXF file'}</button></p>
       <p className="help" style={{ fontSize: '.82rem' }}>{es ? 'Código abierto (Apache-2.0).' : 'Open source (Apache-2.0).'} <a href="./THIRD_PARTY_NOTICES.txt">{es ? 'Avisos de terceros' : 'Third-party notices'}</a> · <a href="https://github.com/6Diggz/open-permit-hub" target="_blank" rel="noreferrer">{es ? 'Código fuente' : 'Source code'}</a> · {es ? 'Reglas' : 'Rules'} {PACK_ID}, {es ? 'revisadas el' : 'checked'} {PACK.verifiedOn}</p>
     </div>
-    <div className="sample" aria-label={L("Example result from the demo lot")}><InspectionCard report={sample} lang={lang} /><ResultList results={sample.results.filter(r => r.status === 'FAIL').slice(0, 1)} lang={lang} /></div>
+    <div className="sample" aria-label={L("Example result from the demo lot")}><InspectionCard example report={sample} lang={lang} /><ResultList results={sample.results.filter(r => r.status === 'FAIL').slice(0, 1)} lang={lang} /></div>
     </main>
   );
 }
@@ -214,14 +217,14 @@ function Q({ id, label, help, value, onChange }: { id: string; label: string; he
   return <div className="field"><label id={id}>{label}</label><TriPick id={id} value={value} onChange={onChange} />{help && <span className="help">{help}</span>}</div>;
 }
 /** Length field. Rejects what can't be a size; accepts unusual sizes but says "check this number". */
-function Len({ id, label, help, mm, onChange, allowZero, range }: { id: string; label: string; help?: string; mm: number | null; onChange: (mm: number | null) => void; allowZero?: boolean; range?: readonly [number, number] }) {
-  const [txt, setTxt] = useState(mm == null ? '' : fmtFtIn(mm)); const [bad, setBad] = useState(false);
+function Len({ id, label, help, mm, onChange, allowZero, range, bare, always }: { id: string; label: string; help?: string; mm: number | null; onChange: (mm: number | null) => void; allowZero?: boolean; range?: readonly [number, number]; /** Unit of a bare number (window fields: inches). */ bare?: 'ft' | 'in'; /** Commit on every good entry, even an unchanged one (confirms example sizes). */ always?: boolean }) {
+  const [txt, setTxt] = useState(mm == null ? '' : fmtFtIn(mm)); const [bad, setBad] = useState(false); const [dirty, setDirty] = useState(false);
   const [prev, setPrev] = useState(mm); if (prev !== mm) { setPrev(mm); setTxt(mm == null ? '' : fmtFtIn(mm)); }
   const odd = !bad && range != null && mm != null && outOfRange(mm, range);
   return <div className="field"><label htmlFor={id}>{label}</label>
-    <input id={id} value={txt} inputMode="text" aria-invalid={bad} aria-describedby={id + '-h'} onChange={e => setTxt(e.target.value)}
-      onBlur={() => { if (!txt.trim()) { setBad(false); if (mm != null) onChange(null); return; } const v = parseLength(txt); const ok = v != null && Number.isFinite(v) && (allowZero ? v >= 0 : v > 0); setBad(!ok); if (ok && (mm == null || Math.abs(v - mm) > 1e-6)) onChange(v); }} />
-    <span className="help" id={id + '-h'} style={odd ? { color: 'var(--info-need)' } : undefined}>{bad && lengthTooLarge(txt) ? L('Check this number: it is larger than any lot or building.') : bad && /^-|^0+(\.0*)?$/.test(txt.trim()) ? L('Enter a size greater than zero.') : bad ? L("Try a format like 20' 6\", 20-6, 20.5 or 6.25m.") : odd ? L('Check this number: it looks unusual for a garage ADU.') : help ?? L("Feet and inches, like 20' 6\"")}</span></div>;
+    <input id={id} value={txt} inputMode="text" aria-invalid={bad} aria-describedby={id + '-h'} onChange={e => { setTxt(e.target.value); setDirty(true); }}
+      onBlur={() => { const r = lengthBlur(txt, mm, { allowZero, bare, always: always && dirty }); setDirty(false); setBad(r.bad); if (r.commit) onChange(r.value); }} />
+    <span className="help" id={id + '-h'} style={odd ? { color: 'var(--info-need)' } : undefined}>{bad && lengthTooLarge(txt) ? L('Check this number: it is larger than any lot or building.') : bad && /^-|^0+(\.0*)?$/.test(txt.trim()) ? L('Enter a size greater than zero.') : bad ? (bare === 'in' ? L("Try a format like 24, 24\" or 2' 0\".") : L("Try a format like 20' 6\", 20-6, 20.5 or 6.25m.")) : odd ? L('Check this number: it looks unusual for a garage ADU.') : help ?? L("Feet and inches, like 20' 6\"")}</span></div>;
 }
 /** Number field with whole-number and range handling that says what happened instead of silently changing the value. */
 function Num({ id, label, help, value, onChange, min = 0, max, integer }: { id: string; label: string; help?: string; value: number | null; onChange: (n: number | null) => void; min?: number; max?: number; integer?: boolean }) {
@@ -255,6 +258,7 @@ function LotStep({ p, update }: { p: Project; update: U; lang: Lang }) {
         <option value="unknown">{L("Not sure yet")}</option><option value="la-city">{L("City of Los Angeles")}</option><option value="la-county">{L("Unincorporated LA County")}</option><option value="other">{L("Another city")}</option></select>
         <span className="help">{L("A \"Los Angeles\" mailing address is not always LA City. Pasadena, Long Beach, Glendale, Burbank and Santa Monica are separate cities, and East LA, View Park and Altadena are unincorporated county. ZIMAS shows if the lot is in LA City.")}</span></div>
     </div>
+    {p.site.jurisdiction === 'la-city' && (() => { const c = addressCity(p.site.address); return c && c !== 'los angeles' && c !== 'la' ? <div className="mods"><label><input type="checkbox" checked={!!s.jurisdictionConfirmed} onChange={e => update(d => { d.site.jurisdictionConfirmed = e.target.checked; })} /> {L("I checked ZIMAS: this lot is in the City of Los Angeles")}</label></div> : null; })()}
     {other && p.site.jurisdiction === 'la-city' && <div className="banner warn" role="status">{L("The address names a place that is not in the City of Los Angeles:")} {other}. {L("Check the parcel in ZIMAS before you rely on these rules.")}</div>}
     <div className="grid2">
       <div className="field"><label htmlFor="mb">{L("What is the main building on the lot?")}</label><select id="mb" value={s.mainBuilding} onChange={e => update(d => { d.site.mainBuilding = e.target.value as Project['site']['mainBuilding']; })}>
@@ -263,14 +267,18 @@ function LotStep({ p, update }: { p: Project; update: U; lang: Lang }) {
       <Num id="exj" label={L("Junior ADUs already on the lot")} integer max={4} value={s.existingJadus} onChange={v => update(d => { d.site.existingJadus = v; })} help={L("A junior ADU is a unit inside the house, up to 500 sq ft. 0 if none.")} />
     </div>
     <div className="grid2">
-      <Len id="lw" range={RANGES.lot} label={L("Lot width (street side)")} mm={lb.maxX - lb.minX} onChange={v => setLot(v, null)} />
-      <Len id="ld" range={RANGES.lot} label={L("Lot depth")} mm={lb.maxY - lb.minY} onChange={v => setLot(null, v)} />
+      <Len always id="lw" range={RANGES.lot} label={L("Lot width (street side)")} mm={lb.maxX - lb.minX} onChange={v => setLot(v, null)} />
+      <Len always id="ld" range={RANGES.lot} label={L("Lot depth")} mm={lb.maxY - lb.minY} onChange={v => setLot(null, v)} />
       <Len id="err" allowZero range={RANGES.uncertainty} label={L("How sure are the lot lines?")} mm={p.site.lotUncertaintyMm} onChange={v => update(d => { d.site.lotUncertaintyMm = v ?? ft(2); })} help={L("County maps can be off by a couple of feet. A survey makes this 0.")} />
     </div>
     <div className="grid2">
-      <Len id="hw" range={RANGES.building} label={L("House width")} mm={hb.maxX - hb.minX} onChange={v => update(d => { d.confirmed.house = true; d.site.primary = rect(hb.minX, hb.minY, v ?? hb.maxX - hb.minX, hb.maxY - hb.minY); })} />
-      <Len id="hd" range={RANGES.building} label={L("House depth")} mm={hb.maxY - hb.minY} onChange={v => update(d => { d.confirmed.house = true; d.site.primary = rect(hb.minX, hb.minY, hb.maxX - hb.minX, v ?? hb.maxY - hb.minY); })} />
-      <Len id="hy" allowZero range={RANGES.setback} label={L("House distance from street line")} mm={hb.minY} onChange={v => update(d => { d.confirmed.house = true; d.site.primary = rect(hb.minX, v ?? hb.minY, hb.maxX - hb.minX, hb.maxY - hb.minY); })} />
+      <Len always id="hw" range={RANGES.building} label={L("House width")} mm={hb.maxX - hb.minX} onChange={v => update(d => { d.confirmed.house = true; d.site.primary = rect(hb.minX, hb.minY, v ?? hb.maxX - hb.minX, hb.maxY - hb.minY); })} />
+      <Len always id="hd" range={RANGES.building} label={L("House depth")} mm={hb.maxY - hb.minY} onChange={v => update(d => { d.confirmed.house = true; d.site.primary = rect(hb.minX, hb.minY, hb.maxX - hb.minX, v ?? hb.maxY - hb.minY); })} />
+      <Len always id="hy" allowZero range={RANGES.setback} label={L("House distance from street line")} mm={hb.minY} onChange={v => update(d => { d.confirmed.house = true; d.site.primary = rect(hb.minX, v ?? hb.minY, hb.maxX - hb.minX, hb.maxY - hb.minY); })} />
+    </div>
+    <div className="grid2">
+      <Q id="q-others" label={L("Other buildings on the lot (shed, second garage, workshop)?")} help={L("Not the main house. Each one sets a fire line halfway between it and the ADU.")} value={s.otherBuildings} onChange={v => update(d => { d.site.otherBuildings = v; })} />
+      {s.otherBuildings === 'yes' && <Len allowZero id="obg" range={RANGES.setback} label={L("Distance from the ADU to the closest other building")} mm={s.otherBuildingGapMm} onChange={v => update(d => { d.site.otherBuildingGapMm = v; })} />}
     </div>
     <h2>{L("What ZIMAS shows")}</h2>
     <div className="grid2">
@@ -307,13 +315,17 @@ function GarageStep({ p, update }: { p: Project; update: U }) {
         <button aria-pressed={a.garageAttachment === 'attached'} onClick={() => update(d => { d.adu.garageAttachment = 'attached'; })}>{L("Attached")}</button>
         <button aria-pressed={a.garageAttachment === 'unknown'} onClick={() => update(d => { d.adu.garageAttachment = 'unknown'; })}>{tr(LANG, 'unknown')}</button>
       </div><span className="help">{L("The city uses sheet II-C for detached garages and II-G for attached ones.")}</span></div>}
+    {a.mode === 'conversion' && <div className="field"><label id="cons">{L("What are the garage walls made of?")}</label>
+      <div className="tri" role="group" aria-labelledby="cons">
+        {(['wood', 'masonry', 'concrete', 'unknown'] as const).map(c => <button key={c} aria-pressed={a.garageConstruction === c} onClick={() => update(d => { d.adu.garageConstruction = c; })}>{c === 'unknown' ? tr(LANG, 'unknown') : (c === 'wood' ? L("Wood frame") : c === 'masonry' ? L("Brick or block") : L("Concrete"))}</button>)}
+      </div><span className="help">{L("Wood-frame is common. Brick, block (CMU) and concrete garages need a licensed architect or engineer.")}</span></div>}
     {a.mode === 'youadu' && <div><button className="btn" onClick={() => { const r = autoFit(p); setScanMsg(r.why); if (r.footprint) update(d => { d.adu.footprint = r.footprint!; }); }}>{L("Fit it on my lot")}</button> <span role="status" className="help">{scanMsg}</span></div>}
     {a.mode === 'youadu' && <p className="lead"><a href="https://dbs.lacity.gov/services/plan-review-permitting/standard-plan-program" target="_blank" rel="noreferrer">{L("See the LA Standard Plan list")}</a>. {L("Enter the footprint from the plan sheet below.")}</p>}
     <div className="grid2">
-      <Len id="gw" range={RANGES.building} label={L("Outside width")} mm={fb.maxX - fb.minX} onChange={v => resize(v, null)} />
-      <Len id="gd" range={RANGES.building} label={L("Outside depth")} mm={fb.maxY - fb.minY} onChange={v => resize(null, v)} />
-      <Len allowZero id="gx" label={L("Distance from the left side line")} help={L("Facing the lot from the street.")} mm={fb.minX - bbox(p.site.lot).minX} onChange={v => { if (v != null) update(d => { d.confirmed.adu = true; d.adu.footprint = translate(d.adu.footprint, v - (fb.minX - bbox(p.site.lot).minX), 0); }); }} />
-      <Len allowZero id="gy" label={L("Distance from the rear line")} mm={bbox(p.site.lot).maxY - fb.maxY} onChange={v => { if (v != null) update(d => { d.confirmed.adu = true; d.adu.footprint = translate(d.adu.footprint, 0, (bbox(p.site.lot).maxY - fb.maxY) - v); }); }} />
+      <Len always id="gw" range={RANGES.building} label={L("Outside width")} mm={fb.maxX - fb.minX} onChange={v => resize(v, null)} />
+      <Len always id="gd" range={RANGES.building} label={L("Outside depth")} mm={fb.maxY - fb.minY} onChange={v => resize(null, v)} />
+      <Len always allowZero id="gx" label={L("Distance from the left side line")} help={L("Facing the lot from the street.")} mm={fb.minX - bbox(p.site.lot).minX} onChange={v => { if (v != null) update(d => { d.confirmed.adu = true; d.adu.footprint = translate(d.adu.footprint, v - (fb.minX - bbox(p.site.lot).minX), 0); }); }} />
+      <Len always allowZero id="gy" label={L("Distance from the rear line")} mm={bbox(p.site.lot).maxY - fb.maxY} onChange={v => { if (v != null) update(d => { d.confirmed.adu = true; d.adu.footprint = translate(d.adu.footprint, 0, (bbox(p.site.lot).maxY - fb.maxY) - v); }); }} />
       <Len id="gh" range={RANGES.height} label={L("Overall height")} mm={a.heightMm} onChange={v => update(d => { d.adu.heightMm = v ?? d.adu.heightMm; })} />
       <Len id="gc" range={RANGES.ceiling} label={L("Finished ceiling height")} mm={a.ceilingHeightMm} onChange={v => update(d => { d.adu.ceilingHeightMm = v; })} help={L("After insulation and drywall. Garages often come out short.")} />
       <Len allowZero id="ge" range={[0, ft(4)]} label={L("Eave depth (roof overhang past the wall)")} mm={a.eaveDepthMm} onChange={v => update(d => { d.adu.eaveDepthMm = v; })} help={L("Enter 0 if the roof stops at the wall. Eaves near a property line are limited.")} />
@@ -333,6 +345,7 @@ function GarageStep({ p, update }: { p: Project; update: U }) {
       <Q id="q-open" label={L("Any windows, doors or vents in walls under 5 ft from the property line or the halfway line to the house?")} value={a.openingsNearLine} onChange={v => update(d => { d.adu.openingsNearLine = v; })} />
       <Q id="q-rated" label={L("Do you plan a 1-hour fire-rated wall where it is close to the line or the house?")} value={a.ratedWallPlanned} onChange={v => update(d => { d.adu.ratedWallPlanned = v; })} />
       {a.mode === 'youadu' && <Q id="q-pitch" label={L("Does the ADU roof pitch match the main house?")} value={a.roofPitchMatches} onChange={v => update(d => { d.adu.roofPitchMatches = v; })} />}
+ {a.eaveDepthMm != null && a.eaveDepthMm > 0 && <Q id="q-eave" label={L("Will the eave underside be 1-hour fire-rated where it is near the line?")} help={L("An eave 2 to 5 ft from the line needs a rated underside. This is separate from the wall.")} value={a.ratedEaveUndersidePlanned} onChange={v => update(d => { d.adu.ratedEaveUndersidePlanned = v; })} />}
       <Q id="q-aspk" label={L("Will the ADU have fire sprinklers?")} value={a.sprinklered} onChange={v => update(d => { d.adu.sprinklered = v; })} />
       <Q id="q-elec" label={L("All-electric (no gas)?")} value={a.allElectric} onChange={v => update(d => { d.adu.allElectric = v; })} />
       {a.allElectric !== 'yes' && <Q id="q-gasm" label={L("Will the ADU have its own gas meter?")} value={a.separateGasMeter} onChange={v => update(d => { d.adu.separateGasMeter = v; })} />}
@@ -373,9 +386,9 @@ function RoomsStep({ p, update }: { p: Project; update: U }) {
     {a.windows.map((w, i) => <fieldset key={w.id} className="grid2" style={{ border: '1px solid var(--rule)', padding: 12 }}>
       <legend>{L("Window")} {i + 1}</legend>
       <div className="field"><label htmlFor={`wr${i}`}>{L("Room")}</label><input id={`wr${i}`} value={w.room} onChange={e => setW(i, { room: e.target.value }, 'wr' + w.id)} aria-describedby={`wr${i}-h`} /><span className="help" id={`wr${i}-h`}>{L("Give each bedroom its own name, like Bedroom 1 and Bedroom 2.")}</span></div>
-      <Len id={`ww${i}`} range={RANGES.window} label={L("Clear width")} mm={w.clearWidthMm} onChange={v => setW(i, { clearWidthMm: v })} />
-      <Len id={`wh${i}`} range={RANGES.window} label={L("Clear height")} mm={w.clearHeightMm} onChange={v => setW(i, { clearHeightMm: v })} />
-      <Len allowZero id={`ws${i}`} range={RANGES.sill} label={L("Sill height above floor")} mm={w.sillMm} onChange={v => setW(i, { sillMm: v })} />
+      <Len bare="in" help={L("Inches if you type just a number, like 24.")} id={`ww${i}`} range={RANGES.window} label={L("Clear width (inches)")} mm={w.clearWidthMm} onChange={v => setW(i, { clearWidthMm: v })} />
+      <Len bare="in" help={L("Inches if you type just a number, like 24.")} id={`wh${i}`} range={RANGES.window} label={L("Clear height (inches)")} mm={w.clearHeightMm} onChange={v => setW(i, { clearHeightMm: v })} />
+      <Len bare="in" help={L("Inches if you type just a number, like 24.")} allowZero id={`ws${i}`} range={RANGES.sill} label={L("Sill height above floor (inches)")} mm={w.sillMm} onChange={v => setW(i, { sillMm: v })} />
       <div className="mods"><label><input type="checkbox" checked={w.sleeping} onChange={e => setW(i, { sleeping: e.target.checked })} /> {L("This is a bedroom escape window")}</label>
         <label><input type="checkbox" checked={w.gradeFloor} onChange={e => setW(i, { gradeFloor: e.target.checked })} /> {L("Ground-level floor")}</label>
         <button className="btn quiet" onClick={() => update(d => { d.adu.windows.splice(i, 1); })}>{L("Remove window")}</button></div>
@@ -422,7 +435,7 @@ function ExportStep({ p, update, report, lang }: { p: Project; update: U; report
       <button className="btn primary" disabled={!!busy} onClick={() => run('report', async () => { const { reportPDF } = await import('../out/pdf'); download(`${slug(p)}-check-report-${lang}.pdf`, await reportPDF(p, report, lang) as BlobPart, 'application/pdf'); })}>{L("Check report (PDF)")}</button>
       <button className="btn" disabled={!!busy} onClick={() => run('html', async () => { const { reportHTML } = await import('../out/reporthtml'); download(`${slug(p)}-check-report-${lang}.html`, reportHTML(p, report, lang), 'text/html'); })}>{L("Check report for screen readers (HTML)")}</button>
       <button className="btn" disabled={!!busy} onClick={() => run('draft', async () => { const { sheetsPDF } = await import('../out/pdf'); download(`${slug(p)}-draft-site-plan.pdf`, await sheetsPDF(p, 'draft') as BlobPart, 'application/pdf'); })}>{L("Draft site plan (PDF, 24x36)")}</button>
-      <button className="btn" disabled={!!busy || isDemo(p)} onClick={() => run('pre', async () => { const { sheetsPDF } = await import('../out/pdf'); download(`${slug(p)}-city-precheck.pdf`, await sheetsPDF(p, 'precheck') as BlobPart, 'application/pdf'); })}>{L("Copy for the city's AI pre-check")}</button>
+      <button className="btn" disabled={!!busy || isDemo(p)} onClick={() => run('pre', async () => { const { sheetsPDF } = await import('../out/pdf'); download(`${slug(p)}-city-precheck.pdf`, await sheetsPDF(p, 'precheck') as BlobPart, 'application/pdf'); })}>{L("Download for the city's AI pre-check (PDF)")}</button>
       <button className="btn" disabled={!!busy || blockers.length > 0} onClick={() => run('zip', async () => { const { handoffZip } = await import('../out/handoff'); download(`${slug(p)}-handoff-packet.zip`, await handoffZip(p, report) as BlobPart, 'application/zip'); })}>{L("Handoff packet for your preparer (ZIP)")}</button>
       <button className="btn" disabled={!!busy} onClick={() => run('dxf', async () => { const { toDXF } = await import('../out/dxf'); download(`${slug(p)}-site-plan.dxf`, await toDXF(p) as BlobPart, 'application/dxf'); })}>{L("Site plan for CAD (DXF)")}</button>
       <button className="btn" onClick={() => { download(`${slug(p)}-materials.csv`, '﻿' + takeoffCSV(t, es), 'text/csv'); setNote(L('Saved to your downloads.')); }}>{L("Materials list (CSV)")}</button>
@@ -464,6 +477,7 @@ function SheetItems({ p, update, report, lang }: { p: Project; update: U; report
     </div>
     {maybe.length > 0 && <><p className="lead">{L("May apply: ask your preparer. These depend on grading, shared driveways, lifts and other facts this app does not ask about.")}</p><div className="mods">{maybe.map(docBox)}</div></>}
     <h2>{L("Shown on your plans?")}</h2>
+    <details open={p.people.preparerRole !== 'owner'}><summary>{L("Plan-sheet items for your preparer")} ({asks.filter(i => !p.sheet[i.id]).length} {L("not answered")})</summary>
     {asks.map(i => <div className="field" key={i.id}><label id={'si-' + i.id}>{i.id} {i.summary[lang]}</label>
       <div className="tri" role="group" aria-labelledby={'si-' + i.id}>
         <button type="button" aria-pressed={p.sheet[i.id] === 'yes'} onClick={() => setA(i.id, 'yes')}>{tr(LANG, 'yes')}</button>
@@ -471,17 +485,18 @@ function SheetItems({ p, update, report, lang }: { p: Project; update: U; report
         <button type="button" aria-pressed={p.sheet[i.id] === 'na'} onClick={() => setA(i.id, 'na')}>{L("Doesn't apply")}</button>
         <button type="button" aria-pressed={!p.sheet[i.id]} onClick={() => setA(i.id, undefined)}>{tr(LANG, 'unknown')}</button>
       </div></div>)}
+    </details>
   </>;
 }
 
-function InspectionCard({ report, lang, score }: { report: Report; lang: Lang; score?: string }) {
+function InspectionCard({ report, lang, score, appDate = null, example }: { report: Report; lang: Lang; score?: string; appDate?: string | null; example?: boolean }) {
   const es = lang === 'es';
   const v = { READY_FOR_PREPARER: es ? 'Listo para su preparador' : 'Ready for your preparer', FIX_ISSUES: es ? 'Hay cosas que corregir' : 'Some things need fixing', INCOMPLETE: es ? 'Falta información' : 'Some answers are missing', NOT_SUPPORTED: es ? 'Dirección no soportada' : 'Address not supported yet' }[report.overall];
-  const c = report.counts; const fr = packFreshness();
+  const c = report.counts; const fr = rulesLine(appDate, report.pack, es);
   return <section className="card" aria-live="polite">
-    <h3>{es ? 'Tarjeta de revisión' : 'Check card'}</h3>
+    <h3>{example ? (es ? 'Resultado de ejemplo (lote de demostración, no es su proyecto)' : 'Example result (demo lot, not your project)') : es ? 'Tarjeta de revisión' : 'Check card'}</h3>
     <div className="verdict">{v}</div>
-    <div className="sub">{es ? 'Revisión por software, no de la ciudad' : 'Software check, not a city review'} · {es ? 'reglas al' : 'rules as of'} {report.vestDate} · {es ? fr.reasonEs : fr.reason}</div>
+    <div className="sub">{es ? 'Revisión por software, no de la ciudad' : 'Software check, not a city review'} · {fr.text}</div>
     {score && <div className="sub">{es ? 'Puntos de la hoja: ' : 'Sheet items: '}{score}</div>}
     <div className="sub" style={{ marginBottom: 4 }}>{es ? 'Revisiones de reglas' : 'Rule checks'}</div>
     <div className="punch"><div><b>{c.FAIL}</b>{es ? 'Corregir' : 'Fix'}</div><div><b>{c.UNKNOWN}</b>{es ? 'Falta info' : 'Need info'}</div><div><b>{c.PASS}</b>{es ? 'Cumple' : 'Pass'}</div><div><b>{c.NOT_CHECKED}</b>{es ? 'Apagado' : 'Off'}</div></div>
@@ -496,7 +511,7 @@ function ResultList({ results, lang }: { results: Result[]; lang: Lang }) {
       <div className="head"><span className="tag">{label[r.status]}</span><span className="title">{r.rule.title[lang]}</span></div>
       <p>{r.msg[lang]}</p>{r.next && <p className="next"><strong>{es ? 'Siguiente: ' : 'Next: '}</strong>{r.next[lang]}</p>}
       {r.dismissed && <p className="pending">{es ? 'Descartado' : 'Dismissed'}: {r.dismissed}</p>}
-      <p className="cite">{r.rule.id} · {r.rule.cites.map(c => (c.edition ? `[${c.edition}] ` : '') + (es ? citeEs(c.code) : c.code)).join('; ')}{RULE_ITEMS[r.rule.id]?.length ? ` · ${es ? 'hoja LADBS' : 'LADBS sheet'} ${RULE_ITEMS[r.rule.id].join(', ')}` : ''}{r.rule.cites.some(c => !c.verified) && <span className="pending"> · {es ? 'cita en verificación' : 'citation being verified'}</span>}</p>
+      <p className="cite">{r.rule.id} · {r.rule.cites.map(c => citeText(c, es)).join('; ')}{RULE_ITEMS[r.rule.id]?.length ? ` · ${es ? 'hoja LADBS' : 'LADBS sheet'} ${RULE_ITEMS[r.rule.id].join(', ')}` : ''}{r.rule.cites.some(c => !c.verified) && <span className="pending"> · {es ? 'cita en verificación' : 'citation being verified'}</span>}</p>
     </li>)}</ul>;
 }
 
@@ -508,7 +523,9 @@ function Projects({ lang, onPick, onNew }: { lang: Lang; onPick: (id: string) =>
   if (!items.length) return null;
   return <section aria-label={es ? 'Sus proyectos' : 'Your projects'} style={{ marginTop: 28 }}>
     <div style={{ display: 'flex', gap: 8, alignItems: 'center', flexWrap: 'wrap', margin: '0 0 8px' }}><h2 style={{ fontSize: '1.05rem', margin: 0, flex: 1 }}>{es ? 'Sus proyectos en este dispositivo' : 'Your projects on this device'}</h2>
-      <button className="btn" onClick={onNew}>{es ? '+ Proyecto nuevo' : '+ New project'}</button></div>
+      <button className="btn" onClick={onNew}>{es ? '+ Proyecto nuevo' : '+ New project'}</button>
+      <button className="btn quiet" onClick={() => { const ps = items.flatMap(e => { try { return [store.open(e.id)]; } catch { return []; } }); download(`all-projects-${new Date().toISOString().slice(0, 10)}.permitpack`, serializeAll(ps), 'application/json'); }}>{es ? 'Respaldar todos los proyectos' : 'Back up all projects'}</button></div>
+    <p className="help" style={{ margin: '0 0 8px' }}>{es ? 'Los proyectos viven solo en este dispositivo. Guarde un respaldo de todos a menudo; ábralo con "Abrir un archivo" para restaurarlos.' : 'Projects live only on this device. Back them all up often; open the file with "Open a saved pack" to restore them.'}</p>
     <ul className="results" style={{ padding: 0 }}>{items.map(e => <li key={e.id} className="res" style={{ display: 'flex', gap: 8, alignItems: 'center', flexWrap: 'wrap' }}>
       {renaming === e.id ? <form style={{ display: 'flex', gap: 6, flex: 1 }} onSubmit={ev => { ev.preventDefault(); try { const x = store.open(e.id); x.name = name.trim() || x.name; store.save(x); } catch { /* gone */ } setRenaming(null); setItems(store.list()); }}>
         <label className="sr" htmlFor={'rn-' + e.id}>{es ? 'Nombre' : 'Name'}</label><input id={'rn-' + e.id} autoFocus value={name} onChange={ev => setName(ev.target.value)} style={{ flex: 1, padding: 6 }} /><button className="btn">{es ? 'Guardar' : 'Save'}</button></form>

@@ -29,11 +29,24 @@ export const LA_ED = PACK.sheet.codes.split(' ')[0]; // "2023"
 
 export type Freshness = { stale: boolean; reason: string; reasonEs: string };
 /** Stale when the review date has passed, or a new Jan 1 (new state laws) has passed since verification. */
-export function packFreshness(today = new Date()): Freshness {
+/** Also stale when the application (vesting) date is past the review date or in a later year: a 2027 filing gets 2027 laws. */
+export function packFreshness(today = new Date(), vestDate?: string | null): Freshness {
   const d = new Date(today.getTime() - today.getTimezoneOffset() * 60000).toISOString().slice(0, 10);
-  const newYear = d.slice(0, 4) > PACK.verifiedOn.slice(0, 4);
+  const later = [d, ...(vestDate && /^\d{4}-\d{2}-\d{2}$/.test(vestDate) ? [vestDate] : [])].sort().pop()!;
+  const newYear = later.slice(0, 4) > PACK.verifiedOn.slice(0, 4);
+  if (later > d) { if (later >= PACK.reviewBy || newYear) return { stale: true,
+    reason: `Your application date (${later}) is after these rules were last checked (${PACK.verifiedOn}). New state laws start each January 1. Check for an app update before you rely on them.`,
+    reasonEs: `Su fecha de solicitud (${later}) es posterior a la última revisión de estas reglas (${PACK.verifiedOn}). Las leyes estatales nuevas empiezan cada 1 de enero. Busque una actualización antes de confiar en ellas.` }; }
   if (d >= PACK.reviewBy || newYear) return { stale: true,
     reason: `These rules were last checked on ${PACK.verifiedOn}. New state laws start each January 1. Check for an app update before you rely on them.`,
     reasonEs: `Estas reglas se revisaron por última vez el ${PACK.verifiedOn}. Las leyes estatales nuevas empiezan cada 1 de enero. Busque una actualización antes de confiar en ellas.` };
   return { stale: false, reason: `Rules checked on ${PACK.verifiedOn}.`, reasonEs: `Reglas revisadas el ${PACK.verifiedOn}.` };
+}
+
+/** The "which rules" line for the card, PDF and HTML. The vesting date shows only when the user set a filing date (it is not a freshness claim). */
+export function rulesLine(applicationDate: string | null, pack: string, es: boolean, today = new Date()): { text: string; stale: boolean } {
+  const fr = packFreshness(today, applicationDate);
+  const filed = applicationDate ? (es ? `Reglas para solicitudes presentadas el ${applicationDate} · ` : `Rules for applications filed ${applicationDate} · `) : '';
+  const base = es ? `paquete de reglas ${pack}, revisado por última vez el ${PACK.verifiedOn}` : `rule pack ${pack}, last checked ${PACK.verifiedOn}`;
+  return { text: filed + base + (fr.stale ? ` · ${es ? fr.reasonEs : fr.reason}` : ''), stale: fr.stale };
 }
