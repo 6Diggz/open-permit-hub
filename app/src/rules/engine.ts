@@ -68,6 +68,7 @@ export function exportBlockers(p: Project, rep: Report): string[] {
   if (p.site.jurisdiction !== 'la-city') b.push('Set the city to LA City. Only LA City is supported right now.');
   if (rep.overall === 'NOT_SUPPORTED') b.push('These rules do not cover this project or date.');
   if (rep.results.some(r => r.rule.id === 'GEO-01' && r.status !== 'PASS')) b.push('Fix the drawing first: the lot or ADU shape is not valid.');
+  if (rep.results.some(r => r.rule.id === 'INP-01' && r.status !== 'PASS')) b.push('Enter your real lot, house and garage sizes. The sheets still show example numbers.');
   if (p.adu.mode === 'conversion' && p.adu.removesGarageDoorWall === 'yes' && !['engineer', 'architect'].includes(p.people.preparerRole) && !p.people.engineerName.trim())
     b.push('Name the licensed engineer for the garage door wall. That part is not conventional framing.');
   return b;

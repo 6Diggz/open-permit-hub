@@ -72,10 +72,10 @@ export interface Project {
     hosePullFt: number | null; windows: Window[]; roofPitchMatches: Tri; bedrooms: number;
     smokeCoPlanned: Tri; allElectric: Tri;
     /** Garage path (sheet II-C detached, II-G attached). */
-    garageAttachment: 'detached' | 'attached' | 'unknown'; staysInsideWalls: Tri; addedForIngressOnly: Tri;
+    garageAttachment: 'detached' | 'attached' | 'unknown'; staysInsideWalls: Tri; addedForIngressOnly: Tri; /** A new story is being built on top of the garage (not existing space). */ newUpperFloor: Tri;
     /** AB 2533 legalization of a pre-2020 unpermitted unit (Gov. Code §66332). */
     legalization: boolean;
-    slabVaporBarrier: Tri; openingsNearLine: Tri; smokeHardwired: Tri;
+    slabVaporBarrier: Tri; openingsNearLine: Tri; /** Windows, doors, vents or eaves on the house wall that faces the ADU. */ houseFacingOpenings: Tri; smokeHardwired: Tri;
     panelAmps: number | null; separateGasMeter: Tri;
     /** Setbacks as written on the floor plan sheet, to compare with the site plan. */
     floorPlanSideSetbackMm: number | null; floorPlanRearSetbackMm: number | null;
@@ -136,8 +136,8 @@ export function blankProject(): Project {
       ceilingHeightMm: null, existingStructurePermitted: 'unknown', builtBefore2020: 'unknown', usedAsHomeBefore2020: 'unknown', mainRoomSleeping: 'unknown', eaveDepthMm: null, addedSetbackMm: null, addedAreaSqFt: 0,
       removesGarageDoorWall: 'unknown', ratedWallPlanned: 'unknown', sprinklered: 'unknown', hosePullFt: null,
       roofPitchMatches: 'unknown', windows: [], bedrooms: 1, smokeCoPlanned: 'unknown', allElectric: 'unknown',
-      garageAttachment: 'unknown', staysInsideWalls: 'unknown', addedForIngressOnly: 'unknown', legalization: false,
-      slabVaporBarrier: 'unknown', openingsNearLine: 'unknown', smokeHardwired: 'unknown', panelAmps: null, separateGasMeter: 'unknown',
+      garageAttachment: 'unknown', staysInsideWalls: 'unknown', addedForIngressOnly: 'unknown', newUpperFloor: 'unknown', legalization: false,
+      slabVaporBarrier: 'unknown', openingsNearLine: 'unknown', houseFacingOpenings: 'unknown', smokeHardwired: 'unknown', panelAmps: null, separateGasMeter: 'unknown',
       floorPlanSideSetbackMm: null, floorPlanRearSetbackMm: null, garageConstruction: 'unknown', ratedEaveUndersidePlanned: 'unknown', rooms: [],
     },
     markup: { pins: [], responses: [] },

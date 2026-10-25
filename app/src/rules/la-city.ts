@@ -35,6 +35,8 @@ const winOk = (x: { clearWidthMm: number | null; clearHeightMm: number | null; s
  * Fire separation lines for the ADU (LADBS sheet III-D.1: "less than 5' from property line or assumed property line").
  * Measured to every lot line, to the assumed line halfway to every other building on the lot, and to the added entry area.
  */
+/** Half the drawn gap to the main house (Infinity for an attached garage converted inside the house). */
+export const houseHalfGap = (p: Project) => (attachedShared(p) ? Infinity : gap(p.adu.footprint, p.site.primary) / 2);
 export function fireSeparation(p: Project): { dist: number; line: L } {
   const fp = p.adu.footprint, lot = p.site.lot; let best = { dist: Infinity, line: t('the property line', 'del lindero') };
   lot.forEach((_, i) => { const d = clearanceToEdge(fp, lot, i); if (d < best.dist) best = { dist: d, line: t('the property line', 'del lindero') }; });
@@ -145,6 +147,8 @@ export const RULES: Rule[] = [
     cites: [{ code: 'Gov. Code §66323(a)(1)(A) (150 sq ft expansion for ingress and egress); LADBS sheet II-C.3, II-C.4', url: GOV + '66323.', verified: true }],
     check: p => {
       const add = p.adu.addedAreaSqFt;
+      if (yes(p.adu.newUpperFloor)) return { status: 'FAIL', unsupported: true, msg: t('A new story on top of the garage is new floor area, not existing space. The garage conversion path allows only existing space plus 150 sq ft for entry.', 'Un piso nuevo sobre el garaje es área nueva, no espacio existente. La conversión de garaje solo permite el espacio existente más 150 pies² para la entrada.'), next: t('Treat it as a new ADU (sheet II-A or II-D). This app does not check that path yet.', 'Trátelo como un ADU nuevo (hoja II-A o II-D). Esta app aún no revisa ese camino.') };
+      if (mayHaveUpperFloor(p) && p.adu.newUpperFloor === 'unknown') return unk(`The ADU is ${Math.round(p.adu.interiorLivableSqFt ?? 0)} sq ft or ${fmtFtIn(p.adu.heightMm ?? 0)} tall, more than one story of this garage. We don't know if the upper floor already exists.`, `El ADU tiene ${Math.round(p.adu.interiorLivableSqFt ?? 0)} pies² o ${fmtFtIn(p.adu.heightMm ?? 0)} de alto, más de un piso de este garaje. No sabemos si el piso de arriba ya existe.`, 'Answer "Is a new story being built on top of the garage?".', 'Responda "¿Se construye un piso nuevo sobre el garaje?".');
       if (add <= 0) return pass('No new floor area is added.', 'No se agrega área nueva.');
       if (add > 150) return fail(`Adds ${add} sq ft. Over 150 sq ft moves this off the simple conversion path.`, `Agrega ${add} pies². Más de 150 pies² cambia el camino.`, 'Treat it as a new ADU. Regular ADU rules (Gov. Code §66314) apply.', 'Trátelo como un ADU nuevo. Aplican las reglas normales (Código de Gobierno §66314).');
       if (p.adu.garageAttachment === 'attached') return unk(`Adds ${add} sq ft to an attached garage. The 150 sq ft allowance is written for detached accessory structures.`, `Agrega ${add} pies² a un garaje adjunto. La extensión de 150 pies² es para estructuras separadas.`, 'Sheet II-G allows only existing space. Ask your preparer if the addition goes under the Ordinance ADU path (II-F).', 'La hoja II-G solo permite espacio existente. Pregunte a su preparador si va por el camino II-F.');
@@ -208,14 +212,14 @@ export const RULES: Rule[] = [
   { id: 'CEI-01', version: '1', module: 'egress', severity: 'major', kind: 'city', hs: true, effectiveFrom: EFF, applies: all,
     title: t('Ceiling height in living areas', 'Altura del techo en áreas habitables'), cites: [{ code: 'LARC R305.1 (7\'-0" minimum; LADBS sheet III-G.1)', url: SHEET_URL, verified: true, edition: LAED }],
     check: p => {
-      // Drawn rooms: every room is checked with its own ceiling (or the garage's). Bathrooms may be 6' 8" (R305.1 exception).
+      // Drawn rooms: every room is checked with its own ceiling (or the garage's). LADBS sheet III-G.1 sets 7' 0" in every room, baths included.
       if (p.adu.rooms?.length) {
         const low: string[] = [], none: string[] = [];
-        p.adu.rooms.forEach((r, i) => { const c = roomCeiling(p, r); const nm = safeName(r.name) || `room ${i + 1}`; const need = r.use === 'bath' ? inch(80) : inch(84);
+        p.adu.rooms.forEach((r, i) => { const c = roomCeiling(p, r); const nm = safeName(r.name) || `room ${i + 1}`; const need = inch(84);
           if (!fin(c)) none.push(nm); else if (c < need) low.push(`${nm} ${fmtFtIn(c)} (need ${fmtFtIn(need)})`); });
         if (low.length) return fail(`Ceiling too low in ${low.join('; ')}.`, `Techo demasiado bajo en ${low.join('; ')}.`, 'Garages often fail here once insulation and drywall go in. Plan for the finished height.', 'Los garajes suelen fallar aquí después del aislamiento y el panel de yeso. Planifique la altura terminada.');
         if (none.length) return unk(`Ceiling height not entered for ${none.join(', ')}.`, `Falta la altura del techo en ${none.join(', ')}.`, 'Measure floor to ceiling in each room, or enter the garage ceiling height.', 'Mida del piso al techo en cada cuarto, o ingrese la altura del techo del garaje.');
-        return pass('Every room meets the ceiling height (7\' 0", bathrooms 6\' 8").', 'Cada cuarto cumple la altura del techo (7\' 0", baños 6\' 8").');
+        return pass('Every room meets the 7\' 0" ceiling height, bathrooms included.', 'Cada cuarto cumple la altura de techo de 7\' 0", baños incluidos.');
       }
       return !fin(p.adu.ceilingHeightMm) ? unk('Ceiling height not entered.', 'Altura del techo no ingresada.', 'Measure floor to ceiling in the main room.', 'Mida del piso al techo en el cuarto principal.')
       : p.adu.ceilingHeightMm >= inch(84) ? pass(`Ceiling ${fmtFtIn(p.adu.ceilingHeightMm)} (need 7' 0").`, `Techo de ${fmtFtIn(p.adu.ceilingHeightMm)} (se necesitan 7' 0").`)
@@ -297,6 +301,14 @@ export const RULES: Rule[] = [
         return pass(`Closest wall is ${fmtFtIn(worst)} from ${line.en}. No rated wall needed.${eaveNeedsRating ? ' A 1-hour eave underside is planned.' : ''}`, `El muro más cercano está a ${fmtFtIn(worst)} ${line.es}. No se necesita muro resistente.${eaveNeedsRating ? ' Se planea un alero con parte inferior de 1 hora.' : ''}`);
       }
       if (yes(p.adu.ratedWallPlanned)) {
+        // The assumed line also sits in front of the EXISTING house wall (LABC 705.3): that wall and its openings must work too.
+        const hg = houseHalfGap(p);
+        if (hg < lim) {
+          const ho = p.adu.houseFacingOpenings;
+          if (ho === 'unknown') return unk(`The house wall is ${fmtFtIn(hg)} from the assumed line halfway to the ADU. That wall must also meet the rules for walls under 5 ft from a line.`, `El muro de la casa está a ${fmtFtIn(hg)} de la línea supuesta a medio camino del ADU. Ese muro también debe cumplir las reglas para muros a menos de 5 pies de un lindero.`, 'Answer "Does the house wall facing the ADU have windows, doors, vents or eaves?" on the Garage step.', 'Responda "¿El muro de la casa que da al ADU tiene ventanas, puertas, ventilas o aleros?" en el paso Garaje.');
+          if (yes(ho) && hg < ft(3)) return fail(`The house wall facing the ADU has openings ${fmtFtIn(hg)} from the assumed line. Openings are not allowed under 3 ft from it.`, `El muro de la casa que da al ADU tiene aberturas a ${fmtFtIn(hg)} de la línea supuesta. No se permiten aberturas a menos de 3 pies.`, 'Close those openings with rated construction, or move the ADU farther from the house.', 'Cierre esas aberturas con construcción resistente, o aleje el ADU de la casa.');
+          if (yes(ho)) return unk(`The house wall facing the ADU has openings ${fmtFtIn(hg)} from the assumed line. Their size is limited between 3 and 5 ft.`, `El muro de la casa que da al ADU tiene aberturas a ${fmtFtIn(hg)} de la línea supuesta. Su tamaño está limitado entre 3 y 5 pies.`, 'Your preparer checks the house openings against LARC Table R302.1(1) and shows them on the plans.', 'Su preparador revisa las aberturas de la casa con la Tabla R302.1(1) del LARC y las muestra en los planos.');
+        }
         if (!eaveOk) return eaveAsk(t(`Closest wall is ${fmtFtIn(worst)} from ${line.en}. A 1-hour wall is planned.`, `El muro más cercano está a ${fmtFtIn(worst)} ${line.es}. Se planea un muro de 1 hora.`));
         return pass(`Closest wall is ${fmtFtIn(worst)} from ${line.en}. A 1-hour wall is planned.${eaveNeedsRating ? ' A 1-hour eave underside is planned.' : ''}`, `El muro más cercano está a ${fmtFtIn(worst)} ${line.es}. Se planea un muro de 1 hora.${eaveNeedsRating ? ' Se planea un alero con parte inferior de 1 hora.' : ''}`);
       }
@@ -487,3 +499,5 @@ export function feeEstimate(p: Project): { school: L; impact: L; outcome: Outcom
 }
 
 export const ruleArea = (p: Project) => toSqFt(area(p.adu.footprint));
+/** Livable area beyond the ground floor plus additions, or a height above a one-story garage: a second floor may be involved. */
+export const mayHaveUpperFloor = (p: Project) => conv(p) && ((isNum(p.adu.interiorLivableSqFt) && p.adu.interiorLivableSqFt > ruleArea(p) + Math.max(0, p.adu.addedAreaSqFt || 0) + 10) || (isNum(p.adu.heightMm) && p.adu.heightMm > ft(17)));

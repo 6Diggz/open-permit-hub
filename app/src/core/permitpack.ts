@@ -8,6 +8,8 @@ export const MAX_PINS = 500, MAX_RESPONSES = 500;
 
 /** Packs larger than this are refused before parsing (a real project is a few KB). */
 export const MAX_PACK_BYTES = 5 * 1024 * 1024;
+/** A backup-all file holds up to 500 projects; each one inside is still held to MAX_PACK_BYTES. */
+export const MAX_BUNDLE_BYTES = 64 * 1024 * 1024;
 /** More windows than this is not a garage ADU; extra ones are dropped on open. */
 export const MAX_WINDOWS = 50;
 
@@ -73,6 +75,8 @@ export function migrate(raw: any): Project {
   if (!['la-city', 'la-county', 'other', 'unknown'].includes(s.jurisdiction)) s.jurisdiction = 'unknown';
   a.garageConstruction = (['wood', 'masonry', 'concrete', 'unknown'] as const).includes(a.garageConstruction) ? a.garageConstruction : 'unknown';
   a.ratedEaveUndersidePlanned = tri(a.ratedEaveUndersidePlanned);
+  a.newUpperFloor = tri(a.newUpperFloor);
+  a.houseFacingOpenings = tri(a.houseFacingOpenings);
   // People and dates: every field typed and capped (a non-string name crashed the PDF export).
   const pe = out.people;
   pe.ownerName = str(pe.ownerName, 120); pe.preparerName = str(pe.preparerName, 120); pe.engineerName = str(pe.engineerName, 120); pe.preparerLicense = str(pe.preparerLicense, 40);
@@ -150,8 +154,8 @@ export async function encryptPack(p: Project, pass: string): Promise<string> {
 }
 
 /** Parse pack text with plain-language errors (never raw parser messages). */
-export function parsePackText(text: string): any {
-  if (text.length > MAX_PACK_BYTES) throw new Error('This file is too large to be a permit pack.');
+export function parsePackText(text: string, max = MAX_PACK_BYTES): any {
+  if (text.length > max) throw new Error('This file is too large to be a permit pack.');
   try { return JSON.parse(text); } catch { throw new Error('This file is damaged or is not a permit pack.'); }
 }
 export const isEncrypted = (j: any) => !!j && typeof j === 'object' && j.format === 'permitpack-encrypted';
@@ -193,13 +197,14 @@ export async function readPackFile(text: string, askPass: () => Promise<string |
 
 /** One file holding every project on this device ("Back up all projects"). Each project inside is checked by migrate on open. */
 export const BUNDLE = 'permitpack-bundle';
-export const serializeAll = (ps: Project[]) => JSON.stringify({ format: BUNDLE, v: 1, savedAt: new Date().toISOString(), projects: ps.map(p => JSON.parse(serialize(p))) }, null, 1);
+export const serializeAll = (ps: Project[]) => JSON.stringify({ format: BUNDLE, v: 1, savedAt: new Date().toISOString(), projects: ps.map(p => JSON.parse(serialize(p))) });
 /** Returns the projects in a backup-all file, or null when the text is not one. Damaged entries are skipped and counted. */
 export function readBundle(text: string): { projects: Project[]; skipped: number } | null {
-  const j = parsePackText(text);
-  if (!j || typeof j !== 'object' || j.format !== BUNDLE) return null;
+  const j = parsePackText(text, MAX_BUNDLE_BYTES);
+  if (!j || typeof j !== 'object' || j.format !== BUNDLE) { if (text.length > MAX_PACK_BYTES) throw new Error('This file is too large to be a permit pack.'); return null; }
+  if (typeof j.v === 'number' && j.v > 1) throw new Error('This backup was made by a newer version of the app. Update the app (reload the page) and try again.');
   if (!Array.isArray(j.projects)) throw new Error('This backup file is damaged.');
   const projects: Project[] = []; let skipped = 0;
-  for (const x of j.projects.slice(0, 500)) { try { projects.push(migrate(x)); } catch { skipped++; } }
+  for (const x of j.projects.slice(0, 500)) { try { if (JSON.stringify(x).length > MAX_PACK_BYTES) throw new Error('too large'); projects.push(migrate(x)); } catch { skipped++; } }
   return { projects, skipped };
 }

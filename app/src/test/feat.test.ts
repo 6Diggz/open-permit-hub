@@ -122,12 +122,12 @@ describe('room drawing feeds the rules', () => {
     const p = base(); const m = room(p, 'Main', 'living', inch(4), inch(4), ft(19), ft(12)), b = room(p, 'Bath', 'bath', inch(4), ft(12.5), ft(8), ft(7));
     m.openings.push(door(0)); p.adu.rooms = [m, b];
     expect(withRooms(p).adu.bedrooms).toBe(0); expect(st(p, 'EGR-01')).toBe('UNKNOWN');
-    m.openings.push(win(2)); expect(st(p, 'EGR-01')).toBe('PASS');
+    m.openings.push(win(3)) /* left wall: outside (the back wall faces the garage interior) */; expect(st(p, 'EGR-01')).toBe('PASS');
     p.adu.mainRoomSleeping = 'no'; expect(st(p, 'EGR-01')).toBe('PASS'); m.openings = m.openings.filter(o => o.kind === 'door'); expect(st(p, 'EGR-01')).toBe('UNKNOWN');
   });
-  it('ceiling is checked per room; bathrooms may be 6\' 8"', () => {
+  it('ceiling is checked per room; bathrooms need 7\' 0" too (LADBS III-G.1)', () => {
     const p = base(); const m = room(p, 'Main', 'living', inch(4), inch(4), ft(12), ft(12)), b = room(p, 'Bath', 'bath', ft(13), inch(4), ft(6), ft(8));
-    p.adu.rooms = [m, b]; p.adu.ceilingHeightMm = inch(85); b.ceilingMm = inch(81); expect(st(p, 'CEI-01')).toBe('PASS');
+    p.adu.rooms = [m, b]; p.adu.ceilingHeightMm = inch(85); b.ceilingMm = inch(81); expect(st(p, 'CEI-01')).toBe('FAIL'); b.ceilingMm = inch(84); expect(st(p, 'CEI-01')).toBe('PASS');
     m.ceilingMm = inch(83); expect(st(p, 'CEI-01')).toBe('FAIL');
     m.ceilingMm = null; p.adu.ceilingHeightMm = null; expect(st(p, 'CEI-01')).toBe('UNKNOWN');
   });

@@ -123,7 +123,9 @@ describe('COR-01 fire separation counts the house (assumed property line)', () =
     expect(st(p, 'FIR-01')!.status).toBe('FAIL'); expect(st(p, 'FIR-01')!.msg.en).toContain('assumed line');
     p.adu.openingsNearLine = 'yes'; expect(st(p, 'FIR-02')!.status).toBe('FAIL');
     expect(ready(p)).toBe('FIX_ISSUES');
-    p.adu.ratedWallPlanned = 'yes'; p.adu.openingsNearLine = 'no'; expect(st(p, 'FIR-01')!.status).toBe('PASS'); expect(st(p, 'FIR-02')!.status).toBe('PASS');
+    p.adu.ratedWallPlanned = 'yes'; p.adu.openingsNearLine = 'no'; expect(st(p, 'FIR-01')!.status).toBe('UNKNOWN'); // house wall 1 ft from the line (r3cases-03)
+    p.adu.houseFacingOpenings = 'yes'; expect(st(p, 'FIR-01')!.status).toBe('FAIL');
+    p.adu.houseFacingOpenings = 'no'; expect(st(p, 'FIR-01')!.status).toBe('PASS'); expect(st(p, 'FIR-02')!.status).toBe('PASS');
   });
   it('COR-01 an attached garage converted inside the house is not measured to the house', () => {
     const p = good(); p.adu.garageAttachment = 'attached'; p.site.primary = rect(ft(20), ft(73), ft(20), ft(27));

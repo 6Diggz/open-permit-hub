@@ -3,7 +3,7 @@ import { blankProject, demoProject, isDemo, MODULES, SAFETY_MODULES, uid, type P
 import { History } from '../core/undo';
 import { nextPinNumber } from '../core/markup';
 import { canDismiss, evaluate, exportBlockers, type Report, type Result } from '../rules/engine';
-import { RULES, PACK_ID, addressCity } from '../rules/la-city';
+import { RULES, PACK_ID, addressCity, mayHaveUpperFloor, houseHalfGap } from '../rules/la-city';
 import { PACK, packFreshness, rulesLine } from '../rules/pack';
 import { bbox, rect, translate } from '../core/geom';
 import { fmtFtIn, fmtSqFt, ft, toFt, RANGES } from '../core/units';
@@ -23,7 +23,7 @@ import { CATALOG, RULE_ITEMS } from '../rules/ladbs-adu-2025';
 import { citeText } from '../rules/cites-es';
 import { tr, type Lang } from './i18n';
 import { L, setUiLang, uiLang } from './lang';
-import { encryptPack, passphraseProblem, readPackFile, serialize, serializeAll, readBundle, MAX_PACK_BYTES } from '../core/permitpack';
+import { encryptPack, passphraseProblem, readPackFile, serialize, serializeAll, readBundle, MAX_BUNDLE_BYTES } from '../core/permitpack';
 import { takeoff, takeoffCSV } from '../out/takeoff';
 import { plainWasmError } from '../out/wasm';
 import { missingGlyphNote } from '../out/glyphs';
@@ -183,7 +183,7 @@ function Welcome({ lang, setLang, onStart, onOpen, onClean, onPick }: { onPick: 
   const openFile = async (f: File) => {
     setErr('');
     try {
-      if (f.size > MAX_PACK_BYTES) throw new Error(es ? 'Este archivo es demasiado grande para ser un paquete.' : 'This file is too large to be a permit pack.');
+      if (f.size > MAX_BUNDLE_BYTES) throw new Error(es ? 'Este archivo es demasiado grande para ser un paquete.' : 'This file is too large to be a permit pack.');
       const text = await f.text(); const bundle = readBundle(text);
       if (bundle) { let n = 0; for (const x of bundle.projects) { if (store.has(x.id)) { x.id = uid(); x.name = `${x.name} ${es ? '(copia abierta)' : '(opened copy)'}`; } if (store.save(x, { force: true }) === 'ok') n++; }
         setErr(es ? `Se restauraron ${n} proyectos.${bundle.skipped ? ` ${bundle.skipped} estaban dañados.` : ''}` : `Restored ${n} projects.${bundle.skipped ? ` ${bundle.skipped} were damaged.` : ''}`); setTick(t => t + 1); return; }
@@ -324,9 +324,11 @@ function GarageStep({ p, update }: { p: Project; update: U }) {
       {a.mode === 'conversion' && <Q id="q-2020" label={L("Was it built before 2020?")} value={a.builtBefore2020} onChange={v => update(d => { d.adu.builtBefore2020 = v; })} />}
       {a.mode === 'conversion' && a.existingStructurePermitted !== 'yes' && <Q id="q-home" label={L("Was it already used as a separate home before January 1, 2020?")} help={L("Only a unit people already lived in counts for AB 2533. A garage converted now does not.")} value={a.usedAsHomeBefore2020} onChange={v => update(d => { d.adu.usedAsHomeBefore2020 = v; })} />}
       {a.mode === 'conversion' && <Q id="q-door" label={L("Will you fill in or change the garage door opening?")} value={a.removesGarageDoorWall} onChange={v => update(d => { d.adu.removesGarageDoorWall = v; })} />}
+      {mayHaveUpperFloor(p) && <Q id="q-upper" label={L("Is a new story being built on top of the garage?")} value={a.newUpperFloor} onChange={v => update(d => { d.adu.newUpperFloor = v; })} />}
       {a.mode === 'conversion' && <Q id="q-inside" label={L("Does the ADU stay inside the existing walls?")} value={a.staysInsideWalls} onChange={v => update(d => { d.adu.staysInsideWalls = v; })} />}
       {a.mode === 'conversion' && a.addedAreaSqFt > 0 && <Q id="q-ingress" label={L("Is the added area only for the entry?")} value={a.addedForIngressOnly} onChange={v => update(d => { d.adu.addedForIngressOnly = v; })} />}
       <Q id="q-slab" label={L("Does the slab have a vapor barrier, or will you add an approved epoxy coating?")} value={a.slabVaporBarrier} onChange={v => update(d => { d.adu.slabVaporBarrier = v; })} />
+      {houseHalfGap(p) < ft(5) && <Q id="q-house-open" label={L("Does the house wall facing the ADU have windows, doors, vents or eaves?")} value={a.houseFacingOpenings} onChange={v => update(d => { d.adu.houseFacingOpenings = v; })} />}
       <Q id="q-open" label={L("Any windows, doors or vents in walls under 5 ft from the property line or the halfway line to the house?")} value={a.openingsNearLine} onChange={v => update(d => { d.adu.openingsNearLine = v; })} />
       <Q id="q-rated" label={L("Do you plan a 1-hour fire-rated wall where it is close to the line or the house?")} value={a.ratedWallPlanned} onChange={v => update(d => { d.adu.ratedWallPlanned = v; })} />
       {a.mode === 'youadu' && <Q id="q-pitch" label={L("Does the ADU roof pitch match the main house?")} value={a.roofPitchMatches} onChange={v => update(d => { d.adu.roofPitchMatches = v; })} />}

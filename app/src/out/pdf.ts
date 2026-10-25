@@ -79,6 +79,7 @@ async function sitePlanSheet(doc: PDFDocument, p: Project, kind: Kind) {
   ty = 150; for (const l of wrap(note, f, 9, tbW - 28)) { pg.drawText(l, { x: tbX + 14, y: ty, size: 9, font: f, color: INK }); ty -= 12; }
   if (kind === 'draft') pg.drawText('DRAFT - NOT FOR SUBMITTAL', { x: W * 0.2, y: H * 0.25, size: 96, font: fb, color: rgb(0.85, 0.2, 0.15), opacity: 0.13, rotate: degrees(28) });
   if (kind === 'precheck') pg.drawText('Pre-check copy - not a submittal', { x: 44, y: H - 50, size: 10, font: fb, color: RED });
+  exampleBanner(pg, p, fb, H);
   return pg;
 }
 
@@ -135,6 +136,7 @@ async function floorPlanSheet(doc: PDFDocument, p: Project, kind: Kind) {
   const rows: [string, string][] = [['Bedrooms', q.adu.bedrooms === 0 ? 'Studio (main room counts as a sleeping room unless stated)' : String(q.adu.bedrooms)], ['Smoke and CO alarms on plan', tri(p.adu.smokeCoPlanned)], ['Smoke alarms hardwired with battery backup', tri(p.adu.smokeHardwired)], ['Sprinklers', tri(p.adu.sprinklered)], ['All-electric', tri(p.adu.allElectric)], ['Slab vapor barrier or epoxy coating', tri(p.adu.slabVaporBarrier)]];
   for (const [a, b] of rows) { pg.drawText(a, { x: x0, y, size: 10, font: f, color: MUTE }); pg.drawText(b, { x: x0 + 250, y, size: 10, font: fb, color: INK }); y -= 15; }
   pg.drawText(safe(`A-2 Floor plan data   ${p.site.address || p.name}   ${PACK_ID}`), { x: 60, y: 54, size: 10, font: f, color: INK });
+  exampleBanner(pg, p, fb, H);
   if (kind === 'draft') pg.drawText('DRAFT - NOT FOR SUBMITTAL', { x: W * 0.2, y: H * 0.25, size: 96, font: fb, color: rgb(0.85, 0.2, 0.15), opacity: 0.13, rotate: degrees(28) });
 }
 
@@ -173,6 +175,11 @@ async function markupSheet(doc: PDFDocument, p: Project) {
   }
 }
 
+/** Sizes the user never entered are the app's example numbers: say so on the sheet, in red, so nobody reads them as measured. */
+function exampleBanner(pg: PDFPage, p: Project, fb: PDFFont, H: number) {
+  const miss = [!p.confirmed?.lot && 'LOT SIZE', !p.confirmed?.house && 'HOUSE SIZE AND POSITION', !p.confirmed?.adu && 'GARAGE SIZE AND POSITION'].filter(Boolean);
+  if (miss.length) pg.drawText(safe(`EXAMPLE SIZES - NOT MEASURED: ${miss.join(', ')}`), { x: 44, y: H - 66, size: 12, font: fb, color: RED });
+}
 export async function sheetsPDF(p: Project, kind: Kind) { const d = await PDFDocument.create(); d.setTitle(`${p.name} - site plan`); setLang(d, p.people.language === 'es' ? 'es-US' : 'en-US'); await sitePlanSheet(d, p, kind); await floorPlanSheet(d, p, kind); if (p.markup.pins.length || p.markup.responses.length) await markupSheet(d, p); return d.save(); }
 
 const STAT: Record<string, [string, string, ReturnType<typeof rgb>]> = {

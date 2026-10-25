@@ -3,7 +3,7 @@ import { area, bbox, inside, overlaps, rect, segmentsCross, translate, type Poly
 import { ft, inch, isNum } from './units';
 
 export const MAX_ROOMS = 40, MAX_OPENINGS = 30, MAX_ROOM_PTS = 64;
-/** Habitable rooms (ceiling 7' 0"); bathrooms may be 6' 8" (R305.1 exception). */
+/** Habitable rooms. Every room, baths included, needs a 7' 0" ceiling (LADBS sheet III-G.1). */
 export const HABITABLE: RoomUse[] = ['sleeping', 'living', 'kitchen'];
 
 /** Footprint outline relative to its own lower-left corner (the frame rooms are stored in). */
@@ -68,17 +68,30 @@ export function addCorner(r: Room): Room {
 }
 
 /** Escape-window facts from drawn rooms. A studio (no sleeping room) counts as one main room (LADBS III-F.1, R310.1). */
+/** True when the window's stretch of wall lies on the garage's outside wall (rooms sit a wall thickness inside the outline, so within 8 in). */
+function onOutside(poly: Poly, o: Opening, foot: Poly, tol = inch(8)): boolean {
+  const a = poly[o.wall], b = poly[(o.wall + 1) % poly.length]; if (!a || !b || foot.length < 3) return false;
+  const L = Math.hypot(b.x - a.x, b.y - a.y) || 1; const at = (d: number): Pt => ({ x: a.x + (b.x - a.x) * d / L, y: a.y + (b.y - a.y) * d / L });
+  const pts = [at(o.offsetMm), at(o.offsetMm + o.widthMm / 2), at(o.offsetMm + o.widthMm)];
+  return foot.some((f, i) => { const g = foot[(i + 1) % foot.length]; const dx = g.x - f.x, dy = g.y - f.y, M = dx * dx + dy * dy;
+    return pts.every(q => { let t = M ? ((q.x - f.x) * dx + (q.y - f.y) * dy) / M : 0; t = Math.max(0, Math.min(1, t)); return Math.hypot(q.x - f.x - t * dx, q.y - f.y - t * dy) <= tol; }); });
+}
 export function roomWindows(p: Project): { bedrooms: number; windows: Window[] } {
   const rooms = p.adu.rooms; const sleeping = rooms.filter(r => r.use === 'sleeping');
   const studio = sleeping.length === 0;
   const windows: Window[] = []; const seen = new Map<string, number>();
   const label = (r: Room, ri: number) => { const base = r.name.trim() || `Room ${ri + 1}`; const k = base.toLowerCase(); const n = (seen.get(k) ?? 0) + 1; seen.set(k, n); return n > 1 ? `${base} (${n})` : base; };
   const labels = rooms.map(label);
-  rooms.forEach((r, ri) => r.openings.filter(o => o.kind === 'window').forEach(o => {
+  const foot = footLocal(p);
+  rooms.forEach((r, ri) => { const bad = new Set(openingProblems(r)); const tp = applyTape(r).poly; r.openings.filter(o => o.kind === 'window').forEach(o => {
+    // A window on a wall shared with another room opens indoors: it is not an escape window.
+    if (!bad.has(o.id) && !onOutside(tp, o, foot)) return;
     // Studio: the main room is treated as a sleeping room even if the user says nobody sleeps there (EGR-01 decides).
     const isSleep = studio ? r.use !== 'bath' : r.use === 'sleeping';
-    windows.push({ id: o.id, room: studio ? 'Main room' : labels[ri], sleeping: isSleep, clearWidthMm: o.widthMm, clearHeightMm: o.heightMm, sillMm: o.sillMm, gradeFloor: true });
-  }));
+    // A window that does not fit its wall has no size we can trust (EGR-01 then asks for it).
+    const ok = !bad.has(o.id);
+    windows.push({ id: o.id, room: studio ? 'Main room' : labels[ri], sleeping: isSleep, clearWidthMm: ok ? o.widthMm : null, clearHeightMm: ok ? o.heightMm : null, sillMm: o.sillMm, gradeFloor: true });
+  }); });
   // A sleeping room drawn with no window still has to show up as "missing".
   return { bedrooms: sleeping.length, windows };
 }
