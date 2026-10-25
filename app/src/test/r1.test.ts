@@ -125,7 +125,7 @@ describe('COR-01 fire separation counts the house (assumed property line)', () =
     expect(ready(p)).toBe('FIX_ISSUES');
     p.adu.ratedWallPlanned = 'yes'; p.adu.openingsNearLine = 'no'; expect(st(p, 'FIR-01')!.status).toBe('UNKNOWN'); // house wall 1 ft from the line (r3cases-03)
     p.adu.houseFacingOpenings = 'yes'; expect(st(p, 'FIR-01')!.status).toBe('FAIL');
-    p.adu.houseFacingOpenings = 'no'; expect(st(p, 'FIR-01')!.status).toBe('PASS'); expect(st(p, 'FIR-02')!.status).toBe('PASS');
+    p.adu.houseFacingOpenings = 'no'; expect(st(p, 'FIR-01')!.status).toBe('UNKNOWN'); p.adu.houseWallRated = 'yes'; expect(st(p, 'FIR-01')!.status).toBe('PASS'); // r4gold-06 expect(st(p, 'FIR-02')!.status).toBe('PASS');
   });
   it('COR-01 an attached garage converted inside the house is not measured to the house', () => {
     const p = good(); p.adu.garageAttachment = 'attached'; p.site.primary = rect(ft(20), ft(73), ft(20), ft(27));
@@ -181,7 +181,9 @@ describe('COR-06 / COR-07 / COR-08 / COR-09 / COR-10 / COR-15', () => {
   });
   it('COR-08 duplex lots are not supported; a lot with an ADU already fails the unit mix', () => {
     const p = good(); p.site.mainBuilding = 'duplex'; expect(ready(p)).toBe('NOT_SUPPORTED');
-    p.site.mainBuilding = 'sfd'; p.site.existingAdus = 1; expect(st(p, 'MIX-01')!.status).toBe('FAIL');
+    p.site.mainBuilding = 'sfd'; p.site.existingAdus = 1; p.site.existingAduAttached = 'no'; expect(st(p, 'MIX-01')!.status).toBe('FAIL');
+    // r4gold-01 (sheet II-C.5a): a detached conversion plus an existing attached ADU is allowed.
+    p.site.existingAduAttached = 'yes'; expect(st(p, 'MIX-01')!.status).toBe('PASS'); p.site.existingAduAttached = 'unknown'; expect(st(p, 'MIX-01')!.status).toBe('UNKNOWN');
     p.site.existingAdus = 0; p.site.existingJadus = 1; expect(st(p, 'MIX-01')!.status).toBe('PASS');
     p.site.mainBuilding = 'unknown'; expect(st(p, 'MIX-01')!.status).toBe('UNKNOWN');
   });

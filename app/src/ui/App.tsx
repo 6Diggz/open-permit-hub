@@ -282,6 +282,7 @@ function LotStep({ p, update, replace }: { p: Project; update: U; lang: Lang; re
       <div className="field"><label htmlFor="mb">{L("What is the main building on the lot?")}</label><select id="mb" value={s.mainBuilding} onChange={e => update(d => { d.site.mainBuilding = e.target.value as Project['site']['mainBuilding']; })}>
         <option value="unknown">{L("Not sure yet")}</option><option value="sfd">{L("One single-family house")}</option><option value="duplex">{L("A duplex")}</option><option value="multifamily">{L("Apartments (3 or more units)")}</option></select></div>
       <Num id="exa" label={L("ADUs already on the lot")} integer max={4} value={s.existingAdus} onChange={v => update(d => { d.site.existingAdus = v; })} help={L("Count permitted and unpermitted ones. 0 if none.")} />
+      {(s.existingAdus ?? 0) >= 1 && <Q id="q-exatt" label={L("Is the existing ADU inside or attached to the house?")} help={L("One attached ADU and one detached ADU can both be on a single-family lot.")} value={s.existingAduAttached ?? 'unknown'} onChange={v => update(d => { d.site.existingAduAttached = v; })} />}
       <Num id="exj" label={L("Junior ADUs already on the lot")} integer max={4} value={s.existingJadus} onChange={v => update(d => { d.site.existingJadus = v; })} help={L("A junior ADU is a unit inside the house, up to 500 sq ft. 0 if none.")} />
     </div>
     <div className="grid2">
@@ -365,6 +366,7 @@ function GarageStep({ p, update }: { p: Project; update: U }) {
       {a.mode === 'conversion' && <Q id="q-inside" label={L("Does the ADU stay inside the existing walls?")} value={a.staysInsideWalls} onChange={v => update(d => { d.adu.staysInsideWalls = v; })} />}
       {a.mode === 'conversion' && a.addedAreaSqFt > 0 && <Q id="q-ingress" label={L("Is the added area only for the entry?")} value={a.addedForIngressOnly} onChange={v => update(d => { d.adu.addedForIngressOnly = v; })} />}
       <Q id="q-slab" label={L("Does the slab have a vapor barrier, or will you add an approved epoxy coating?")} value={a.slabVaporBarrier} onChange={v => update(d => { d.adu.slabVaporBarrier = v; })} />
+      {houseHalfGap(p) * 2 < ft(5) && <Q id="q-house-rated" label={L("Will the house wall facing the ADU be 1-hour rated?")} help={L("Needed when the house and the ADU are less than 5 ft apart.")} value={a.houseWallRated ?? 'unknown'} onChange={v => update(d => { d.adu.houseWallRated = v; })} />}
       {houseHalfGap(p) < ft(5) && <Q id="q-house-open" label={L("Does the house wall facing the ADU have windows, doors, vents or eaves?")} value={a.houseFacingOpenings} onChange={v => update(d => { d.adu.houseFacingOpenings = v; })} />}
       <Q id="q-open" label={L("Any windows, doors or vents in walls under 5 ft from the property line or the halfway line to the house?")} value={a.openingsNearLine} onChange={v => update(d => { d.adu.openingsNearLine = v; })} />
       <Q id="q-rated" label={L("Do you plan a 1-hour fire-rated wall where it is close to the line or the house?")} value={a.ratedWallPlanned} onChange={v => update(d => { d.adu.ratedWallPlanned = v; })} />

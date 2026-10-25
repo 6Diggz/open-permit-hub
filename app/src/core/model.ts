@@ -47,7 +47,7 @@ export interface Project {
     /** Main building on the lot (sheet II-C is for an existing single-family dwelling only). */
     mainBuilding: 'sfd' | 'duplex' | 'multifamily' | 'unknown';
     /** ADUs and JADUs already on the lot, permitted or not (sheet II-C.5 unit mix). */
-    existingAdus: number | null; existingJadus: number | null;
+    existingAdus: number | null; existingJadus: number | null; /** The existing ADU is inside or attached to the house (r4gold-01, sheet II-C.5a / II-G.3a). */ existingAduAttached?: Tri;
     primary: Poly; primaryHeightMm: number;
     flags: {
       hillside: Tri; vhfhsz: Tri; hpoz: Tri; coastal: Tri; methane: Tri; fireRebuild: Tri;
@@ -79,7 +79,7 @@ export interface Project {
     garageAttachment: 'detached' | 'attached' | 'unknown'; staysInsideWalls: Tri; addedForIngressOnly: Tri; /** A new story is being built on top of the garage (not existing space). */ newUpperFloor: Tri;
     /** AB 2533 legalization of a pre-2020 unpermitted unit (Gov. Code §66332). */
     legalization: boolean;
-    slabVaporBarrier: Tri; openingsNearLine: Tri; /** Windows, doors, vents or eaves on the house wall that faces the ADU. */ houseFacingOpenings: Tri; smokeHardwired: Tri;
+    slabVaporBarrier: Tri; openingsNearLine: Tri; /** Windows, doors, vents or eaves on the house wall that faces the ADU. */ houseFacingOpenings: Tri; /** The house wall facing the ADU will be 1-hour rated (needed when they are under 5 ft apart). */ houseWallRated?: Tri; smokeHardwired: Tri;
     panelAmps: number | null; separateGasMeter: Tri;
     /** Setbacks as written on the floor plan sheet, to compare with the site plan. */
     floorPlanSideSetbackMm: number | null; floorPlanRearSetbackMm: number | null;

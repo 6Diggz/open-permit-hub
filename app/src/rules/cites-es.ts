@@ -8,6 +8,8 @@ export const CITES_ES: Record<string, string> = {
   'Data check (not a code rule)': 'Revisión de datos (no es una regla del código)',
   'LADBS jurisdiction': 'Jurisdicción de LADBS',
   'Gov. Code §66323(a)(1)(A); LADBS sheet II-C (detached) and II-G (attached)': 'Código de Gobierno §66323(a)(1)(A); hoja LADBS II-C (separado) y II-G (adjunto)',
+  'Gov. Code §66323(a)(2)': 'Código de Gobierno §66323(a)(2)',
+  'LADBS sheet II-D.2 (new detached State ADU, 800 sf max)': 'Hoja LADBS II-D.2 (ADU estatal separado nuevo, máximo 800 pies²)',
   'LADBS sheet II-C (conversion per Gov. Code §66323(a)(1) for an existing single-family dwelling only); II-C.1, II-C.5 (unit mix)': 'Hoja LADBS II-C (conversión según Código de Gobierno §66323(a)(1) solo para una casa unifamiliar existente); II-C.1, II-C.5 (combinación de unidades)',
   'Gov. Code §66323(a)(1) (one ADU and one JADU per single-family lot)': 'Código de Gobierno §66323(a)(1) (un ADU y un JADU por lote unifamiliar)',
   'Gov. Code §66323(a)(1)(A) (150 sq ft expansion for ingress and egress); LADBS sheet II-C.3, II-C.4': 'Código de Gobierno §66323(a)(1)(A) (ampliación de 150 pies² para entrar y salir); hoja LADBS II-C.3, II-C.4',

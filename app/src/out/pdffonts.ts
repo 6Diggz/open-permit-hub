@@ -7,6 +7,7 @@ import regular from '@fontsource/public-sans/files/public-sans-latin-400-normal.
 import bold from '@fontsource/public-sans/files/public-sans-latin-700-normal.woff?inline';
 
 const bytes = (dataUrl: string) => Uint8Array.from(atob(dataUrl.slice(dataUrl.indexOf(',') + 1)), c => c.charCodeAt(0));
+const NOLIG = { liga: false, clig: false, dlig: false, rlig: false };
 /** WOFF 1.0 -> TrueType (sfnt): inflate each table and lay them out again. A PDF FontFile2 must be TrueType, not WOFF. */
 export function woffToTtf(w: Uint8Array): Uint8Array {
   const dv = new DataView(w.buffer, w.byteOffset, w.byteLength); if (dv.getUint32(0) !== 0x774f4646) return w;
@@ -28,6 +29,7 @@ export function sheetFonts(doc: PDFDocument): Promise<{ f: PDFFont; fb: PDFFont 
   let c = cache.get(doc); if (!c) { c = load(doc); cache.set(doc, c); } return c;
 }
 async function load(doc: PDFDocument): Promise<{ f: PDFFont; fb: PDFFont }> {
-  try { doc.registerFontkit(fontkit); return { f: await doc.embedFont(woffToTtf(bytes(regular)), { subset: false }), fb: await doc.embedFont(woffToTtf(bytes(bold)), { subset: false }) }; }
+  // r4reach-01: no ligatures. A drawn "fi" glyph has no text mapping, so "fix" copied or read aloud as "x".
+  try { doc.registerFontkit(fontkit); return { f: await doc.embedFont(woffToTtf(bytes(regular)), { subset: false, features: NOLIG }), fb: await doc.embedFont(woffToTtf(bytes(bold)), { subset: false, features: NOLIG }) }; }
   catch { return { f: await doc.embedFont(StandardFonts.Helvetica), fb: await doc.embedFont(StandardFonts.HelveticaBold) }; }
 }

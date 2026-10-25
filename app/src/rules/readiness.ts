@@ -61,19 +61,26 @@ export type PlainVerdict = 'likely-yes' | 'likely-no' | 'unsure';
  */
 export function plainAnswer(p: Project, rep: Report): { verdict: PlainVerdict; en: string; es: string } {
   const c = rep.counts; const fails = rep.results.filter(r => r.status === 'FAIL' && !r.dismissed).length;
-  const checks = c.PASS + c.INFO, left = c.UNKNOWN;
+  const checks = c.PASS + c.INFO, left = c.UNKNOWN + c.NOT_CHECKED; // r4gold-02: switched-off checks are open questions too
   const what = p.adu.mode === 'conversion' ? { en: 'this garage', es: 'este garaje' } : { en: 'this lot', es: 'este lote' };
-  if (rep.overall === 'NOT_SUPPORTED' || p.site.jurisdiction !== 'la-city')
+  if (p.site.jurisdiction !== 'la-city')
     return { verdict: 'unsure', en: `Not sure: this tool's rules cover the City of Los Angeles only, so it cannot say if ${what.en} can become an ADU yet.`, es: `No se sabe: las reglas de esta herramienta son solo para la Ciudad de Los Ángeles, así que no puede decir aún si ${what.es} puede ser una ADU.` };
+  // r4gold-03: an LA City project the rules do not cover gets its own reason (duplex, new story, date), not the city one.
+  if (rep.overall === 'NOT_SUPPORTED') { const u = rep.results.find(r => r.unsupported || (r.status === 'FAIL' && r.rule.id === 'JUR-01'));
+    return { verdict: 'unsure', en: `Not sure: this app does not check this kind of project yet. ${u ? u.msg.en : ''}`.trim(), es: `No se sabe: esta app aún no revisa este tipo de proyecto. ${u ? u.msg.es : ''}`.trim() }; }
   if (fails > 0)
     return { verdict: 'likely-no', en: `Not as entered: ${fails} check${fails === 1 ? '' : 's'} found a problem to fix before ${what.en} can become an ADU; ${left} questions left.`, es: `No como está: ${fails} revisión(es) encontraron un problema que corregir antes de que ${what.es} pueda ser una ADU; quedan ${left} preguntas.` };
   const f = p.site.flags; const zone = p.site.zone.trim().toUpperCase();
-  const residential = /^(\[?Q\]?|\(T\)|\(Q\))*\s*(R[1-5SAEWDU]|RD|RE|RS|RA|RW|RU|RZ|A[12]|R\d)/.test(zone);
+  // r4gold-04: RAS is a commercial/residential mixed zone; a lot in two zones is not a plain answer.
+  const split = /[/,;&]|\sAND\s/.test(zone);
+  const residential = !split && !/^(\[?Q\]?|\(T\)|\(Q\))*\s*RAS/.test(zone) && /^(\[?Q\]?|\(T\)|\(Q\))*\s*(R[1-5SAEWDU]|RD|RE|RS|RA|RW|RU|RZ|A[12]|R\d)/.test(zone);
+  // r4gold-02: these checks decide the answer, so it cannot be "likely yes" while any is open or a module is off.
+  const gate = rep.results.some(r => ['INP-01', 'REV-01', 'JUR-01', 'HAZ-05', 'GAR-01', 'MIX-01', 'SET-01'].includes(r.rule.id) && (r.status === 'UNKNOWN' || r.status === 'NOT_CHECKED')) || Object.values(p.modules).some(v => !v);
   const special = (['hillside', 'vhfhsz', 'hpoz', 'coastal', 'fireRebuild'] as const).filter(k => f[k] === 'yes');
-  const unknownMap = (['hillside', 'vhfhsz', 'hpoz', 'coastal'] as const).filter(k => f[k] === 'unknown');
-  if (!residential || special.length || unknownMap.length)
-    return { verdict: 'unsure', en: `Maybe: no blockers found in ${checks} checks, but ${!zone ? 'the zone is not known' : !residential ? `zone ${zone.slice(0, 20)} is not a plain residential zone` : special.length ? 'this lot is in a special area with extra review' : 'some map questions are not answered'}; ${left} questions left.`,
-      es: `Tal vez: no se encontraron bloqueos en ${checks} revisiones, pero ${!zone ? 'no se sabe la zona' : !residential ? `la zona ${zone.slice(0, 20)} no es residencial simple` : special.length ? 'este lote está en un área especial con revisión extra' : 'faltan preguntas del mapa'}; quedan ${left} preguntas.` };
+  const unknownMap = (['hillside', 'vhfhsz', 'hpoz', 'coastal', 'fireRebuild'] as const).filter(k => f[k] === 'unknown');
+  if (!residential || special.length || unknownMap.length || gate)
+    return { verdict: 'unsure', en: `Maybe ${what.en} can become an ADU: no blockers found in ${checks} checks, but ${!zone ? 'the zone is not known' : split ? 'the lot is in more than one zone' : !residential ? `zone ${zone.slice(0, 20)} is not a plain residential zone` : special.length ? 'this lot is in a special area with extra review' : unknownMap.length ? 'some map questions are not answered' : 'some key answers are still open or some checks are switched off'}; ${left} questions left.`,
+      es: `Tal vez ${what.es} puede ser una ADU: no se encontraron bloqueos en ${checks} revisiones, pero ${!zone ? 'no se sabe la zona' : split ? 'el lote está en más de una zona' : !residential ? `la zona ${zone.slice(0, 20)} no es residencial simple` : special.length ? 'este lote está en un área especial con revisión extra' : unknownMap.length ? 'faltan preguntas del mapa' : 'faltan respuestas clave o hay revisiones apagadas'}; quedan ${left} preguntas.` };
   return { verdict: 'likely-yes', en: `Likely yes, ${what.en} can become an ADU: no blockers found in ${checks} checks; ${left} questions left for you or your preparer.`,
     es: `Probablemente sí, ${what.es} puede ser una ADU: no se encontraron bloqueos en ${checks} revisiones; quedan ${left} preguntas para usted o su preparador.` };
 }

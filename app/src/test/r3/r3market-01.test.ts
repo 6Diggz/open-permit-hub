@@ -19,7 +19,8 @@ describe('r3market-01 plain answer after lookup', () => {
     expect(typeof fn).toBe('function');
     const a = fn(next, rep);
     expect(['likely-yes', 'likely-no', 'unsure']).toContain(a.verdict);
-    expect(a.verdict).toBe('likely-yes'); // R1 lot in LA City, no overlays: the state law conversion path is open
+    // r4gold-02: a lookup alone leaves the permit, unit count and attachment open, so the answer is "Maybe", never "Likely yes".
+    expect(a.verdict).toBe('unsure');
     expect(a.en).toMatch(/garage/i); expect(a.es.length).toBeGreaterThan(10);
     expect(a.en.split(/\s+/).length).toBeLessThan(40); // one short sentence a homeowner can read
   });

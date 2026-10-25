@@ -72,13 +72,13 @@ export function migrate(raw: any): Project {
   s.existingAdus = numOrNull(s.existingAdus, 100); s.existingJadus = numOrNull(s.existingJadus, 100);
   s.address = str(s.address); s.apn = str(s.apn, 40); s.legalDescription = str(s.legalDescription, 300);
   for (const k of Object.keys(base.site.flags) as (keyof typeof base.site.flags)[]) s.flags[k] = tri(s.flags[k]);
-  s.otherBuildings = tri(s.otherBuildings); s.otherBuildingGapMm = fix('distance to other buildings', s.otherBuildingGapMm, len, null);
+  s.otherBuildings = tri(s.otherBuildings); s.existingAduAttached = tri(s.existingAduAttached); s.otherBuildingGapMm = fix('distance to other buildings', s.otherBuildingGapMm, len, null);
   s.jurisdictionConfirmed = s.jurisdictionConfirmed === true;
   if (!['la-city', 'la-county', 'other', 'unknown'].includes(s.jurisdiction)) s.jurisdiction = 'unknown';
   a.garageConstruction = (['wood', 'masonry', 'concrete', 'unknown'] as const).includes(a.garageConstruction) ? a.garageConstruction : 'unknown';
   a.ratedEaveUndersidePlanned = tri(a.ratedEaveUndersidePlanned);
   a.newUpperFloor = tri(a.newUpperFloor);
-  a.houseFacingOpenings = tri(a.houseFacingOpenings);
+  a.houseFacingOpenings = tri(a.houseFacingOpenings); a.houseWallRated = tri(a.houseWallRated);
   // People and dates: every field typed and capped (a non-string name crashed the PDF export).
   const pe = out.people;
   pe.ownerName = str(pe.ownerName, 120); pe.preparerName = str(pe.preparerName, 120); pe.engineerName = str(pe.engineerName, 120); pe.preparerLicense = str(pe.preparerLicense, 40);
