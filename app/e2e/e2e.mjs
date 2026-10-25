@@ -111,7 +111,7 @@ for (const width of [390, 1440]) {
     await a.fill('#apn', '1111-222-333'); await a.waitForTimeout(300); await b.reload(); await b.getByRole('heading', { level: 2 }).first().waitFor();
     ok((await b.inputValue('#addr')) === 'Tab B St', `qa-04 tab B's edit is not overwritten ${W}`);
     await a.goto(BASE + '#projects'); await visibleButton(a, 'All projects').click().catch(() => {});
-    const c2 = await ctx(width); const w = await c2.newPage(); await w.goto(BASE); await w.keyboard.press('Tab'); let found = false;
+    const c2 = await ctx(width); const w = await c2.newPage(); await w.goto(BASE); await w.getByRole('button', { name: 'Try the demo lot' }).waitFor(); await w.keyboard.press('Tab'); let found = false;
     for (let i = 0; i < 12 && !found; i++) { found = await w.evaluate(() => document.activeElement?.type === 'file'); if (!found) await w.keyboard.press('Tab'); }
     ok(found && await w.evaluate(() => getComputedStyle(document.activeElement.closest('label')).outlineStyle !== 'none'), `qa-29 the file picker shows a focus ring ${W}`);
     ok(await w.locator('meta[http-equiv="Content-Security-Policy"]').count() === 1, `appsec-10 CSP meta present ${W}`);
