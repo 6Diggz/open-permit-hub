@@ -81,6 +81,9 @@ export function addressCity(addr: string): string | null {
   return c && i - 1 >= 1 && !/\d/.test(c) ? c : null;
 }
 
+/** r4juris-06: numbers a pack can change without forking rule code. LA City (LADBS sheet III-D.1/D.2): no sprinkler reduction. */
+export const PARAMS = { fireSep: { unratedMinFt: 5, unratedMinFtSprinklered: 5, openingsBanFt: 3, projectionMinFt: 2 } } as const;
+
 export const RULES: Rule[] = [
   { id: 'GEO-01', version: '1', module: 'core', severity: 'critical', kind: 'city', effectiveFrom: EFF, applies: all,
     title: t('Drawing and numbers make sense', 'El dibujo y los números tienen sentido'), cites: [{ code: 'Data check (not a code rule)', verified: true }],
@@ -303,9 +306,9 @@ export const RULES: Rule[] = [
       if (!Number.isFinite(worst)) return unk('Distances could not be measured.', 'No se pudieron medir las distancias.', 'Fix the drawing first.', 'Corrija el dibujo primero.');
       // LADBS sheet III-D.1: 1-hour walls under 5 ft. LABC Table 602 gives no sprinkler reduction, so the pass line is 5 ft in every case.
       // Half a millimeter of slack so a dimension entered as exactly 5 ft (or 2 ft) is not lost to floating point.
-      const lim = ft(5) - 0.5;
+      const FS = PARAMS.fireSep; const lim = ft(yes(p.adu.sprinklered) ? FS.unratedMinFtSprinklered : FS.unratedMinFt) - 0.5;
       const eave = p.adu.eaveDepthMm; const proj = isNum(eave) && eave > 0 ? worst - eave : null;
-      if (proj != null && proj < ft(2) - 0.5) return fail(`The eave reaches ${fmtFtIn(Math.max(0, proj))} from ${line.en}. Projections can't come closer than 2 ft.`, `El alero llega a ${fmtFtIn(Math.max(0, proj))} ${line.es}. Las salientes no pueden acercarse a menos de 2 pies.`, 'Cut the eave back on that side.', 'Recorte el alero de ese lado.');
+      if (proj != null && proj < ft(FS.projectionMinFt) - 0.5) return fail(`The eave reaches ${fmtFtIn(Math.max(0, proj))} from ${line.en}. Projections can't come closer than 2 ft.`, `El alero llega a ${fmtFtIn(Math.max(0, proj))} ${line.es}. Las salientes no pueden acercarse a menos de 2 pies.`, 'Cut the eave back on that side.', 'Recorte el alero de ese lado.');
       // Eave depth is asked whenever an eave of up to 6 ft (the largest GEO-01 accepts) could reach the 5 ft line.
       if (eave == null && worst < lim + ft(6)) return unk(`Closest wall is ${fmtFtIn(worst)} from ${line.en}. An eave on that side could come too close, and walls this close may need a rating.`, `El muro más cercano está a ${fmtFtIn(worst)} ${line.es}. Un alero de ese lado podría quedar demasiado cerca, y muros tan cercanos pueden necesitar resistencia al fuego.`, 'Enter the eave depth (roof overhang) on the Garage step. Enter 0 if there is none.', 'Ingrese la profundidad del alero en el paso Garaje. Ingrese 0 si no hay.');
       const other = otherBuildingsMissing(p); if (other && worst >= lim) return other;
@@ -322,11 +325,11 @@ export const RULES: Rule[] = [
         const hg = houseHalfGap(p), hgap = hg * 2;
         // r4gold-07: with 5 ft or more between them, the assumed line may sit on the rated, blank ADU wall (III-D.1, LARC R302.1):
         // the house is then 5 ft or more from it and has no limits. Needs no ADU openings and an eave that still clears the line.
-        const aduFaceOk = hgap >= lim && p.adu.openingsNearLine === 'no' && isNum(eave) && (eave <= 0 || (hgap - eave >= ft(2) - 0.5 && (hgap - eave >= lim || yes(p.adu.ratedEaveUndersidePlanned))));
+        const aduFaceOk = hgap >= lim && p.adu.openingsNearLine === 'no' && isNum(eave) && (eave <= 0 || (hgap - eave >= ft(FS.projectionMinFt) - 0.5 && (hgap - eave >= lim || yes(p.adu.ratedEaveUndersidePlanned))));
         if (hg < lim && !aduFaceOk) {
           const ho = p.adu.houseFacingOpenings;
           if (ho === 'unknown') return unk(`The house wall is ${fmtFtIn(hg)} from the assumed line halfway to the ADU. That wall must also meet the rules for walls under 5 ft from a line.`, `El muro de la casa está a ${fmtFtIn(hg)} de la línea supuesta a medio camino del ADU. Ese muro también debe cumplir las reglas para muros a menos de 5 pies de un lindero.`, 'Answer "Does the house wall facing the ADU have windows, doors, vents or eaves?" on the Garage step.', 'Responda "¿El muro de la casa que da al ADU tiene ventanas, puertas, ventilas o aleros?" en el paso Garaje.');
-          if (yes(ho) && hg < ft(3)) return fail(`The house wall facing the ADU has openings ${fmtFtIn(hg)} from the assumed line. Openings are not allowed under 3 ft from it.`, `El muro de la casa que da al ADU tiene aberturas a ${fmtFtIn(hg)} de la línea supuesta. No se permiten aberturas a menos de 3 pies.`, 'Close those openings with rated construction, or move the ADU farther from the house.', 'Cierre esas aberturas con construcción resistente, o aleje el ADU de la casa.');
+          if (yes(ho) && hg < ft(FS.openingsBanFt)) return fail(`The house wall facing the ADU has openings ${fmtFtIn(hg)} from the assumed line. Openings are not allowed under 3 ft from it.`, `El muro de la casa que da al ADU tiene aberturas a ${fmtFtIn(hg)} de la línea supuesta. No se permiten aberturas a menos de 3 pies.`, 'Close those openings with rated construction, or move the ADU farther from the house.', 'Cierre esas aberturas con construcción resistente, o aleje el ADU de la casa.');
           if (yes(ho)) return unk(`The house wall facing the ADU has openings ${fmtFtIn(hg)} from the assumed line. Their size is limited between 3 and 5 ft.`, `El muro de la casa que da al ADU tiene aberturas a ${fmtFtIn(hg)} de la línea supuesta. Su tamaño está limitado entre 3 y 5 pies.`, 'Your preparer checks the house openings against LARC Table R302.1(1) and shows them on the plans.', 'Su preparador revisa las aberturas de la casa con la Tabla R302.1(1) del LARC y las muestra en los planos.');
           // r4gold-06: under 5 ft apart, every line position leaves the house wall under 5 ft too, so it needs a 1-hour rating (LABC 705.3, LARC Table R302.1(1)).
           if (hgap < lim) { const hr = p.adu.houseWallRated ?? 'unknown';

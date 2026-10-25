@@ -63,7 +63,7 @@ export function plainAnswer(p: Project, rep: Report): { verdict: PlainVerdict; e
   const c = rep.counts; const fails = rep.results.filter(r => r.status === 'FAIL' && !r.dismissed).length;
   const checks = c.PASS + c.INFO, left = c.UNKNOWN + c.NOT_CHECKED; // r4gold-02: switched-off checks are open questions too
   const what = p.adu.mode === 'conversion' ? { en: 'this garage', es: 'este garaje' } : { en: 'this lot', es: 'este lote' };
-  if (p.site.jurisdiction !== 'la-city')
+  if (!rep.pack.startsWith(p.site.jurisdiction + '@')) // r4juris-04: any jurisdiction with its own pack can answer
     return { verdict: 'unsure', en: `Not sure: this tool's rules cover the City of Los Angeles only, so it cannot say if ${what.en} can become an ADU yet.`, es: `No se sabe: las reglas de esta herramienta son solo para la Ciudad de Los Ángeles, así que no puede decir aún si ${what.es} puede ser una ADU.` };
   // r4gold-03: an LA City project the rules do not cover gets its own reason (duplex, new story, date), not the city one.
   if (rep.overall === 'NOT_SUPPORTED') { const u = rep.results.find(r => r.unsupported || (r.status === 'FAIL' && r.rule.id === 'JUR-01'));
