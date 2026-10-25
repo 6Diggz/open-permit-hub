@@ -21,7 +21,7 @@ export function Plan({ p, onMove, es = false }: { p: Project; es?: boolean; onMo
     if (m[e.key]) { e.preventDefault(); onMove(m[e.key][0], m[e.key][1], true); say(); }
   };
   return (
-    <svg ref={svg} viewBox={`${vb.x} ${vb.y} ${vb.w} ${vb.h}`} role="img" aria-label="Site plan. The ADU can be moved with arrow keys when focused.">
+    <svg ref={svg} viewBox={`${vb.x} ${vb.y} ${vb.w} ${vb.h}`} role="group" aria-label={es ? 'Plano del lote. El ADU se puede mover con las flechas cuando está seleccionado.' : 'Site plan. The ADU can be moved with arrow keys when focused.'}>
       <defs><pattern id="hatch" width={ft(1.2)} height={ft(1.2)} patternUnits="userSpaceOnUse" patternTransform="rotate(45)"><line x1="0" y1="0" x2="0" y2={ft(1.2)} stroke="currentColor" strokeWidth={s * 0.8} opacity=".35" /></pattern></defs>
       <g color="var(--ink)">
         {/* setback band 4 ft inside side/rear lines */}
@@ -36,7 +36,7 @@ export function Plan({ p, onMove, es = false }: { p: Project; es?: boolean; onMo
           return <g key={d.i}><text x={mx} y={Y(my)} fontSize={s * 12} textAnchor="middle" dy={-s * 6} fill={ok ? 'var(--pencil)' : 'var(--fix)'} fontWeight="700" paintOrder="stroke" stroke="var(--sheet)" strokeWidth={s * 4}>{fmtFtIn(d.d)} {es ? 'al lindero' : 'to line'}</text></g>;
         })}
         <polygon points={pts(fp)} fill="var(--card)" fillOpacity=".55" stroke="var(--ink)" strokeWidth={s * 3} tabIndex={0} role="button"
-          aria-label={`ADU footprint. Distances to side and rear lines: ${dims.filter(d => d.i !== p.site.streetEdge).map(d => fmtFtIn(d.d)).join(', ')}. Arrow keys move 6 inches, Shift moves 1 foot.`}
+          aria-label={es ? `Huella del ADU. Distancias a los linderos laterales y trasero: ${dims.filter(d => d.i !== p.site.streetEdge).map(d => fmtFtIn(d.d)).join(', ')}. Las flechas mueven 6 pulgadas, Mayús mueve 1 pie.` : `ADU footprint. Distances to side and rear lines: ${dims.filter(d => d.i !== p.site.streetEdge).map(d => fmtFtIn(d.d)).join(', ')}. Arrow keys move 6 inches, Shift moves 1 foot.`}
           style={{ cursor: 'grab' }} onKeyDown={key}
           onPointerDown={e => { (e.target as Element).setPointerCapture(e.pointerId); drag.current = toModel(e); }}
           onPointerMove={e => { if (!drag.current) return; const m = toModel(e); onMove(m.x - drag.current.x, m.y - drag.current.y, false); drag.current = m; }}

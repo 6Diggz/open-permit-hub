@@ -98,3 +98,16 @@ dialog.ask p { margin: 0 0 14px; color: var(--pencil); }
 .ask-row { display: flex; gap: 8px; justify-content: flex-end; margin-top: 14px; flex-wrap: wrap; }
 .btn.danger { background: var(--fix); border-color: var(--fix); }
 .toast { position: fixed; left: 50%; bottom: max(16px, env(safe-area-inset-bottom, 0px)); transform: translateX(-50%); background: var(--ink); color: var(--sheet); padding: 10px 16px; border-radius: var(--r-md); max-width: calc(100vw - 32px); z-index: 20; }
+
+/* Round 1 fixes: no visual restyle, only reachability, contrast and focus. */
+.mobile-only { display: none; }
+@media (max-width: 1100px) { .mobile-only { display: inline-block; } }
+label.btn:focus-within { outline: 3px solid var(--focus); outline-offset: 2px; }
+.side:focus-visible { outline: 3px solid var(--focus); outline-offset: -3px; }
+:root { --link: #1d4ed8; --info-text: var(--info-need); }
+@media (prefers-color-scheme: dark) { :root:not([data-theme="light"]) { --link: #8ab4ff; --info-text: #e8b65a; } }
+:root[data-theme="dark"] { --link: #8ab4ff; --info-text: #e8b65a; }
+.res .pending { color: var(--info-text); }
+a { color: var(--link); }
+.card .sub { color: var(--card-ink); opacity: 1; }
+.card a { color: var(--card-ink); }

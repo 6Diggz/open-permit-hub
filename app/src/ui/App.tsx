@@ -1,10 +1,11 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
-import { blankProject, demoProject, isDemo, MODULES, SAFETY_MODULES, type Project, type Tri, type Window } from '../core/model';
+import { blankProject, demoProject, isDemo, MODULES, SAFETY_MODULES, uid, type Project, type Tri, type Window } from '../core/model';
 import { History } from '../core/undo';
-import { evaluate, exportBlockers, type Report, type Result } from '../rules/engine';
+import { canDismiss, evaluate, exportBlockers, type Report, type Result } from '../rules/engine';
 import { RULES, PACK_ID } from '../rules/la-city';
+import { PACK, packFreshness } from '../rules/pack';
 import { bbox, rect, translate } from '../core/geom';
-import { fmtFtIn, fmtSqFt, ft, parseLength, toFt } from '../core/units';
+import { fmtFtIn, fmtSqFt, ft, parseLength, lengthTooLarge, toFt, RANGES, outOfRange } from '../core/units';
 import { area } from '../core/geom';
 import { Plan } from './Plan';
 import { CleanFix } from './CleanFix';
@@ -12,80 +13,119 @@ import { ask, AskHost } from './Ask';
 import { autoFit } from '../rules/fit';
 import { readiness, scoreLine, applies as itemApplies } from '../rules/readiness';
 import { CATALOG, RULE_ITEMS } from '../rules/ladbs-adu-2025';
+import { citeEs } from '../rules/cites-es';
 import { tr, type Lang } from './i18n';
 import { ES } from './es';
 let LANG: Lang = 'en';
 const L = (en: string) => (LANG === 'es' ? (ES as Record<string, string>)[en] ?? en : en);
-import { encryptPack, openPack, serialize } from '../core/permitpack';
+import { encryptPack, passphraseProblem, readPackFile, serialize, MAX_PACK_BYTES } from '../core/permitpack';
 import { takeoff, takeoffCSV } from '../out/takeoff';
+import { plainWasmError } from '../out/wasm';
+import { missingGlyphNote } from '../out/glyphs';
 import { fromGLTF, fromRoomPlanJSON, tapeCheck } from '../io/scan';
 
 import * as store from '../core/store';
-let loadError = '';
-const load = (): Project | null => { try { const id = store.lastId(); return id ? store.open(id) : null; } catch (e) { loadError = (e as Error).message; return null; } };
+import type { SaveResult } from '../core/store';
+let loadError = ''; let loadErrorId: string | null = null;
+const load = (): Project | null => { const id = store.lastId(); try { return id ? store.open(id) : null; } catch (e) { loadError = (e as Error).message; loadErrorId = id; return null; } };
 const persist = (p: Project) => store.save(p);
 function download(name: string, data: BlobPart, type: string) {
   const url = URL.createObjectURL(new Blob([data], { type })); const a = document.createElement('a'); a.href = url; a.download = name; a.click(); setTimeout(() => URL.revokeObjectURL(url), 2000);
 }
+/** On phones, hand the file to the phone's own share sheet (Messages, Mail, WhatsApp); elsewhere, download it. */
+async function shareOrDownload(name: string, data: string, type: string): Promise<'shared' | 'saved' | 'cancelled'> {
+  try {
+    const file = new File([data], name, { type });
+    if (matchMedia?.('(pointer: coarse)').matches && navigator.canShare?.({ files: [file] })) { await navigator.share({ files: [file], title: name }); return 'shared'; }
+  } catch (e) { if ((e as Error)?.name === 'AbortError') return 'cancelled'; }
+  download(name, data, type); return 'saved';
+}
 const slug = (p: Project) => (p.site.address || p.name).replace(/[^a-z0-9]+/gi, '-').replace(/^-|-$/g, '').toLowerCase().slice(0, 40) || 'project';
+const STEP_KEYS = ['lot', 'garage', 'rooms', 'checks', 'export'];
+const stepFromHash = () => { const m = location.hash.match(/step=(\w+)/); const i = m ? STEP_KEYS.indexOf(m[1]) : -1; return i < 0 ? 0 : i; };
+/** Typing in a text field: skip the app-wide undo shortcut so the field's own undo works. */
+const inField = (t: EventTarget | null) => t instanceof HTMLElement && (t.tagName === 'INPUT' || t.tagName === 'TEXTAREA' || t.tagName === 'SELECT' || t.isContentEditable);
 
 export default function App() {
   const hist = useRef<History<Project> | null>(null); const dragStart = useRef<Project | null>(null);
   const [p, setP] = useState<Project | null>(load);
-  const [step, setStep] = useState(0);
+  const [step, setStepRaw] = useState(stepFromHash);
   const [tool, setTool] = useState<'adu' | 'clean'>(location.hash === '#clean' ? 'clean' : 'adu');
   const [lang, setLang] = useState<Lang>(() => (p?.people.language ?? (navigator.language?.startsWith('es') ? 'es' : 'en')));
-  const [savedOk, setSavedOk] = useState(true);
+  const [saveState, setSaveState] = useState<SaveResult>('ok');
+  const [notice, setNotice] = useState<string[]>(() => (p ? openNotes(p) : []));
+  const formRef = useRef<HTMLDivElement>(null); const moved = useRef(false);
   if (p && !hist.current) hist.current = new History(p);
   LANG = lang;
 
-  useEffect(() => { if (p) setSavedOk(persist(p)); }, [p]);
+  useEffect(() => { if (p) setSaveState(persist(p)); }, [p]);
   useEffect(() => { navigator.storage?.persist?.().catch(() => {}); }, []);
   useEffect(() => { document.documentElement.lang = lang; }, [lang]);
+  // Another tab saved this project: say so now, before this tab's next save is refused.
+  useEffect(() => { const id = p?.id; if (!id) return; const on = (e: StorageEvent) => { if (e.key === store.keyOf(id) && e.newValue) setSaveState('conflict'); }; window.addEventListener('storage', on); return () => window.removeEventListener('storage', on); }, [p?.id]);
+  // Browser Back / Forward move between steps; the step lives in the URL so reload keeps it.
+  useEffect(() => { const on = () => { if (location.hash === '#clean') { setTool('clean'); return; } setTool('adu'); setStepRaw(stepFromHash()); moved.current = true; }; window.addEventListener('popstate', on); return () => window.removeEventListener('popstate', on); }, []);
+  useEffect(() => { if (p && tool === 'adu' && !/step=/.test(location.hash)) history.replaceState(null, '', `#step=${STEP_KEYS[step]}`); }, [p, tool, step]);
+  // Move focus to the new step's heading so keyboard and screen-reader users land on it.
+  useEffect(() => { if (!moved.current) return; moved.current = false; const h = formRef.current?.querySelector('h2'); if (h) { h.setAttribute('tabindex', '-1'); h.focus(); h.scrollIntoView?.({ block: 'start' }); } }, [step]);
+  const setStep = (i: number) => { moved.current = true; setStepRaw(i); history.pushState(null, '', `#step=${STEP_KEYS[i]}`); };
+  const openTool = (t: 'adu' | 'clean') => { setTool(t); history.pushState(null, '', t === 'clean' ? '#clean' : `#step=${STEP_KEYS[step]}`); };
 
   const report: Report | null = useMemo(() => (p ? evaluate(p, RULES, PACK_ID) : null), [p]);
-  const commit = (next: Project) => { hist.current!.push(next); setP(next); };
-  const update = (fn: (d: Project) => void) => { const d: Project = structuredClone(p!); fn(d); commit(d); };
+  const commit = (next: Project, key?: string) => { hist.current!.push(next, key); setP(next); };
+  const update = (fn: (d: Project) => void, key?: string) => { const d: Project = structuredClone(p!); fn(d); d.rulePack = PACK_ID; commit(d, key); };
   const undo = () => { if (hist.current?.undo()) setP(hist.current.present); };
   const redo = () => { if (hist.current?.redo()) setP(hist.current.present); };
   useEffect(() => {
-    const k = (e: KeyboardEvent) => { if ((e.metaKey || e.ctrlKey) && e.key.toLowerCase() === 'z') { e.preventDefault(); e.shiftKey ? redo() : undo(); } };
+    const k = (e: KeyboardEvent) => { if (inField(e.target)) return; if ((e.metaKey || e.ctrlKey) && e.key.toLowerCase() === 'z') { e.preventDefault(); if (e.shiftKey) redo(); else undo(); } };
     window.addEventListener('keydown', k); return () => window.removeEventListener('keydown', k);
   });
+  const show = (x: Project, s = 0) => { setNotice(openNotes(x)); const y = { ...x, repairNotes: undefined }; hist.current = new History(y); setP(y); setStep(s); };
 
-  if (tool === 'clean') return <><CleanFix onBack={() => setTool('adu')} /><AskHost /></>;
-  if (!p || !report) return <><AskHost /><Welcome onPick={id => { try { const x = store.open(id); hist.current = new History(x); setP(x); setStep(0); } catch (e) { loadError = (e as Error).message; } }} onClean={() => setTool('clean')} lang={lang} setLang={setLang} onStart={(d) => { const x = d ? demoProject() : blankProject(); x.people.language = lang; if (!d && lang === 'es') x.name = 'Mi conversión de garaje'; hist.current = new History(x); setP(x); setStep(0); }} onOpen={x => { hist.current = new History(x); setP(x); setStep(3); }} /></>;
+  if (tool === 'clean') return <><CleanFix onBack={() => openTool('adu')} /><AskHost /></>;
+  if (!p || !report) return <><AskHost /><Welcome onPick={id => { try { show(store.open(id)); } catch (e) { loadError = (e as Error).message; loadErrorId = id; setP(null); } }} onClean={() => openTool('clean')} lang={lang} setLang={setLang}
+    onStart={(d) => { const x = d ? demoProject() : blankProject(); x.people.language = lang; if (!d && lang === 'es') x.name = 'Mi conversión de garaje'; show(x); }} onOpen={x => show(x, 3)} /></>;
 
   const steps: string[] = tr(lang, 'steps');
   const stepDot = (i: number) => { const mod = [['core', 'zoning', 'hazards'], ['zoning', 'fire', 'structural', 'fees'], ['egress'], [], []][i]; const rs = report.results.filter(r => mod.includes(r.rule.module)); return rs.some(r => r.status === 'FAIL') ? 'var(--fix)' : rs.some(r => r.status === 'UNKNOWN') ? 'var(--info-need)' : rs.some(r => r.status === 'NOT_CHECKED') ? 'var(--off)' : rs.some(r => r.status === 'PASS') ? 'var(--pass)' : 'transparent'; };
+  const close = () => { setP(null); hist.current = null; history.pushState(null, '', '#projects'); };
+  const fresh = packFreshness();
+  const saveText = saveState === 'ok' ? tr(lang, 'saved') : saveState === 'blocked' ? L("Not saved: storage is blocked. Export a backup.") : L("Not saved: this project changed in another tab.");
 
   return (
     <div className="app"><AskHost />
       <nav className="rail" aria-label={L("Steps")}>
         <p className="brand">{tr(lang, 'app')}</p>
-        <p className="brand-sub">LA City · {PACK_ID.split('@')[1]}</p>
+        <p className="brand-sub">LA City · {PACK.version}</p>
         {steps.map((s, i) => (
           <button key={s} className="step" aria-current={step === i ? 'step' : undefined} onClick={() => setStep(i)}>
             <span className="n" aria-hidden>{i + 1}</span>{s}<span className="dot" style={{ background: stepDot(i) }} aria-hidden />
           </button>
         ))}
         <div className="rail-foot">
-          <span>{savedOk ? tr(lang, 'saved') : L("Not saved: storage is blocked. Export a backup.")}</span>
-          <button className="btn quiet" onClick={async () => { setP(null); hist.current = null; }}>{L("All projects")}</button>
+          <span>{saveText}</span>
+          <button className="btn quiet" onClick={close}>{L("All projects")}</button>
         </div>
       </nav>
 
       <main className="main" id="main">
         <div className="toolbar">
-          <strong>{p.name}</strong>{isDemo(p) && <span className="res tag" style={{ background: 'var(--off)', color: '#fff', padding: '2px 6px' }}>{L("Demo")}</span>}
+          <h1 style={{ font: 'inherit', fontWeight: 700, margin: 0 }}>{p.name}</h1>{isDemo(p) && <span className="res tag" style={{ background: 'var(--off)', color: '#fff', padding: '2px 6px' }}>{L("Demo")}</span>}
           <span className="grow" />
+          <button className="btn quiet mobile-only" onClick={close}>{L("All projects")}</button>
           <button className="btn quiet" onClick={undo} disabled={!hist.current?.canUndo}>{tr(lang, 'undo')}</button>
           <button className="btn quiet" onClick={redo} disabled={!hist.current?.canRedo}>{tr(lang, 'redo')}</button>
           <label className="sr" htmlFor="lang">{L("Language")}</label>
           <select id="lang" className="btn quiet" value={lang} onChange={e => { const l = e.target.value as Lang; setLang(l); update(d => { d.people.language = l; }); }}>
-            <option value="en">{L("English")}</option><option value="es">{L("Espa\u00f1ol")}</option>
+            <option value="en">{L("English")}</option><option value="es">{L("Español")}</option>
           </select>
         </div>
+        {saveState === 'blocked' && <div className="banner warn" role="alert">{L("Not saved: storage is blocked. Export a backup.")}</div>}
+        {saveState === 'conflict' && <div className="banner warn" role="alert">{L("This project changed in another tab. Pick which copy to keep.")}{' '}
+          <button className="btn quiet" onClick={() => { try { show(store.open(p.id), step); setSaveState('ok'); } catch { /* gone */ } }}>{L("Load the newer copy")}</button>{' '}
+          <button className="btn quiet" onClick={() => setSaveState(store.save(p, { force: true }))}>{L("Keep my version")}</button></div>}
+        {notice.length > 0 && <div className="banner" role="status">{notice.map(n => <div key={n}>{n}</div>)}<button className="btn quiet" onClick={() => setNotice([])}>{L("OK")}</button></div>}
+        {fresh.stale && <div className="banner warn" role="status">{lang === 'es' ? fresh.reasonEs : fresh.reason}</div>}
         {p.site.flags.fireRebuild === 'yes' && <div className="banner warn">{L("This lot is in a 2025 burn area. Use the official rebuild path. Automatic passes are off.")}</div>}
         <div className="drawing">
           <Plan p={p} es={lang === 'es'} onMove={(dx, dy, c) => {
@@ -96,7 +136,7 @@ export default function App() {
           }} />
           <span className="hint">{L("Drag the ADU, or select it and use arrow keys. Shaded band = 4 ft side/rear setback.")}</span>
         </div>
-        <div className="form">
+        <div className="form" ref={formRef}>
           {step === 0 && <LotStep p={p} update={update} lang={lang} />}
           {step === 1 && <GarageStep p={p} update={update} />}
           {step === 2 && <RoomsStep p={p} update={update} />}
@@ -109,7 +149,7 @@ export default function App() {
         </div>
       </main>
 
-      <aside className="side" aria-label={L("Check results")}>
+      <aside className="side" aria-label={L("Check results")} tabIndex={0}>
         <InspectionCard report={report} lang={lang} score={scoreLine(readiness(p, report), lang === 'es')} />
         <ResultList results={report.results} lang={lang} />
       </aside>
@@ -117,31 +157,53 @@ export default function App() {
   );
 }
 
+/** Messages to show once when a project opens: repaired values, and rules updated since it was last checked. */
+function openNotes(x: Project): string[] {
+  const n: string[] = [];
+  if (x.repairNotes?.length) n.push(`${L("Some saved values were damaged and were reset. Enter them again:")} ${x.repairNotes.join(', ')}.`);
+  if (x.rulePack && x.rulePack !== PACK_ID) n.push(`${L("The rules were updated since this project was last checked. It is now checked under")} ${PACK_ID} (${L("was")} ${x.rulePack}).`);
+  return n;
+}
+
 function Welcome({ lang, setLang, onStart, onOpen, onClean, onPick }: { onPick: (id: string) => void; onClean: () => void; lang: Lang; setLang: (l: Lang) => void; onStart: (demo: boolean) => void; onOpen: (p: Project) => void }) {
   const [err, setErr] = useState('');
-  const sample = evaluate(demoProject(), RULES, PACK_ID);
+  const sample = evaluate(demoProject(), RULES, PACK_ID); const es = lang === 'es';
+  const openFile = async (f: File) => {
+    setErr('');
+    try {
+      if (f.size > MAX_PACK_BYTES) throw new Error(es ? 'Este archivo es demasiado grande para ser un paquete.' : 'This file is too large to be a permit pack.');
+      const x = await readPackFile(await f.text(), async () => ((await ask({ title: es ? 'Este paquete está bloqueado' : 'This pack is locked', body: es ? 'Ingrese la frase de acceso que le dieron con el archivo.' : 'Enter the passphrase you were given with the file.', input: 'password', minLength: 1, confirm: es ? 'Abrir' : 'Open', cancel: es ? 'Cancelar' : 'Cancel', labels: { field: es ? 'Frase de acceso' : 'Passphrase', show: es ? 'Mostrar' : 'Show' } })) as string | null));
+      if (!x) return;
+      if (store.has(x.id)) {
+        const c = await ask({ title: es ? 'Ya tiene este proyecto' : 'You already have this project', body: es ? `"${x.name}" ya está en este dispositivo. Abrir el archivo como copia aparte guarda las dos versiones.` : `"${x.name}" is already on this device. Opening the file as a separate copy keeps both versions.`, confirm: es ? 'Guardar los dos' : 'Keep both', alt: { label: es ? 'Reemplazar el mío' : 'Replace mine', value: 'replace' }, cancel: es ? 'Cancelar' : 'Cancel' });
+        if (!c) return;
+        if (c !== 'replace') { x.id = uid(); x.name = `${x.name} ${es ? '(copia abierta)' : '(opened copy)'}`; }
+      }
+      onOpen(x);
+    } catch (e) { setErr((e as Error).message); }
+  };
+  const raw = loadErrorId ? store.raw(loadErrorId) : null;
   return (
-    <div className="welcome-grid"><div className="welcome">
+    <main className="welcome-grid" id="main"><div className="welcome">
       <button className="btn quiet" style={{ marginBottom: 28 }} onClick={() => setLang(lang === 'en' ? 'es' : 'en')}>{lang === 'en' ? 'Español' : 'English'}</button>
-      <h1>{lang === 'es' ? 'Su garaje, revisado contra las reglas de LA.' : 'Your garage, checked against LA\'s rules.'}</h1>
+      <h1>{es ? 'Su garaje, revisado contra las reglas de LA.' : 'Your garage, checked against LA\'s rules.'}</h1>
       <p>{tr(lang, 'tagline')}</p>
-      <p>{lang === 'es' ? 'Gratis. Funciona en su dispositivo. No necesita cuenta. No es una aprobación de la ciudad.' : 'Free. Runs on your device. No account. Not a city approval.'}</p>
+      <p>{es ? 'Gratis. Funciona en su dispositivo. No necesita cuenta. No es una aprobación de la ciudad.' : 'Free. Runs on your device. No account. Not a city approval.'}</p>
       <div className="row">
         <button className="btn primary" onClick={() => onStart(false)}>{tr(lang, 'start')}</button>
         <button className="btn" onClick={() => onStart(true)}>{tr(lang, 'demo')}</button>
-        <label className="btn quiet">{lang === 'es' ? 'Abrir un archivo' : 'Open a saved pack'}
-          <input type="file" accept=".permitpack,.json" className="sr" onChange={async e => {
-            const f = e.target.files?.[0]; if (!f) return; const text = await f.text();
-            try { let pass: string | undefined; if (text.includes('permitpack-encrypted')) pass = ((await ask({ title: 'This pack is locked', body: 'Enter the passphrase you were given with the file.', input: 'password', minLength: 1, confirm: 'Open' })) as string | null) ?? undefined; if (!pass) return; onOpen(await openPack(text, pass)); } catch (x) { setErr((x as Error).message); }
-          }} />
+        <label className="btn quiet">{es ? 'Abrir un archivo' : 'Open a saved pack'}
+          <input type="file" accept=".permitpack,.json" className="sr" onChange={async e => { const f = e.target.files?.[0]; e.target.value = ''; if (f) await openFile(f); }} />
         </label>
       </div>
-      <Projects lang={lang} onPick={onPick} />
-      <p style={{ marginTop: 28 }}><button className="btn quiet" onClick={onClean}>{lang === 'es' ? 'Para dibujantes: limpiar un archivo DWG o DXF' : 'For drafters: clean and fix a DWG or DXF file'}</button></p>
-      {(err || loadError) && <p role="alert" style={{ color: 'var(--fix)' }}>{err || `We couldn't open your saved project (${loadError}). A raw copy was kept in this browser; open a backup file instead.`}</p>}
+      {(err || loadError) && <p role="alert" style={{ color: 'var(--fix)' }}>{err || (es ? `No pudimos abrir su proyecto guardado (${loadError}).` : `We couldn't open your saved project (${loadError}).`)}
+        {!err && raw && <> <button className="btn quiet" onClick={() => download('damaged-project.permitpack', raw, 'application/json')}>{es ? 'Descargar la copia guardada' : 'Download the saved copy'}</button></>}</p>}
+      <Projects lang={lang} onPick={onPick} onNew={() => onStart(false)} />
+      <p style={{ marginTop: 28 }}><button className="btn quiet" onClick={onClean}>{es ? 'Para dibujantes: limpiar un archivo DWG o DXF' : 'For drafters: clean and fix a DWG or DXF file'}</button></p>
+      <p className="help" style={{ fontSize: '.82rem' }}>{es ? 'Código abierto (Apache-2.0).' : 'Open source (Apache-2.0).'} <a href="./THIRD_PARTY_NOTICES.txt">{es ? 'Avisos de terceros' : 'Third-party notices'}</a> · <a href="https://github.com/6Diggz/open-permit-hub" target="_blank" rel="noreferrer">{es ? 'Código fuente' : 'Source code'}</a> · {es ? 'Reglas' : 'Rules'} {PACK_ID}, {es ? 'revisadas el' : 'checked'} {PACK.verifiedOn}</p>
     </div>
     <div className="sample" aria-label={L("Example result from the demo lot")}><InspectionCard report={sample} lang={lang} /><ResultList results={sample.results.filter(r => r.status === 'FAIL').slice(0, 1)} lang={lang} /></div>
-    </div>
+    </main>
   );
 }
 
@@ -151,43 +213,64 @@ function TriPick({ id, value, onChange, lang = 'en' as Lang }: { id: string; val
 function Q({ id, label, help, value, onChange }: { id: string; label: string; help?: string; value: Tri; onChange: (v: Tri) => void }) {
   return <div className="field"><label id={id}>{label}</label><TriPick id={id} value={value} onChange={onChange} />{help && <span className="help">{help}</span>}</div>;
 }
-function Len({ id, label, help, mm, onChange, allowZero }: { id: string; label: string; help?: string; mm: number | null; onChange: (mm: number | null) => void; allowZero?: boolean }) {
+/** Length field. Rejects what can't be a size; accepts unusual sizes but says "check this number". */
+function Len({ id, label, help, mm, onChange, allowZero, range }: { id: string; label: string; help?: string; mm: number | null; onChange: (mm: number | null) => void; allowZero?: boolean; range?: readonly [number, number] }) {
   const [txt, setTxt] = useState(mm == null ? '' : fmtFtIn(mm)); const [bad, setBad] = useState(false);
-  useEffect(() => { setTxt(mm == null ? '' : fmtFtIn(mm)); }, [mm]);
+  const [prev, setPrev] = useState(mm); if (prev !== mm) { setPrev(mm); setTxt(mm == null ? '' : fmtFtIn(mm)); }
+  const odd = !bad && range != null && mm != null && outOfRange(mm, range);
   return <div className="field"><label htmlFor={id}>{label}</label>
     <input id={id} value={txt} inputMode="text" aria-invalid={bad} aria-describedby={id + '-h'} onChange={e => setTxt(e.target.value)}
-      onBlur={() => { if (!txt.trim()) { setBad(false); onChange(null); return; } const v = parseLength(txt); const ok = v != null && (allowZero ? v >= 0 : v > 0); setBad(!ok); if (ok) onChange(v); }} />
-    <span className="help" id={id + '-h'}>{bad && /^-|^0+(\.0*)?$/.test(txt.trim()) ? L('Enter a size greater than zero.') : bad ? L("Try a format like 20' 6\", 20-6, 20.5 or 6.25m.") : help ?? L("Feet and inches, like 20' 6\"")}</span></div>;
+      onBlur={() => { if (!txt.trim()) { setBad(false); if (mm != null) onChange(null); return; } const v = parseLength(txt); const ok = v != null && Number.isFinite(v) && (allowZero ? v >= 0 : v > 0); setBad(!ok); if (ok && (mm == null || Math.abs(v - mm) > 1e-6)) onChange(v); }} />
+    <span className="help" id={id + '-h'} style={odd ? { color: 'var(--info-need)' } : undefined}>{bad && lengthTooLarge(txt) ? L('Check this number: it is larger than any lot or building.') : bad && /^-|^0+(\.0*)?$/.test(txt.trim()) ? L('Enter a size greater than zero.') : bad ? L("Try a format like 20' 6\", 20-6, 20.5 or 6.25m.") : odd ? L('Check this number: it looks unusual for a garage ADU.') : help ?? L("Feet and inches, like 20' 6\"")}</span></div>;
 }
-function Num({ id, label, help, value, onChange, min = 0 }: { id: string; label: string; help?: string; value: number | null; onChange: (n: number | null) => void; min?: number }) {
-  return <div className="field"><label htmlFor={id}>{label}</label><input id={id} type="number" min={min} value={value ?? ''} onChange={e => onChange(e.target.value === '' ? null : Math.max(min, Number(e.target.value)))} />{help && <span className="help">{help}</span>}</div>;
+/** Number field with whole-number and range handling that says what happened instead of silently changing the value. */
+function Num({ id, label, help, value, onChange, min = 0, max, integer }: { id: string; label: string; help?: string; value: number | null; onChange: (n: number | null) => void; min?: number; max?: number; integer?: boolean }) {
+  const [msg, setMsg] = useState('');
+  return <div className="field"><label htmlFor={id}>{label}</label><input id={id} type="number" min={min} max={max} step={integer ? 1 : 'any'} inputMode={integer ? 'numeric' : 'decimal'} value={value ?? ''} aria-describedby={id + '-h'}
+    onChange={e => { if (e.target.value === '') { setMsg(''); onChange(null); return; } let n = Number(e.target.value); if (!Number.isFinite(n)) return; let m = '';
+      if (integer && !Number.isInteger(n)) { n = Math.round(n); m = L('Use a whole number.'); }
+      if (n < min) { n = min; m = `${L('The smallest allowed is')} ${min}.`; }
+      if (max != null && n > max) m = L('Check this number: it looks unusual for a garage ADU.');
+      setMsg(m); onChange(n); }} />
+    <span className="help" id={id + '-h'} style={msg ? { color: 'var(--info-need)' } : undefined}>{msg || help}</span></div>;
 }
 
-type U = (fn: (d: Project) => void) => void;
+type U = (fn: (d: Project) => void, key?: string) => void;
+
+/** Lot is in another city or unincorporated county area if the address names one of these. */
+const OTHER_PLACES = /\b(pasadena|glendale|burbank|long beach|santa monica|beverly hills|culver city|inglewood|west hollywood|san fernando|torrance|east los angeles|east la|view park|windsor hills|altadena|marina del rey|ladera heights|west athens|florence|willowbrook|topanga|la crescenta)\b/i;
 
 function LotStep({ p, update }: { p: Project; update: U; lang: Lang }) {
-  const lb = bbox(p.site.lot), hb = bbox(p.site.primary); const f = p.site.flags;
+  const lb = bbox(p.site.lot), hb = bbox(p.site.primary); const f = p.site.flags; const s = p.site;
   const zimas = `https://zimas.lacity.org/?address=${encodeURIComponent(p.site.address)}`;
   const setLot = (w: number | null, dpt: number | null) => update(d => { d.confirmed.lot = true; const W = w ?? lb.maxX - lb.minX, D = dpt ?? lb.maxY - lb.minY; d.site.lot = rect(0, 0, W, D); });
+  const other = p.site.address.match(OTHER_PLACES)?.[0];
   return <>
     <h2>{L("The lot")}</h2>
     <p className="lead">{L("Enter the address, then check the parcel in ZIMAS. It's the city's free map, and it answers most of the questions below.")}</p>
     <div className="grid2">
-      <div className="field"><label htmlFor="addr">{L("Street address")}</label><input id="addr" value={p.site.address} onChange={e => update(d => { d.site.address = e.target.value; })} autoComplete="street-address" /><span className="help">{p.site.address ? <a href={zimas} target="_blank" rel="noreferrer">{L("Open this address in ZIMAS")}</a> : L("Used only on your sheets. It stays on this device.")}</span></div>
-      <div className="field"><label htmlFor="apn">{L("Parcel number (APN)")}</label><input id="apn" value={p.site.apn} onChange={e => update(d => { d.site.apn = e.target.value; })} placeholder="1234-567-890" /><span className="help">{L("The 10-digit number on your property tax bill.")}</span></div>
+      <div className="field"><label htmlFor="addr">{L("Street address")}</label><input id="addr" value={p.site.address} onChange={e => update(d => { d.site.address = e.target.value; }, 'addr')} autoComplete="street-address" /><span className="help">{p.site.address ? <a href={zimas} target="_blank" rel="noreferrer">{L("Open this address in ZIMAS")}</a> : L("Used only on your sheets. It stays on this device.")}</span></div>
+      <div className="field"><label htmlFor="apn">{L("Parcel number (APN)")}</label><input id="apn" value={p.site.apn} onChange={e => update(d => { d.site.apn = e.target.value; }, 'apn')} placeholder="1234-567-890" /><span className="help">{L("The 10-digit number on your property tax bill.")}</span></div>
       <div className="field"><label htmlFor="jur">{L("City")}</label><select id="jur" value={p.site.jurisdiction} onChange={e => update(d => { d.site.jurisdiction = e.target.value as Project['site']['jurisdiction']; })}>
         <option value="unknown">{L("Not sure yet")}</option><option value="la-city">{L("City of Los Angeles")}</option><option value="la-county">{L("Unincorporated LA County")}</option><option value="other">{L("Another city")}</option></select>
-        <span className="help">{L("Glendale, Santa Monica and others are separate cities with their own rules.")}</span></div>
+        <span className="help">{L("A \"Los Angeles\" mailing address is not always LA City. Pasadena, Long Beach, Glendale, Burbank and Santa Monica are separate cities, and East LA, View Park and Altadena are unincorporated county. ZIMAS shows if the lot is in LA City.")}</span></div>
+    </div>
+    {other && p.site.jurisdiction === 'la-city' && <div className="banner warn" role="status">{L("The address names a place that is not in the City of Los Angeles:")} {other}. {L("Check the parcel in ZIMAS before you rely on these rules.")}</div>}
+    <div className="grid2">
+      <div className="field"><label htmlFor="mb">{L("What is the main building on the lot?")}</label><select id="mb" value={s.mainBuilding} onChange={e => update(d => { d.site.mainBuilding = e.target.value as Project['site']['mainBuilding']; })}>
+        <option value="unknown">{L("Not sure yet")}</option><option value="sfd">{L("One single-family house")}</option><option value="duplex">{L("A duplex")}</option><option value="multifamily">{L("Apartments (3 or more units)")}</option></select></div>
+      <Num id="exa" label={L("ADUs already on the lot")} integer max={4} value={s.existingAdus} onChange={v => update(d => { d.site.existingAdus = v; })} help={L("Count permitted and unpermitted ones. 0 if none.")} />
+      <Num id="exj" label={L("Junior ADUs already on the lot")} integer max={4} value={s.existingJadus} onChange={v => update(d => { d.site.existingJadus = v; })} help={L("A junior ADU is a unit inside the house, up to 500 sq ft. 0 if none.")} />
     </div>
     <div className="grid2">
-      <Len id="lw" label={L("Lot width (street side)")} mm={lb.maxX - lb.minX} onChange={v => setLot(v, null)} />
-      <Len id="ld" label={L("Lot depth")} mm={lb.maxY - lb.minY} onChange={v => setLot(null, v)} />
-      <Len id="err" label={L("How sure are the lot lines?")} mm={p.site.lotUncertaintyMm} onChange={v => update(d => { d.site.lotUncertaintyMm = v ?? ft(2); })} help={L("County maps can be off by a couple of feet. A survey makes this 0.")} />
+      <Len id="lw" range={RANGES.lot} label={L("Lot width (street side)")} mm={lb.maxX - lb.minX} onChange={v => setLot(v, null)} />
+      <Len id="ld" range={RANGES.lot} label={L("Lot depth")} mm={lb.maxY - lb.minY} onChange={v => setLot(null, v)} />
+      <Len id="err" allowZero range={RANGES.uncertainty} label={L("How sure are the lot lines?")} mm={p.site.lotUncertaintyMm} onChange={v => update(d => { d.site.lotUncertaintyMm = v ?? ft(2); })} help={L("County maps can be off by a couple of feet. A survey makes this 0.")} />
     </div>
     <div className="grid2">
-      <Len id="hw" label={L("House width")} mm={hb.maxX - hb.minX} onChange={v => update(d => { d.confirmed.house = true; d.site.primary = rect(hb.minX, hb.minY, v ?? hb.maxX - hb.minX, hb.maxY - hb.minY); })} />
-      <Len id="hd" label={L("House depth")} mm={hb.maxY - hb.minY} onChange={v => update(d => { d.confirmed.house = true; d.site.primary = rect(hb.minX, hb.minY, hb.maxX - hb.minX, v ?? hb.maxY - hb.minY); })} />
-      <Len id="hy" label={L("House distance from street line")} mm={hb.minY} onChange={v => update(d => { d.confirmed.house = true; d.site.primary = rect(hb.minX, v ?? hb.minY, hb.maxX - hb.minX, hb.maxY - hb.minY); })} />
+      <Len id="hw" range={RANGES.building} label={L("House width")} mm={hb.maxX - hb.minX} onChange={v => update(d => { d.confirmed.house = true; d.site.primary = rect(hb.minX, hb.minY, v ?? hb.maxX - hb.minX, hb.maxY - hb.minY); })} />
+      <Len id="hd" range={RANGES.building} label={L("House depth")} mm={hb.maxY - hb.minY} onChange={v => update(d => { d.confirmed.house = true; d.site.primary = rect(hb.minX, hb.minY, hb.maxX - hb.minX, v ?? hb.maxY - hb.minY); })} />
+      <Len id="hy" allowZero range={RANGES.setback} label={L("House distance from street line")} mm={hb.minY} onChange={v => update(d => { d.confirmed.house = true; d.site.primary = rect(hb.minX, v ?? hb.minY, hb.maxX - hb.minX, hb.maxY - hb.minY); })} />
     </div>
     <h2>{L("What ZIMAS shows")}</h2>
     <div className="grid2">
@@ -197,7 +280,7 @@ function LotStep({ p, update }: { p: Project; update: U; lang: Lang }) {
       <Q id="q-coast" label={L("Coastal Zone?")} value={f.coastal} onChange={v => update(d => { d.site.flags.coastal = v; })} />
       <Q id="q-meth" label={L("Methane zone?")} value={f.methane} onChange={v => update(d => { d.site.flags.methane = v; })} />
       <Q id="q-burn" label={L("In a 2025 burn area (Palisades or Eaton)?")} value={f.fireRebuild} onChange={v => update(d => { d.site.flags.fireRebuild = v; })} />
-      <Q id="q-tr" label={L("Within a half-mile walk of major transit?")} help={L("Walking distance, not a straight line.")} value={f.transitHalfMile} onChange={v => update(d => { d.site.flags.transitHalfMile = v; })} />
+      <Q id="q-tr" label={L("Within a half-mile walk of a major transit stop or a frequent bus corridor?")} help={L("Walking distance, not a straight line. A high-quality transit corridor counts too.")} value={f.transitHalfMile} onChange={v => update(d => { d.site.flags.transitHalfMile = v; })} />
       <Q id="q-slope" label={L("Lot slopes more than 10%?")} value={f.slopeOver10} onChange={v => update(d => { d.site.flags.slopeOver10 = v; })} />
       <Q id="q-spk" label={L("Does the main house have fire sprinklers?")} value={f.primarySprinklered} onChange={v => update(d => { d.site.flags.primarySprinklered = v; })} />
       <Q id="q-rent" label={L("Is any unit on the lot rented now?")} value={f.anyUnitRented} onChange={v => update(d => { d.site.flags.anyUnitRented = v; })} />
@@ -225,49 +308,52 @@ function GarageStep({ p, update }: { p: Project; update: U }) {
         <button aria-pressed={a.garageAttachment === 'unknown'} onClick={() => update(d => { d.adu.garageAttachment = 'unknown'; })}>{tr(LANG, 'unknown')}</button>
       </div><span className="help">{L("The city uses sheet II-C for detached garages and II-G for attached ones.")}</span></div>}
     {a.mode === 'youadu' && <div><button className="btn" onClick={() => { const r = autoFit(p); setScanMsg(r.why); if (r.footprint) update(d => { d.adu.footprint = r.footprint!; }); }}>{L("Fit it on my lot")}</button> <span role="status" className="help">{scanMsg}</span></div>}
-    {a.mode === 'youadu' && <p className="lead"><a href="https://dbs.lacity.gov/services/plan-review-permitting/standard-plan-program" target="_blank" rel="noreferrer">{L("See the LA Standard Plan list")}</a>. Enter the footprint from the plan sheet below.</p>}
+    {a.mode === 'youadu' && <p className="lead"><a href="https://dbs.lacity.gov/services/plan-review-permitting/standard-plan-program" target="_blank" rel="noreferrer">{L("See the LA Standard Plan list")}</a>. {L("Enter the footprint from the plan sheet below.")}</p>}
     <div className="grid2">
-      <Len id="gw" label={L("Outside width")} mm={fb.maxX - fb.minX} onChange={v => resize(v, null)} />
-      <Len id="gd" label={L("Outside depth")} mm={fb.maxY - fb.minY} onChange={v => resize(null, v)} />
+      <Len id="gw" range={RANGES.building} label={L("Outside width")} mm={fb.maxX - fb.minX} onChange={v => resize(v, null)} />
+      <Len id="gd" range={RANGES.building} label={L("Outside depth")} mm={fb.maxY - fb.minY} onChange={v => resize(null, v)} />
       <Len allowZero id="gx" label={L("Distance from the left side line")} help={L("Facing the lot from the street.")} mm={fb.minX - bbox(p.site.lot).minX} onChange={v => { if (v != null) update(d => { d.confirmed.adu = true; d.adu.footprint = translate(d.adu.footprint, v - (fb.minX - bbox(p.site.lot).minX), 0); }); }} />
       <Len allowZero id="gy" label={L("Distance from the rear line")} mm={bbox(p.site.lot).maxY - fb.maxY} onChange={v => { if (v != null) update(d => { d.confirmed.adu = true; d.adu.footprint = translate(d.adu.footprint, 0, (bbox(p.site.lot).maxY - fb.maxY) - v); }); }} />
-      <Len id="gh" label={L("Overall height")} mm={a.heightMm} onChange={v => update(d => { d.adu.heightMm = v ?? d.adu.heightMm; })} />
-      <Len id="gc" label={L("Finished ceiling height")} mm={a.ceilingHeightMm} onChange={v => update(d => { d.adu.ceilingHeightMm = v; })} help={L("After insulation and drywall. Garages often come out short.")} />
-      <Num id="gs" label={L("Interior livable area (sq ft)")} value={a.interiorLivableSqFt} onChange={v => update(d => { d.adu.interiorLivableSqFt = v; })} help={`Inside the walls. Outside footprint is ${fmtSqFt(area(a.footprint))}.`} />
-      {a.mode === 'conversion' && <Num id="ga" label={L("Added floor area (sq ft)")} value={a.addedAreaSqFt} onChange={v => update(d => { d.adu.addedAreaSqFt = v ?? 0; })} />}
-      <Num id="hp" label={L("Walking distance from street curb to the farthest point (ft)")} value={a.hosePullFt} onChange={v => update(d => { d.adu.hosePullFt = v; })} help={L("Firefighters drag hose along this path.")} />
+      <Len id="gh" range={RANGES.height} label={L("Overall height")} mm={a.heightMm} onChange={v => update(d => { d.adu.heightMm = v ?? d.adu.heightMm; })} />
+      <Len id="gc" range={RANGES.ceiling} label={L("Finished ceiling height")} mm={a.ceilingHeightMm} onChange={v => update(d => { d.adu.ceilingHeightMm = v; })} help={L("After insulation and drywall. Garages often come out short.")} />
+      <Len allowZero id="ge" range={[0, ft(4)]} label={L("Eave depth (roof overhang past the wall)")} mm={a.eaveDepthMm} onChange={v => update(d => { d.adu.eaveDepthMm = v; })} help={L("Enter 0 if the roof stops at the wall. Eaves near a property line are limited.")} />
+      <Num id="gs" max={1200} label={L("Interior livable area (sq ft)")} value={a.interiorLivableSqFt} onChange={v => update(d => { d.adu.interiorLivableSqFt = v; })} help={`${L("Inside the walls. Outside footprint is")} ${fmtSqFt(area(a.footprint))}.`} />
+      {a.mode === 'conversion' && <Num id="ga" max={150} label={L("Added floor area (sq ft)")} value={a.addedAreaSqFt} onChange={v => update(d => { d.adu.addedAreaSqFt = v ?? 0; })} />}
+      {a.mode === 'conversion' && a.addedAreaSqFt > 0 && <Len allowZero id="gas" range={RANGES.setback} label={L("Closest distance from the added part to a side or rear line")} mm={a.addedSetbackMm} onChange={v => update(d => { d.adu.addedSetbackMm = v; })} help={L("Additions need 4 ft from side and rear lines.")} />}
+      <Num id="hp" max={1000} label={L("Walking distance from street curb to the farthest point (ft)")} value={a.hosePullFt} onChange={v => update(d => { d.adu.hosePullFt = v; })} help={L("Firefighters drag hose along this path.")} />
     </div>
     <div className="grid2">
       {a.mode === 'conversion' && <Q id="q-perm" label={L("Was the garage built with a permit?")} value={a.existingStructurePermitted} onChange={v => update(d => { d.adu.existingStructurePermitted = v; })} help={L("Check LADBS permit records for the address.")} />}
       {a.mode === 'conversion' && <Q id="q-2020" label={L("Was it built before 2020?")} value={a.builtBefore2020} onChange={v => update(d => { d.adu.builtBefore2020 = v; })} />}
+      {a.mode === 'conversion' && a.existingStructurePermitted !== 'yes' && <Q id="q-home" label={L("Was it already used as a separate home before January 1, 2020?")} help={L("Only a unit people already lived in counts for AB 2533. A garage converted now does not.")} value={a.usedAsHomeBefore2020} onChange={v => update(d => { d.adu.usedAsHomeBefore2020 = v; })} />}
       {a.mode === 'conversion' && <Q id="q-door" label={L("Will you fill in or change the garage door opening?")} value={a.removesGarageDoorWall} onChange={v => update(d => { d.adu.removesGarageDoorWall = v; })} />}
       {a.mode === 'conversion' && <Q id="q-inside" label={L("Does the ADU stay inside the existing walls?")} value={a.staysInsideWalls} onChange={v => update(d => { d.adu.staysInsideWalls = v; })} />}
       {a.mode === 'conversion' && a.addedAreaSqFt > 0 && <Q id="q-ingress" label={L("Is the added area only for the entry?")} value={a.addedForIngressOnly} onChange={v => update(d => { d.adu.addedForIngressOnly = v; })} />}
       <Q id="q-slab" label={L("Does the slab have a vapor barrier, or will you add an approved epoxy coating?")} value={a.slabVaporBarrier} onChange={v => update(d => { d.adu.slabVaporBarrier = v; })} />
-      <Q id="q-open" label={L("Any windows, doors or vents in walls under 5 ft from the property line?")} value={a.openingsNearLine} onChange={v => update(d => { d.adu.openingsNearLine = v; })} />
-      <Q id="q-rated" label={L("Do you plan a 1-hour fire-rated wall where it is close to the line?")} value={a.ratedWallPlanned} onChange={v => update(d => { d.adu.ratedWallPlanned = v; })} />
+      <Q id="q-open" label={L("Any windows, doors or vents in walls under 5 ft from the property line or the halfway line to the house?")} value={a.openingsNearLine} onChange={v => update(d => { d.adu.openingsNearLine = v; })} />
+      <Q id="q-rated" label={L("Do you plan a 1-hour fire-rated wall where it is close to the line or the house?")} value={a.ratedWallPlanned} onChange={v => update(d => { d.adu.ratedWallPlanned = v; })} />
       {a.mode === 'youadu' && <Q id="q-pitch" label={L("Does the ADU roof pitch match the main house?")} value={a.roofPitchMatches} onChange={v => update(d => { d.adu.roofPitchMatches = v; })} />}
       <Q id="q-aspk" label={L("Will the ADU have fire sprinklers?")} value={a.sprinklered} onChange={v => update(d => { d.adu.sprinklered = v; })} />
       <Q id="q-elec" label={L("All-electric (no gas)?")} value={a.allElectric} onChange={v => update(d => { d.adu.allElectric = v; })} />
       {a.allElectric !== 'yes' && <Q id="q-gasm" label={L("Will the ADU have its own gas meter?")} value={a.separateGasMeter} onChange={v => update(d => { d.adu.separateGasMeter = v; })} />}
     </div>
     <div className="grid2">
-      <Len allowZero id="fps" label={L("Side setback written on the floor plan")} mm={a.floorPlanSideSetbackMm} onChange={v => update(d => { d.adu.floorPlanSideSetbackMm = v; })} help={L("We compare it with the site plan.")} />
-      <Len allowZero id="fpr" label={L("Rear setback written on the floor plan")} mm={a.floorPlanRearSetbackMm} onChange={v => update(d => { d.adu.floorPlanRearSetbackMm = v; })} help={L("We compare it with the site plan.")} />
-      <Num id="amps" label={L("Main electrical panel size (amps)")} value={a.panelAmps} onChange={v => update(d => { d.adu.panelAmps = v; })} help={L("Printed on the main breaker.")} />
+      <Len allowZero id="fps" range={RANGES.setback} label={L("Side setback written on the floor plan")} mm={a.floorPlanSideSetbackMm} onChange={v => update(d => { d.adu.floorPlanSideSetbackMm = v; })} help={L("We compare it with the site plan.")} />
+      <Len allowZero id="fpr" range={RANGES.setback} label={L("Rear setback written on the floor plan")} mm={a.floorPlanRearSetbackMm} onChange={v => update(d => { d.adu.floorPlanRearSetbackMm = v; })} help={L("We compare it with the site plan.")} />
+      <Num id="amps" max={800} label={L("Main electrical panel size (amps)")} value={a.panelAmps} onChange={v => update(d => { d.adu.panelAmps = v; })} help={L("Printed on the main breaker.")} />
     </div>
-    {a.mode === 'conversion' && <div className="mods"><label><input type="checkbox" checked={a.legalization} onChange={e => update(d => { d.adu.legalization = e.target.checked; })} /> {L("Legalize an unpermitted unit built before 2020 (AB 2533)")}</label></div>}
+    {a.mode === 'conversion' && <div className="mods"><label><input type="checkbox" checked={a.legalization} onChange={e => update(d => { d.adu.legalization = e.target.checked; })} /> {L("Legalize an unpermitted unit that was already a home before 2020 (AB 2533)")}</label></div>}
     <h2>{L("Import a scan (optional)")}</h2>
     <p className="lead">{L("Scan the inside with Polycam (GLTF) or an app that exports Apple RoomPlan JSON. You can always type sizes instead.")}</p>
     <div className="grid2">
       <div className="field"><label htmlFor="scan">{L("Scan file")}</label><input id="scan" type="file" accept=".gltf,.glb,.json" onChange={async e => {
-        const file = e.target.files?.[0]; if (!file) return; setScanMsg('Reading scan...');
+        const file = e.target.files?.[0]; if (!file) return; setScanMsg(L('Reading scan...'));
         try {
           const r = file.name.endsWith('.json') ? fromRoomPlanJSON(await file.text()) : await fromGLTF(await file.arrayBuffer());
           let fp = r.footprint; let msg = `${r.source}: ${fmtFtIn(bbox(fp).maxX)} x ${fmtFtIn(bbox(fp).maxY)}. ${r.note}`;
           if (tape) { const t = tapeCheck(bbox(fp).maxX, tape); if (t.rescan) { setScanMsg(`The scan is ${t.driftPct.toFixed(1)}% off your tape. Scan again in better light.`); return; } fp = fp.map(q => ({ x: q.x * t.factor, y: q.y * t.factor })); msg += ` Scaled to your tape (${t.driftPct.toFixed(1)}% change).`; }
           update(d => { d.adu.footprint = translate(fp, fb.minX, fb.minY); if (r.heightMm) d.adu.ceilingHeightMm = r.heightMm; }); setScanMsg(msg);
-        } catch (x) { setScanMsg((x as Error).message); }
+        } catch (x) { setScanMsg(plainWasmError(x)); }
       }} /><span className="help" role="status">{scanMsg}</span></div>
       <Len id="tape" label={L("Tape-measured width (to check the scan)")} mm={tape} onChange={setTape} help={L("Measure the same wall with a tape. Scans drift.")} />
     </div>
@@ -276,24 +362,25 @@ function GarageStep({ p, update }: { p: Project; update: U }) {
 
 function RoomsStep({ p, update }: { p: Project; update: U }) {
   const a = p.adu;
-  const setW = (i: number, patch: Partial<Window>) => update(d => { d.adu.windows[i] = { ...d.adu.windows[i], ...patch }; });
+  const setW = (i: number, patch: Partial<Window>, key?: string) => update(d => { d.adu.windows[i] = { ...d.adu.windows[i], ...patch }; }, key);
   return <>
     <h2>{L("Rooms, windows and alarms")}</h2>
     <p className="lead">{L("Every bedroom needs a window you can climb out of. Measure the clear opening when the window is fully open, not the size on the label.")}</p>
-    <div className="grid2"><Num id="beds" label={L("Bedrooms")} value={a.bedrooms} onChange={v => update(d => { d.adu.bedrooms = v ?? 0; })} />
+    <div className="grid2"><Num id="beds" integer max={6} label={L("Bedrooms")} value={a.bedrooms} onChange={v => update(d => { d.adu.bedrooms = v ?? 0; })} help={L("0 for a studio.")} />
+      {a.bedrooms === 0 && <Q id="q-studio" label={L("Studio: will anyone sleep in the main room?")} help={L("If yes or not sure, the main room needs an escape window.")} value={a.mainRoomSleeping} onChange={v => update(d => { d.adu.mainRoomSleeping = v; })} />}
       <Q id="q-alarm" label={L("Smoke and CO alarms shown on the plan?")} value={a.smokeCoPlanned} onChange={v => update(d => { d.adu.smokeCoPlanned = v; })} />
       <Q id="q-hw" label={L("Are smoke alarms hardwired with battery backup?")} value={a.smokeHardwired} onChange={v => update(d => { d.adu.smokeHardwired = v; })} /></div>
     {a.windows.map((w, i) => <fieldset key={w.id} className="grid2" style={{ border: '1px solid var(--rule)', padding: 12 }}>
-      <legend>Window {i + 1}</legend>
-      <div className="field"><label htmlFor={`wr${i}`}>{L("Room")}</label><input id={`wr${i}`} value={w.room} onChange={e => setW(i, { room: e.target.value })} /></div>
-      <Len id={`ww${i}`} label={L("Clear width")} mm={w.clearWidthMm} onChange={v => setW(i, { clearWidthMm: v })} />
-      <Len id={`wh${i}`} label={L("Clear height")} mm={w.clearHeightMm} onChange={v => setW(i, { clearHeightMm: v })} />
-      <Len id={`ws${i}`} label={L("Sill height above floor")} mm={w.sillMm} onChange={v => setW(i, { sillMm: v })} />
-      <div className="mods"><label><input type="checkbox" checked={w.sleeping} onChange={e => setW(i, { sleeping: e.target.checked })} /> This is a bedroom escape window</label>
-        <label><input type="checkbox" checked={w.gradeFloor} onChange={e => setW(i, { gradeFloor: e.target.checked })} /> Ground-level floor</label>
+      <legend>{L("Window")} {i + 1}</legend>
+      <div className="field"><label htmlFor={`wr${i}`}>{L("Room")}</label><input id={`wr${i}`} value={w.room} onChange={e => setW(i, { room: e.target.value }, 'wr' + w.id)} aria-describedby={`wr${i}-h`} /><span className="help" id={`wr${i}-h`}>{L("Give each bedroom its own name, like Bedroom 1 and Bedroom 2.")}</span></div>
+      <Len id={`ww${i}`} range={RANGES.window} label={L("Clear width")} mm={w.clearWidthMm} onChange={v => setW(i, { clearWidthMm: v })} />
+      <Len id={`wh${i}`} range={RANGES.window} label={L("Clear height")} mm={w.clearHeightMm} onChange={v => setW(i, { clearHeightMm: v })} />
+      <Len allowZero id={`ws${i}`} range={RANGES.sill} label={L("Sill height above floor")} mm={w.sillMm} onChange={v => setW(i, { sillMm: v })} />
+      <div className="mods"><label><input type="checkbox" checked={w.sleeping} onChange={e => setW(i, { sleeping: e.target.checked })} /> {L("This is a bedroom escape window")}</label>
+        <label><input type="checkbox" checked={w.gradeFloor} onChange={e => setW(i, { gradeFloor: e.target.checked })} /> {L("Ground-level floor")}</label>
         <button className="btn quiet" onClick={() => update(d => { d.adu.windows.splice(i, 1); })}>{L("Remove window")}</button></div>
     </fieldset>)}
-    <div><button className="btn" onClick={() => update(d => { d.adu.windows.push({ id: crypto.randomUUID(), room: 'Bedroom', sleeping: true, clearWidthMm: null, clearHeightMm: null, sillMm: null, gradeFloor: true }); })}>{L("Add a window")}</button></div>
+    <div><button className="btn" onClick={() => update(d => { const n = d.adu.windows.filter(x => x.sleeping).length; d.adu.windows.push({ id: uid(), room: d.adu.bedrooms === 0 ? L('Main room') : d.adu.bedrooms > 1 ? `${L('Bedroom')} ${n + 1}` : L('Bedroom'), sleeping: true, clearWidthMm: null, clearHeightMm: null, sillMm: null, gradeFloor: true }); })}>{L("Add a window")}</button></div>
   </>;
 }
 
@@ -301,52 +388,59 @@ function ChecksStep({ p, update, report, lang }: { p: Project; update: U; report
   return <>
     <h2>{L("Checks")}</h2>
     <p className="lead">{L("Turn off a group only if someone else is handling it. Anything off prints as \"not checked\" on every export. Safety groups must be on to export.")}</p>
-    <div className="mods">{MODULES.map(m => <label key={m.id}><input type="checkbox" checked={p.modules[m.id]} onChange={e => update(d => { d.modules[m.id] = e.target.checked; })} /> {m.label}{m.safety ? ' (safety)' : ''}</label>)}</div>
+    <div className="mods">{MODULES.map(m => <label key={m.id}><input type="checkbox" checked={p.modules[m.id]} onChange={e => update(d => { d.modules[m.id] = e.target.checked; })} /> {L(m.label)}{m.safety ? ` (${L('safety')})` : ''}</label>)}</div>
     <SheetItems p={p} update={update} report={report} lang={lang} />
     <h2>{L("Notes you've dismissed")}</h2>
-    {p.dismissed.length === 0 ? <p className="lead">{L("None. You can dismiss a minor or major item with a reason. Critical items can't be dismissed.")}</p> :
+    {p.dismissed.length === 0 ? <p className="lead">{L("None. You can dismiss a minor or major item with a reason. Critical and health-and-safety items can't be dismissed.")}</p> :
       <ul>{p.dismissed.map(x => <li key={x.ruleId}>{x.ruleId}: {x.reason} <button className="btn quiet" onClick={() => update(d => { d.dismissed = d.dismissed.filter(y => y.ruleId !== x.ruleId); })}>{L("Restore")}</button></li>)}</ul>}
-    <div className="mods">{report.results.filter(r => (r.status === 'FAIL' || r.status === 'UNKNOWN') && r.rule.severity !== 'critical' && !r.dismissed).map(r =>
-      <label key={r.rule.id}><button className="btn quiet" onClick={async () => { const reason = await ask({ title: L('Dismiss this item?'), body: `${r.rule.title[lang]}. ${L('Your reason prints on the report.')}`, input: 'text', minLength: 3, confirm: L('Dismiss') }) as string | null; if (reason) update(d => { d.dismissed.push({ ruleId: r.rule.id, reason, at: new Date().toISOString(), ruleVersion: r.rule.version }); }); }}>{L("Dismiss")}</button> {r.rule.id} {r.rule.title[lang]}</label>)}</div>
+    <div className="mods">{report.results.filter(r => (r.status === 'FAIL' || r.status === 'UNKNOWN') && canDismiss(r.rule) && !r.dismissed).map(r =>
+      <label key={r.rule.id}><button className="btn quiet" onClick={async () => { const reason = await ask({ title: L('Dismiss this item?'), body: `${r.rule.title[lang]}. ${L('Your reason prints on the report.')}`, input: 'text', minLength: 3, confirm: L('Dismiss'), cancel: L('Cancel'), labels: { field: L('Reason'), short: L('Type a short reason first.') } }) as string | null; if (reason) update(d => { d.dismissed.push({ ruleId: r.rule.id, reason, at: new Date().toISOString(), ruleVersion: r.rule.version }); }); }}>{L("Dismiss")}</button> {r.rule.id} {r.rule.title[lang]}</label>)}</div>
   </>;
 }
 
 function ExportStep({ p, update, report, lang }: { p: Project; update: U; report: Report; lang: Lang }) {
-  const blockers = exportBlockers(p, report); const [busy, setBusy] = useState(''); const [note, setNote] = useState(''); const [filed, setFiled] = useState('');
-  const run = async (label: string, fn: () => Promise<void>) => { setBusy(label); setNote(''); try { await fn(); setNote(L('Saved to your downloads.')); } catch (e) { setNote((e as Error).message); } setBusy(''); };
-  const t = takeoff(p);
+  const blockers = exportBlockers(p, report); const [busy, setBusy] = useState(''); const [note, setNote] = useState(''); const [filed, setFiled] = useState(''); const [issued, setIssued] = useState('');
+  const run = async (label: string, fn: () => Promise<void>) => { setBusy(label); setNote(''); try { await fn(); setNote(L('Saved to your downloads.')); } catch (e) { setNote(plainWasmError(e)); } setBusy(''); };
+  const t = takeoff(p); const es = lang === 'es';
+  const missing = missingGlyphNote(p, es);
   return <>
     <h2>{L("People on the plans")}</h2>
     <div className="grid2">
-      <div className="field"><label htmlFor="own">{L("Property owner")}</label><input id="own" value={p.people.ownerName} onChange={e => update(d => { d.people.ownerName = e.target.value; })} /></div>
+      <div className="field"><label htmlFor="own">{L("Property owner")}</label><input id="own" value={p.people.ownerName} onChange={e => update(d => { d.people.ownerName = e.target.value; }, 'own')} /></div>
       <div className="field"><label htmlFor="role">{L("Who prepares the final plans?")}</label><select id="role" value={p.people.preparerRole} onChange={e => update(d => { d.people.preparerRole = e.target.value as Project['people']['preparerRole']; })}>
         <option value="owner">{L("Me, the owner")}</option><option value="drafter">{L("A drafter or designer")}</option><option value="architect">{L("A licensed architect")}</option><option value="engineer">{L("A licensed engineer")}</option><option value="contractor">{L("A licensed contractor")}</option></select></div>
-      <div className="field"><label htmlFor="pn">{L("Preparer name")}</label><input id="pn" value={p.people.preparerName} onChange={e => update(d => { d.people.preparerName = e.target.value; })} /></div>
-      {p.people.preparerRole !== 'owner' && <div className="field"><label htmlFor="pl">{L("License number (if any)")}</label><input id="pl" value={p.people.preparerLicense} onChange={e => update(d => { d.people.preparerLicense = e.target.value; })} /></div>}
+      <div className="field"><label htmlFor="pn">{L("Preparer name")}</label><input id="pn" value={p.people.preparerName} onChange={e => update(d => { d.people.preparerName = e.target.value; }, 'pn')} /></div>
+      {p.people.preparerRole !== 'owner' && <div className="field"><label htmlFor="pl">{L("License number (if any)")}</label><input id="pl" value={p.people.preparerLicense} onChange={e => update(d => { d.people.preparerLicense = e.target.value; }, 'pl')} /></div>}
+      {p.adu.mode === 'conversion' && p.adu.removesGarageDoorWall === 'yes' && <div className="field"><label htmlFor="eng">{L("Licensed engineer for the garage door wall")}</label><input id="eng" value={p.people.engineerName} onChange={e => update(d => { d.people.engineerName = e.target.value; }, 'eng')} aria-describedby="eng-h" /><span className="help" id="eng-h">{L("Changing that wall is not conventional framing, so an engineer details it.")}</span></div>}
     </div>
+    <p className="help" style={{ color: 'var(--pencil)', fontSize: '.82rem' }}>{L("The sheets print the preparer's name and role. This app is a tool; it is not the preparer of your plans.")}</p>
     <h2>{L("Download")}</h2>
     <p className="lead">{L("Nothing here is a permit. Your preparer finalizes the handoff packet and submits it to the city.")}</p>
     {blockers.length > 0 && <div className="banner warn" role="alert"><strong>{L("The handoff packet is locked:")}</strong><ul style={{ margin: '4px 0 0' }}>{blockers.map(b => <li key={b}>{L(b)}</li>)}</ul>{L("Draft sheets and the check report still work.")}</div>}
+    {missing && <div className="banner warn" role="status">{missing}</div>}
     <div className="mods" style={{ gridTemplateColumns: 'repeat(auto-fit,minmax(240px,1fr))', display: 'grid' }}>
       <button className="btn primary" disabled={!!busy} onClick={() => run('report', async () => { const { reportPDF } = await import('../out/pdf'); download(`${slug(p)}-check-report-${lang}.pdf`, await reportPDF(p, report, lang) as BlobPart, 'application/pdf'); })}>{L("Check report (PDF)")}</button>
+      <button className="btn" disabled={!!busy} onClick={() => run('html', async () => { const { reportHTML } = await import('../out/reporthtml'); download(`${slug(p)}-check-report-${lang}.html`, reportHTML(p, report, lang), 'text/html'); })}>{L("Check report for screen readers (HTML)")}</button>
       <button className="btn" disabled={!!busy} onClick={() => run('draft', async () => { const { sheetsPDF } = await import('../out/pdf'); download(`${slug(p)}-draft-site-plan.pdf`, await sheetsPDF(p, 'draft') as BlobPart, 'application/pdf'); })}>{L("Draft site plan (PDF, 24x36)")}</button>
       <button className="btn" disabled={!!busy || isDemo(p)} onClick={() => run('pre', async () => { const { sheetsPDF } = await import('../out/pdf'); download(`${slug(p)}-city-precheck.pdf`, await sheetsPDF(p, 'precheck') as BlobPart, 'application/pdf'); })}>{L("Copy for the city's AI pre-check")}</button>
       <button className="btn" disabled={!!busy || blockers.length > 0} onClick={() => run('zip', async () => { const { handoffZip } = await import('../out/handoff'); download(`${slug(p)}-handoff-packet.zip`, await handoffZip(p, report) as BlobPart, 'application/zip'); })}>{L("Handoff packet for your preparer (ZIP)")}</button>
-      <button className="btn" disabled={!!busy} onClick={() => run('dxf', async () => { const { toDXF } = await import('../out/dxf'); download(`${slug(p)}-site-plan.dxf`, toDXF(p), 'application/dxf'); })}>{L("Site plan for CAD (DXF)")}</button>
-      <button className="btn" onClick={() => download(`${slug(p)}-materials.csv`, takeoffCSV(t), 'text/csv')}>{L("Materials list (CSV)")}</button>
+      <button className="btn" disabled={!!busy} onClick={() => run('dxf', async () => { const { toDXF } = await import('../out/dxf'); download(`${slug(p)}-site-plan.dxf`, await toDXF(p) as BlobPart, 'application/dxf'); })}>{L("Site plan for CAD (DXF)")}</button>
+      <button className="btn" onClick={() => { download(`${slug(p)}-materials.csv`, '﻿' + takeoffCSV(t, es), 'text/csv'); setNote(L('Saved to your downloads.')); }}>{L("Materials list (CSV)")}</button>
     </div>
     {note && !busy && <p role="status">{note}</p>}
     {busy && <p role="status">{L('Making')} {busy}...</p>}
     <h2>{L("Materials estimate")}</h2>
-    <table className="take"><thead><tr><th>{L("Item")}</th><th>Qty</th><th>{L("Unit")}</th></tr></thead><tbody>{t.map(r => <tr key={r.item}><td>{r.item}<br /><span className="help" style={{ color: 'var(--pencil)', fontSize: '.8rem' }}>{r.basis}</span></td><td className="q">{r.qty}</td><td>{r.unit}</td></tr>)}</tbody></table>
+    <table className="take"><thead><tr><th>{L("Item")}</th><th>{L("Qty")}</th><th>{L("Unit")}</th></tr></thead><tbody>{t.map(r => <tr key={r.item}><td>{es ? r.itemEs : r.item}<br /><span className="help" style={{ color: 'var(--pencil)', fontSize: '.8rem' }}>{es ? r.basisEs : r.basis}</span></td><td className="q">{r.qty}</td><td>{es ? r.unitEs : r.unit}</td></tr>)}</tbody></table>
     <h2>{L("Deadlines")}</h2>
     <div className="grid2"><div className="field"><label htmlFor="filed">{L("Date you filed for plan check")}</label><input id="filed" type="date" value={filed} onChange={e => setFiled(e.target.value)} /></div>
-      <div className="field"><label>&nbsp;</label><button className="btn" disabled={!filed} onClick={async () => { const { deadlinesICS } = await import('../out/ics'); download('plan-check-deadline.ics', deadlinesICS(p, filed), 'text/calendar'); }}>{L("Add to my calendar")}</button></div></div>
+      <div className="field"><label htmlFor="issued">{L("Date the permit was issued (optional)")}</label><input id="issued" type="date" value={issued} onChange={e => setIssued(e.target.value)} /></div>
+      <div className="field"><label htmlFor="ics">&nbsp;</label><button id="ics" className="btn" disabled={!filed} aria-describedby="ics-h" onClick={async () => { const { deadlinesICS } = await import('../out/ics'); download('plan-check-deadline.ics', deadlinesICS(p, filed, 0, issued || undefined), 'text/calendar'); setNote(L('Saved to your downloads.')); }}>{L("Add to my calendar")}</button>
+        <span className="help" id="ics-h">{filed ? L("Plan check expires 18 months after filing. With an issue date, the 12-month start and 2-year permit limits are added too.") : L("Enter the date you filed to set the reminder.")}</span></div></div>
     <h2>{L("Backup and share")}</h2>
     <p className="lead">{L("Your project lives only on this device. On iPhone, save a backup to Files every week.")}</p>
     <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap' }}>
-      <button className="btn" onClick={() => download(`${slug(p)}.permitpack`, serialize(p), 'application/json')}>{L("Save backup")}</button>
-      <button className="btn" onClick={async () => { const pass = await ask({ title: L('Lock a copy to share'), body: L('Pick a passphrase of 8 or more characters. Send it separately from the file, for example by text message.'), input: 'password', minLength: 8, confirm: L('Save locked copy') }) as string | null; if (!pass) return; try { download(`${slug(p)}-locked.permitpack`, await encryptPack(p, pass), 'application/json'); setNote(L('Saved to your downloads.')); } catch (e) { setNote((e as Error).message); } }}>{L("Save locked copy to share")}</button>
+      <button className="btn" onClick={async () => { const r = await shareOrDownload(`${slug(p)}.permitpack`, serialize(p), 'application/json'); if (r !== 'cancelled') setNote(r === 'shared' ? L('Shared.') : L('Saved to your downloads.')); }}>{L("Save backup")}</button>
+      <button className="btn" onClick={async () => { const pass = await ask({ title: L('Lock a copy to share'), body: L('Pick a passphrase of 8 or more characters, like 3 or 4 unrelated words. Send it separately from the file, for example by text message. Nobody can recover it if it is lost, not even this app.'), input: 'password', minLength: 8, repeat: L('Type it again'), validate: v => { const m = passphraseProblem(v); return m ? L(m) : null; }, confirm: L('Save locked copy'), cancel: L('Cancel'), labels: { field: L('Passphrase'), repeat: L('Type it again'), mismatch: L('The two passphrases do not match.'), short: L('Use a passphrase of 8 or more characters.'), show: L('Show') } }) as string | null; if (!pass) return; try { const r = await shareOrDownload(`${slug(p)}-locked.permitpack`, await encryptPack(p, pass), 'application/json'); if (r !== 'cancelled') setNote(r === 'shared' ? L('Shared.') : L('Saved to your downloads.')); } catch (e) { setNote(L((e as Error).message)); } }}>{L("Save locked copy to share")}</button>
     </div>
     <p className="help" style={{ color: 'var(--pencil)', fontSize: '.82rem' }}>{L("This tool is free. If anyone charges you for \"guaranteed permits\" made with it, that's a scam.")}</p>
   </>;
@@ -356,16 +450,19 @@ function SheetItems({ p, update, report, lang }: { p: Project; update: U; report
   const rd = readiness(p, report); const linked = new Set(Object.values(RULE_ITEMS).flat());
   const open = CATALOG.filter(i => itemApplies(i, p) && !linked.has(i.id) && i.mode !== 'auto');
   const docs = open.filter(i => i.mode === 'doc'), asks = open.filter(i => i.mode === 'ask');
+  const must = docs.filter(i => i.garageRelevant), maybe = docs.filter(i => !i.garageRelevant);
   const setA = (id: string, v: 'yes' | 'no' | 'na' | undefined) => update(d => { if (v) d.sheet[id] = v; else delete d.sheet[id]; });
+  const docBox = (i: typeof docs[number]) => <label key={i.id}><input type="checkbox" checked={!!p.docs[i.id]} onChange={e => update(d => { d.docs[i.id] = e.target.checked; })} /> {i.id} {i.summary[lang]}</label>;
   return <>
     <h2>{L("LADBS correction sheet")}</h2>
-    <p className="lead">{scoreLine(rd, lang === 'es')}. {L("Form PC/STR/Corr.Lst.20A, Rev 10/01/2025.")}</p>
+    <p className="lead">{scoreLine(rd, lang === 'es')}. {L("Form")} {PACK.sheet.form}, Rev {PACK.sheet.rev}.</p>
     <h2>{L("Documents to attach")}</h2>
     <div className="mods">
       <label><input type="checkbox" checked={!!p.docs['NRG.CF1R']} onChange={e => update(d => { d.docs['NRG.CF1R'] = e.target.checked; })} /> III.H.9 {L("Title 24 CF1R energy certificate")}</label>
       <label><input type="checkbox" checked={!!p.docs['NRG.HERS']} onChange={e => update(d => { d.docs['NRG.HERS'] = e.target.checked; })} /> III.H.9 {L("HERS field verification")}</label>
-      {docs.map(i => <label key={i.id}><input type="checkbox" checked={!!p.docs[i.id]} onChange={e => update(d => { d.docs[i.id] = e.target.checked; })} /> {i.id} {i.summary[lang]}</label>)}
+      {must.map(docBox)}
     </div>
+    {maybe.length > 0 && <><p className="lead">{L("May apply: ask your preparer. These depend on grading, shared driveways, lifts and other facts this app does not ask about.")}</p><div className="mods">{maybe.map(docBox)}</div></>}
     <h2>{L("Shown on your plans?")}</h2>
     {asks.map(i => <div className="field" key={i.id}><label id={'si-' + i.id}>{i.id} {i.summary[lang]}</label>
       <div className="tri" role="group" aria-labelledby={'si-' + i.id}>
@@ -378,43 +475,47 @@ function SheetItems({ p, update, report, lang }: { p: Project; update: U; report
 }
 
 function InspectionCard({ report, lang, score }: { report: Report; lang: Lang; score?: string }) {
-  const v = { READY_FOR_PREPARER: lang === 'es' ? 'Listo para su preparador' : 'Ready for your preparer', FIX_ISSUES: lang === 'es' ? 'Hay cosas que corregir' : 'Some things need fixing', INCOMPLETE: lang === 'es' ? 'Falta información' : 'Some answers are missing', NOT_SUPPORTED: lang === 'es' ? 'Dirección no soportada' : 'Address not supported yet' }[report.overall];
-  const c = report.counts;
+  const es = lang === 'es';
+  const v = { READY_FOR_PREPARER: es ? 'Listo para su preparador' : 'Ready for your preparer', FIX_ISSUES: es ? 'Hay cosas que corregir' : 'Some things need fixing', INCOMPLETE: es ? 'Falta información' : 'Some answers are missing', NOT_SUPPORTED: es ? 'Dirección no soportada' : 'Address not supported yet' }[report.overall];
+  const c = report.counts; const fr = packFreshness();
   return <section className="card" aria-live="polite">
-    <h3>{lang === 'es' ? 'Tarjeta de revisión' : 'Check card'}</h3>
+    <h3>{es ? 'Tarjeta de revisión' : 'Check card'}</h3>
     <div className="verdict">{v}</div>
-    <div className="sub">{lang === 'es' ? 'Revisión por software, no de la ciudad' : 'Software check, not a city review'} · {lang === 'es' ? 'reglas al' : 'rules as of'} {report.vestDate}</div>
-    {score && <div className="sub">{score}</div>}
-    <div className="punch"><div><b>{c.FAIL}</b>{lang === 'es' ? 'Corregir' : 'Fix'}</div><div><b>{c.UNKNOWN}</b>{lang === 'es' ? 'Falta info' : 'Need info'}</div><div><b>{c.PASS}</b>{lang === 'es' ? 'Cumple' : 'Pass'}</div><div><b>{c.NOT_CHECKED}</b>{lang === 'es' ? 'Apagado' : 'Off'}</div></div>
+    <div className="sub">{es ? 'Revisión por software, no de la ciudad' : 'Software check, not a city review'} · {es ? 'reglas al' : 'rules as of'} {report.vestDate} · {es ? fr.reasonEs : fr.reason}</div>
+    {score && <div className="sub">{es ? 'Puntos de la hoja: ' : 'Sheet items: '}{score}</div>}
+    <div className="sub" style={{ marginBottom: 4 }}>{es ? 'Revisiones de reglas' : 'Rule checks'}</div>
+    <div className="punch"><div><b>{c.FAIL}</b>{es ? 'Corregir' : 'Fix'}</div><div><b>{c.UNKNOWN}</b>{es ? 'Falta info' : 'Need info'}</div><div><b>{c.PASS}</b>{es ? 'Cumple' : 'Pass'}</div><div><b>{c.NOT_CHECKED}</b>{es ? 'Apagado' : 'Off'}</div></div>
   </section>;
 }
 function ResultList({ results, lang }: { results: Result[]; lang: Lang }) {
+  const es = lang === 'es';
   const order = ['FAIL', 'UNKNOWN', 'NOT_CHECKED', 'INFO', 'PASS'];
-  const label = { FAIL: lang === 'es' ? 'Corregir' : 'Fix', UNKNOWN: lang === 'es' ? 'Falta info' : 'Need info', PASS: lang === 'es' ? 'Cumple' : 'Pass', NOT_CHECKED: lang === 'es' ? 'No revisado' : 'Not checked', INFO: lang === 'es' ? 'Nota' : 'Note' };
+  const label = { FAIL: es ? 'Corregir' : 'Fix', UNKNOWN: es ? 'Falta info' : 'Need info', PASS: es ? 'Cumple' : 'Pass', NOT_CHECKED: es ? 'No revisado' : 'Not checked', INFO: es ? 'Nota' : 'Note' };
   return <ul className="results">{[...results].sort((a, b) => order.indexOf(a.status) - order.indexOf(b.status)).map(r =>
     <li key={r.rule.id} className={`res ${r.status}`}>
       <div className="head"><span className="tag">{label[r.status]}</span><span className="title">{r.rule.title[lang]}</span></div>
-      <p>{r.msg[lang]}</p>{r.next && <p className="next"><strong>{lang === 'es' ? 'Siguiente: ' : 'Next: '}</strong>{r.next[lang]}</p>}
-      {r.dismissed && <p className="pending">Dismissed: {r.dismissed}</p>}
-      <p className="cite">{r.rule.id} · {r.rule.cites.map(c => c.code).join('; ')}{RULE_ITEMS[r.rule.id]?.length ? ` · ${lang === 'es' ? 'hoja LADBS' : 'LADBS sheet'} ${RULE_ITEMS[r.rule.id].join(', ')}` : ''}{r.rule.cites.some(c => !c.verified) && <span className="pending"> · citation being verified</span>}</p>
+      <p>{r.msg[lang]}</p>{r.next && <p className="next"><strong>{es ? 'Siguiente: ' : 'Next: '}</strong>{r.next[lang]}</p>}
+      {r.dismissed && <p className="pending">{es ? 'Descartado' : 'Dismissed'}: {r.dismissed}</p>}
+      <p className="cite">{r.rule.id} · {r.rule.cites.map(c => (c.edition ? `[${c.edition}] ` : '') + (es ? citeEs(c.code) : c.code)).join('; ')}{RULE_ITEMS[r.rule.id]?.length ? ` · ${es ? 'hoja LADBS' : 'LADBS sheet'} ${RULE_ITEMS[r.rule.id].join(', ')}` : ''}{r.rule.cites.some(c => !c.verified) && <span className="pending"> · {es ? 'cita en verificación' : 'citation being verified'}</span>}</p>
     </li>)}</ul>;
 }
 
 export { SAFETY_MODULES, toFt };
 
-function Projects({ lang, onPick }: { lang: Lang; onPick: (id: string) => void }) {
+function Projects({ lang, onPick, onNew }: { lang: Lang; onPick: (id: string) => void; onNew: () => void }) {
   const [items, setItems] = useState(store.list); const es = lang === 'es';
   const [renaming, setRenaming] = useState<string | null>(null); const [name, setName] = useState('');
   if (!items.length) return null;
   return <section aria-label={es ? 'Sus proyectos' : 'Your projects'} style={{ marginTop: 28 }}>
-    <h2 style={{ fontSize: '1.05rem', margin: '0 0 8px' }}>{es ? 'Sus proyectos en este dispositivo' : 'Your projects on this device'}</h2>
+    <div style={{ display: 'flex', gap: 8, alignItems: 'center', flexWrap: 'wrap', margin: '0 0 8px' }}><h2 style={{ fontSize: '1.05rem', margin: 0, flex: 1 }}>{es ? 'Sus proyectos en este dispositivo' : 'Your projects on this device'}</h2>
+      <button className="btn" onClick={onNew}>{es ? '+ Proyecto nuevo' : '+ New project'}</button></div>
     <ul className="results" style={{ padding: 0 }}>{items.map(e => <li key={e.id} className="res" style={{ display: 'flex', gap: 8, alignItems: 'center', flexWrap: 'wrap' }}>
       {renaming === e.id ? <form style={{ display: 'flex', gap: 6, flex: 1 }} onSubmit={ev => { ev.preventDefault(); try { const x = store.open(e.id); x.name = name.trim() || x.name; store.save(x); } catch { /* gone */ } setRenaming(null); setItems(store.list()); }}>
-        <label className="sr" htmlFor={'rn-' + e.id}>Name</label><input id={'rn-' + e.id} autoFocus value={name} onChange={ev => setName(ev.target.value)} style={{ flex: 1, padding: 6 }} /><button className="btn">{es ? 'Guardar' : 'Save'}</button></form>
+        <label className="sr" htmlFor={'rn-' + e.id}>{es ? 'Nombre' : 'Name'}</label><input id={'rn-' + e.id} autoFocus value={name} onChange={ev => setName(ev.target.value)} style={{ flex: 1, padding: 6 }} /><button className="btn">{es ? 'Guardar' : 'Save'}</button></form>
         : <button className="btn quiet" style={{ flex: 1, textAlign: 'left', border: 0 }} onClick={() => onPick(e.id)}><strong>{e.name}</strong>{e.demo ? (es ? ' (ejemplo)' : ' (demo)') : ''}<br /><span style={{ fontSize: '.82rem', color: 'var(--pencil)' }}>{e.address || (es ? 'Sin dirección' : 'No address yet')} · {new Date(e.updatedAt).toLocaleDateString()}</span></button>}
       <button className="btn quiet" onClick={() => { setRenaming(e.id); setName(e.name); }}>{es ? 'Renombrar' : 'Rename'}</button>
-      <button className="btn quiet" onClick={() => { store.duplicate(e.id); setItems(store.list()); }}>{es ? 'Duplicar' : 'Duplicate'}</button>
-      <button className="btn quiet" onClick={async () => { if (await ask({ title: es ? '¿Borrar este proyecto?' : 'Delete this project?', body: es ? `"${e.name}" se borra de este dispositivo. Guarde una copia antes si la necesita.` : `"${e.name}" is removed from this device. Save a backup first if you need it.`, confirm: es ? 'Borrar' : 'Delete', danger: true })) { store.remove(e.id); setItems(store.list()); } }}>{es ? 'Borrar' : 'Delete'}</button>
+      <button className="btn quiet" onClick={() => { try { store.duplicate(e.id); } catch { /* damaged */ } setItems(store.list()); }}>{es ? 'Duplicar' : 'Duplicate'}</button>
+      <button className="btn quiet" onClick={async () => { if (await ask({ title: es ? '¿Borrar este proyecto?' : 'Delete this project?', body: es ? `"${e.name}" se borra de este dispositivo. Guarde una copia antes si la necesita.` : `"${e.name}" is removed from this device. Save a backup first if you need it.`, confirm: es ? 'Borrar' : 'Delete', cancel: es ? 'Cancelar' : 'Cancel', danger: true })) { store.remove(e.id); setItems(store.list()); } }}>{es ? 'Borrar' : 'Delete'}</button>
     </li>)}</ul>
   </section>;
 }
