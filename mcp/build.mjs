@@ -1,7 +1,7 @@
 // Builds dist/server.mjs, dist/selftest.mjs and dist/e2e.mjs with esbuild, and writes dist/build-info.json:
 // a hash of every source file that went into the server, so the self-test can prove dist matches src (r4agent-14).
 import { build, version } from 'esbuild';
-import { readFileSync, writeFileSync, existsSync, mkdirSync, copyFileSync } from 'node:fs';
+import { readFileSync, writeFileSync, existsSync, mkdirSync, copyFileSync, globSync } from 'node:fs';
 import { createHash } from 'node:crypto';
 import { resolve, dirname, relative } from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -19,6 +19,18 @@ const vite = {
       return { path: r.path, namespace: q }; });
     b.onLoad({ filter: /.*/, namespace: 'raw' }, a => ({ contents: readFileSync(a.path, 'utf8'), loader: 'text', watchFiles: [a.path] }));
     b.onLoad({ filter: /.*/, namespace: 'inline' }, a => ({ contents: `export default ${JSON.stringify('data:application/octet-stream;base64,' + readFileSync(a.path).toString('base64'))};`, loader: 'js', watchFiles: [a.path] }));
+    // OUT2-17: import.meta.glob (locale files, lazy CJK font pieces) becomes a map of loaders that read the file from disk when
+    // called, relative to dist/, so the server bundle stays small and only the needed file is read.
+    b.onLoad({ filter: /\/app\/src\/.*\.tsx?$/ }, a => {
+      const src = readFileSync(a.path, 'utf8'); if (!src.includes('import.meta.glob')) return undefined;
+      const out = src.replace(/import\.meta\.glob(?:<[^>]*>)?\(\s*'([^']+)'\s*(?:,\s*(\{[^}]*\}))?\s*\)/g, (_m, pat, opts = '') => {
+        const inline = /\?inline/.test(opts); const dir = dirname(a.path);
+        const files = globSync(pat, { cwd: dir }).sort();
+        const entries = files.map(rel => { const key = rel.startsWith('.') ? rel : './' + rel; const fromDist = relative(resolve(here, 'dist'), resolve(dir, rel)).split('\\').join('/');
+          return `${JSON.stringify(key)}: () => import('node:fs').then(fs => { const b = fs.readFileSync(new URL(${JSON.stringify(fromDist)}, import.meta.url)); return ${inline ? "'data:application/octet-stream;base64,' + b.toString('base64')" : "JSON.parse(b.toString('utf8'))"}; })`; });
+        return `({ ${entries.join(', ')} })`; });
+      return { contents: out, loader: a.path.endsWith('x') ? 'tsx' : 'ts', resolveDir: dirname(a.path), watchFiles: [a.path] };
+    });
     b.onResolve({ filter: /clean-wasm\/cleanfix\.js$/ }, a => (a.namespace === 'wasm' ? undefined : { path: 'cleanfix', namespace: 'wasm' }));
     b.onLoad({ filter: /.*/, namespace: 'wasm' }, () => ({ resolveDir: here, loader: 'js', contents: hasWasm
       ? `import * as m from ${JSON.stringify(resolve(wasmDir, 'cleanfix.js'))}; import { readFileSync } from 'node:fs';
