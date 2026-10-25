@@ -76,7 +76,7 @@ export function FieldMode({ p, update, onBack, download }: { p: Project; update:
   };
 
   const list = INSP_ITEMS.filter(x => { const s = result(p.inspection, x.id).s; return show === 'all' || (show === 'open' ? s == null : s === 'fail'); });
-  return <div className="fm" lang={lang}>
+  return <div className="fm fm-hc" lang={lang}>
     <div className="toolbar fm-bar">
       <button type="button" className="btn" onClick={onBack}>{L('Back to the project')}</button>
       <span className="grow" />

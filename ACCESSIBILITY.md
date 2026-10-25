@@ -14,3 +14,6 @@
 
 ## Report a barrier
 Open an issue with the "Accessibility" label. Please say which screen, device, browser and assistive technology.
+
+## Field mode (inspector, `#field`)
+Field mode adds the `.fm-hc` class (round 6). It targets WCAG AAA text contrast (7:1) and 56 x 56 CSS px minimum targets for gloved hands. Secondary text uses the `--ink` token. Light theme only, it uses darker variants of the status tokens: `--pass` #145a38 (8.24:1 with white text), `--fix` #8c1b12 (9.21:1), `--info-need`/`--info-text` #6a4405. These are the only new color values. The rest of the app is unchanged.

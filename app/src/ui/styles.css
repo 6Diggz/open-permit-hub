@@ -143,3 +143,12 @@ a { color: var(--link); }
 .fm-note { width: 100%; font: inherit; font-size: 1rem; padding: 10px; border: 2px solid var(--rule); border-radius: var(--r-sm); background: var(--sheet); color: var(--ink); }
 .fm-actions { display: grid; gap: 10px; }
 label.btn[aria-disabled="true"] { opacity: .45; cursor: progress; }
+/* r6 (r5field-02/03): field-mode accessibility only, approved; not a restyle. WCAG AAA 7:1 text and 56 px gloved-hand targets.
+   .fm-hc reuses --ink for all secondary text. Darker variants (light theme only; dark theme keeps its own tokens) are the only new values:
+   --pass #145a38 (8.24:1 with white, 7.19:1 on --desk), --fix #8c1b12 (9.21 / 8.04), --info-need/--info-text #6a4405 (7.4+ on --desk). */
+.fm-hc { --pencil: var(--ink); }
+.fm-hc .lead, .fm-hc .cite, .fm-hc .help, .fm-hc .fm-group, .fm-hc .tri button:not([aria-pressed="true"]) { color: var(--ink); }
+@media not (prefers-color-scheme: dark) { :root:not([data-theme="dark"]) .fm-hc { --pass: #145a38; --fix: #8c1b12; --info-need: #6a4405; --info-text: #6a4405; } }
+:root[data-theme="light"] .fm-hc { --pass: #145a38; --fix: #8c1b12; --info-need: #6a4405; --info-text: #6a4405; }
+.fm-hc .btn, .fm-hc .fm-big, .fm-hc input, .fm-hc select, .fm-hc .tri button { min-height: 56px; min-width: 56px; }
+.fm-hc .field input, .fm-hc .field select { font-size: 1.05rem; }
