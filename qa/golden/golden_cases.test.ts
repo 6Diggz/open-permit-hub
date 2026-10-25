@@ -8,17 +8,17 @@
  *  - Gov. Code 66314(d)(7)/(d)(11)/(d)(12), 66321(b)(4), 66323(a)(1)(A) (inside existing space + max 150 sf ingress/egress),
  *    66332 (AB 2533), B&P 5537/6737.1
  * Every `expect` row is "what the code/sheet requires". A failing row = an engine finding.
- * Run: cd /home/claude/opa/app && npx vitest run /home/claude/stress/r3/tests/golden_cases.test.ts --root /
+ * Run: cd app && npx vitest run --root ../qa/golden (runs in CI on every push)
  */
 import { describe, it, expect } from 'vitest';
-import { evaluate, type Status, type Report } from '/home/claude/opa/app/src/rules/engine';
-import { RULES, PACK_ID } from '/home/claude/opa/app/src/rules/la-city';
-import { readiness } from '/home/claude/opa/app/src/rules/readiness';
-import { rect } from '/home/claude/opa/app/src/core/geom';
-import { ft, inch } from '/home/claude/opa/app/src/core/units';
+import { evaluate, type Status, type Report } from '../../app/src/rules/engine';
+import { RULES, PACK_ID } from '../../app/src/rules/la-city';
+import { readiness } from '../../app/src/rules/readiness';
+import { rect } from '../../app/src/core/geom';
+import { ft, inch } from '../../app/src/core/units';
 
 import { base } from './golden_base';
-import type { Project } from '/home/claude/opa/app/src/core/model';
+import type { Project } from '../../app/src/core/model';
 export { base };
 const TODAY = new Date('2026-10-24T12:00:00');
 type Exp = Status | 'NA';
@@ -99,9 +99,7 @@ const CASES: Case[] = [
     make: () => { const p = base(); p.adu.addedAreaSqFt = 400; p.adu.addedForIngressOnly = 'no'; p.adu.heightMm = ft(22); p.adu.addedSetbackMm = ft(6); p.adu.interiorLivableSqFt = 760; return p; },
     exp: { 'SCP-01': 'FAIL', 'ADD-01': 'PASS' }, overall: 'NOT_SUPPORTED' },
 
-  { id: 'C12b', title: 'Same second story, but the user leaves "added area" at 0 (the footprint did not grow)', why: 'Nothing in the model asks about a new floor above. A 22 ft garage with a new upper floor must never read READY on the conversion path.',
-    make: () => { const p = base(); p.adu.heightMm = ft(22); p.adu.interiorLivableSqFt = 760; return p; },
-    exp: {}, overall: 'NOT_SUPPORTED' },
+  // C12b removed (round 6): superseded by golden_cases_r4.test.ts C12b, which asks newUpperFloor.
 ];
 
 const run = (p: Project) => { const rep = evaluate(p, RULES, PACK_ID, TODAY); return { rep, rd: readiness(p, rep) }; };

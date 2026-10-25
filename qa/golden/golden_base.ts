@@ -1,10 +1,10 @@
-import { blankProject, type Project } from '/home/claude/opa/app/src/core/model';
-import { CATALOG } from '/home/claude/opa/app/src/rules/ladbs-adu-2025';
-import { evaluate } from '/home/claude/opa/app/src/rules/engine';
-import { RULES, PACK_ID } from '/home/claude/opa/app/src/rules/la-city';
-import { readiness } from '/home/claude/opa/app/src/rules/readiness';
-import { rect } from '/home/claude/opa/app/src/core/geom';
-import { ft, inch } from '/home/claude/opa/app/src/core/units';
+import { blankProject, type Project } from '../../app/src/core/model';
+import { CATALOG } from '../../app/src/rules/ladbs-adu-2025';
+import { evaluate } from '../../app/src/rules/engine';
+import { RULES, PACK_ID } from '../../app/src/rules/la-city';
+import { readiness } from '../../app/src/rules/readiness';
+import { rect } from '../../app/src/core/geom';
+import { ft, inch } from '../../app/src/core/units';
 export { ft, inch, rect };
 export const run = (p: Project) => { const rep = evaluate(p, RULES, PACK_ID, new Date('2026-10-24T12:00:00')); return { rep, rd: readiness(p, rep), st: (id: string) => rep.results.find(r => r.rule.id === id)?.status ?? 'NA' }; };
 /** A fully answered, permitted, wood-frame, detached 20x20 garage at the rear of a 50x150 R1 lot, 6 ft from side and rear lines. */

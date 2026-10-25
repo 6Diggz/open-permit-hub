@@ -1,5 +1,5 @@
 /**
- * Golden cases, round 5 (seat r5gold). Builds on /home/claude/opa/qa/golden/golden_cases_r4.test.ts and golden_base.ts.
+ * Golden cases, round 5 (seat r5gold). Builds on golden_cases_r4.test.ts and golden_base.ts.
  * Targets the round-4 logic: MIX-01 combinations (LADBS ADU/JADU/MTH correction sheet 2023 LABC/LARC, rev. Dec 8 2025:
  * II-C.5a, II-D.1, II-D.5a, II-G.3a), SIZ-01 (II-D.2, Gov. Code 66323(a)(2)), the house-wall rating (LARC Table R302.1(1),
  * LABC 705.3, sheet III-D.1), the assumed line on a rated blank ADU wall, plain-answer gating (EN + ES), other-city /
@@ -8,9 +8,9 @@
  * on main d26ad77 until that r5gold finding is fixed.
  */
 import { describe, it, expect } from 'vitest';
-import { base, run, ft, rect } from '/home/claude/opa/qa/golden/golden_base';
-import { plainAnswer } from '/home/claude/opa/app/src/rules/readiness';
-import type { Project } from '/home/claude/opa/app/src/core/model';
+import { base, run, ft, rect } from './golden_base';
+import { plainAnswer } from '../../app/src/rules/readiness';
+import type { Project } from '../../app/src/core/model';
 
 type Plain = 'likely-yes' | 'likely-no' | 'unsure' | 'not-likely-yes';
 interface Case { id: string; title: string; why: string; red?: string; make: () => Project; exp: Record<string, string>; overall?: string; notOverall?: string;

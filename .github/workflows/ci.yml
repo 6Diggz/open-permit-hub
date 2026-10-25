@@ -22,8 +22,8 @@ jobs:
         run: cd clean && wasm-pack build --release --target web --out-dir ../app/src/clean-wasm
       - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
         with: { node-version: 22 }
-      - name: App tests, typecheck, build, lint
-        run: cd app && npm ci && npx vitest run && npm run build && npx oxlint
+      - name: App tests, golden LA cases (qa/golden), typecheck, build, lint
+        run: cd app && npm ci && npx vitest run && npx vitest run --root ../qa/golden && npm run build && npx oxlint
       - name: Only allowed licenses in the web bundle (allowlist; catches every GPL/AGPL/LGPL variant)
         run: cd app && node ../scripts/license-gate.mjs
       - name: Third-party notices carry every crate's license text and are up to date

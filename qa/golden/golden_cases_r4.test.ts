@@ -8,20 +8,20 @@
  *  - Gov. Code 66314(d)(7)/(d)(11)/(d)(12), 66321(b)(4), 66323(a)(1)(A) (inside existing space + max 150 sf ingress/egress),
  *    66332 (AB 2533), B&P 5537/6737.1
  * Every `expect` row is "what the code/sheet requires". A failing row = an engine finding.
- * Run: cd /home/claude/opa/app && npx vitest run --root /home/claude/stress/r4/tests golden_cases_r4
+ * Run: cd app && npx vitest run --root ../qa/golden (runs in CI on every push)
  * Round 4 (seat r4gold): C12b corrected, C12c-C40 added; extra sources: LADBS sheet II-C.5a / II-D.2 / II-G.3a / II-J combination tables,
  * CRC R305.1 (2022: baths 6'-8"), CRC R302.1 exception for detached garages (4" eave) applies to U occupancy only.
  */
 import { describe, it, expect } from 'vitest';
-import { evaluate, type Status, type Report } from '/home/claude/opa/app/src/rules/engine';
-import { RULES, PACK_ID } from '/home/claude/opa/app/src/rules/la-city';
-import { readiness } from '/home/claude/opa/app/src/rules/readiness';
-import { rect } from '/home/claude/opa/app/src/core/geom';
-import { ft, inch } from '/home/claude/opa/app/src/core/units';
+import { evaluate, type Status, type Report } from '../../app/src/rules/engine';
+import { RULES, PACK_ID } from '../../app/src/rules/la-city';
+import { readiness } from '../../app/src/rules/readiness';
+import { rect } from '../../app/src/core/geom';
+import { ft, inch } from '../../app/src/core/units';
 
 import { base } from './golden_base';
-import { plainAnswer } from '/home/claude/opa/app/src/rules/readiness';
-import type { Project } from '/home/claude/opa/app/src/core/model';
+import { plainAnswer } from '../../app/src/rules/readiness';
+import type { Project } from '../../app/src/core/model';
 export { base };
 const TODAY = new Date('2026-10-24T12:00:00');
 type Exp = Status | 'NA';
@@ -143,7 +143,7 @@ const CASES: Case[] = [
     make: () => { const p = base(); p.site.existingAdus = 1; return p; }, exp: {}, not: { 'MIX-01': ['FAIL'] }, overall: 'INCOMPLETE', plain: 'not-likely-yes' },
 
   { id: 'C18', title: 'Existing DETACHED ADU (backyard unit) + converting the garage too', why: 'Sheet II-C.5a allows only ONE detached/conversion State ADU. FAIL is right (when the existing one is detached).',
-    make: () => { const p = base(); p.site.existingAdus = 1; p.site.otherBuildings = 'yes'; p.site.otherBuildingGapMm = ft(14); return p; },
+    make: () => { const p = base(); p.site.existingAdus = 1; p.site.otherBuildings = 'yes'; p.site.otherBuildingGapMm = ft(14); p.site.existingAduAttached = 'no'; /* r5gold restatement: answered detached */ return p; },
     exp: { 'MIX-01': 'FAIL' }, overall: 'FIX_ISSUES', plain: 'likely-no' },
 
   { id: 'C19', title: 'Attached garage conversion (II-G) on a lot that already has a detached ADU', why: 'Sheet II-G.3a: existing SFD + one attached State ADU + one detached State or Ordinance ADU + one JADU is allowed: must not FAIL.',
@@ -152,7 +152,7 @@ const CASES: Case[] = [
     exp: {}, not: { 'MIX-01': ['FAIL'] }, overall: 'INCOMPLETE', plain: 'not-likely-yes' },
 
   { id: 'C20', title: 'Converting the garage AND building a new detached ADU 12 ft from it', why: 'II-C.5a / II-D.5a: only one detached-or-conversion State ADU per SFD lot -> the combination fails. (Model has no "planned second ADU" field; entered here as an ADU on the lot.)',
-    make: () => { const p = base(); p.site.existingAdus = 1; p.site.otherBuildings = 'yes'; p.site.otherBuildingGapMm = ft(12); return p; },
+    make: () => { const p = base(); p.site.existingAdus = 1; p.site.otherBuildings = 'yes'; p.site.otherBuildingGapMm = ft(12); p.site.existingAduAttached = 'no'; /* r5gold restatement: answered detached */ return p; },
     exp: { 'MIX-01': 'FAIL' }, overall: 'FIX_ISSUES', plain: 'likely-no' },
 
   { id: 'C21', title: '900 sq ft (30x30) existing garage converted, 840 sq ft livable', why: 'The 800 sf cap is II-D.2 (NEW detached, GC 66323(a)(2)). A conversion of existing space has no size cap (II-C.2); over 750 sf the impact fee is not $0.',
