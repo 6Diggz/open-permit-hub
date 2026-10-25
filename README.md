@@ -39,7 +39,7 @@ Or in Claude Code: `claude mcp add permit-hub -e OPA_ROOT=/path/to/projects -- n
 
 | Tool | What it does | Writes? |
 |---|---|---|
-| `list_projects` | Every `.permitpack` in the projects folder, with its status. | no |
+| `list_projects` | Every `.permitpack` in the projects folder (up to 500, 4 folders deep; `truncated: true` when more exist), with its status. | no |
 | `create_project` | New garage conversion (or new ADU) as a working copy; returns the first checks. | new file |
 | `import_permitpack` | Working copy from a plain or passphrase-locked pack, or a backup bundle. | new file |
 | `get_project` | The whole project: lot, house, garage, rooms, doors, windows, answers, sheet answers, docs, review notes. | no |

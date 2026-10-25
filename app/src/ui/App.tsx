@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useRef, useState } from 'react';
+import { lazy, Suspense, useEffect, useMemo, useRef, useState } from 'react';
 import { blankProject, demoProject, isDemo, MODULES, SAFETY_MODULES, uid, type Project, type Tri, type Window } from '../core/model';
 import { History } from '../core/undo';
 import { nextPinNumber } from '../core/markup';
@@ -15,7 +15,8 @@ import { Len, Num, Q } from './fields';
 import { RoomsPanel } from './Rooms';
 import { RoomPlan } from './RoomPlan';
 import { ReviewStep } from './Review';
-import { FieldMode } from './FieldMode';
+// r6ux-07: field mode (inspection, photos) loads only when opened, not on the landing page.
+const FieldMode = lazy(() => import('./FieldMode').then(m => ({ default: m.FieldMode })));
 import { fromMap, unmark, type MapField } from '../io/parcel-apply';
 import { ask, AskHost } from './Ask';
 import { autoFit } from '../rules/fit';
@@ -114,7 +115,7 @@ export default function App() {
   if (!p || !report) return <><AskHost /><Welcome onPick={id => { try { show(store.open(id)); } catch (e) { loadError = (e as Error).message; loadErrorId = id; setP(null); } }} onClean={() => openTool('clean')} lang={lang} setLang={setLang} field={tool === 'field'}
     onStart={(d) => { const x = d ? demoProject() : blankProject(); x.people.language = lang; if (lang === 'es') x.name = d ? 'Lote de ejemplo (no es una dirección real)' : 'Mi conversión de garaje'; show(x); }} onOpen={x => show(x, 3)} /></>;
 
-  if (tool === 'field') return <><AskHost /><FieldMode p={p} update={update} onBack={() => openTool('adu')} download={download} /></>;
+  if (tool === 'field') return <><AskHost /><Suspense fallback={<p className="lead" role="status">{L('Loading…')}</p>}><FieldMode p={p} update={update} onBack={() => openTool('adu')} download={download} /></Suspense></>;
   const steps: string[] = tr(lang, 'steps');
   const stepDot = (i: number) => { const mod = [['core', 'zoning', 'hazards'], ['zoning', 'fire', 'structural', 'fees'], ['egress'], [], [], []][i]; const rs = report.results.filter(r => mod.includes(r.rule.module)); return rs.some(r => r.status === 'FAIL') ? 'var(--fix)' : rs.some(r => r.status === 'UNKNOWN') ? 'var(--info-need)' : rs.some(r => r.status === 'NOT_CHECKED') ? 'var(--off)' : rs.some(r => r.status === 'PASS') ? 'var(--pass)' : 'transparent'; };
   const close = () => { flushSave(); setP(null); hist.current = null; history.pushState(null, '', '#projects'); };
@@ -151,7 +152,9 @@ export default function App() {
         </div>
         {/* r5whole-06: on a phone the check card is far below the form; the plain answer is shown at the top too. */}
         {homeTip && <div className="banner" role="status">{L("Tip: in Safari tap Share, then Add to Home Screen. Projects in a Home Screen app are kept; Safari can clear them after 7 days without a visit. Still save a backup.")} <button className="btn quiet" onClick={hideTip}>{L("OK")}</button></div>}
-        {verdict && <p className="banner mobile-only" style={{ margin: '8px 16px 0' }}>{verdict.plain[lang === 'es' ? 'es' : 'en']}</p>}
+        {verdict && <p className={'banner mobile-only' + (verdict.plain.verdict === 'likely-no' ? ' warn' : '')} style={{ margin: '8px 16px 0' }}>{verdict.plain[lang === 'es' ? 'es' : 'en']}{' '}
+          {/* r6ux-06: a path from the top answer to the details */}
+          <button type="button" className="btn quiet" onClick={() => { const c = document.querySelector<HTMLElement>('aside section.card'); c?.scrollIntoView({ block: 'start' }); c?.focus(); }}>{L(verdict.plain.verdict === 'likely-no' ? 'See what to fix' : 'See the details')}</button></p>}
         {saveState === 'blocked' && <div className="banner warn" role="alert">{L("Not saved: storage is blocked. Export a backup.")}</div>}
         {saveState === 'conflict' && <div className="banner warn" role="alert">{L("This project changed in another tab. Pick which copy to keep.")}{' '}
           <button className="btn quiet" onClick={() => { try { show(store.open(p.id), step); setSaveState('ok'); } catch { /* gone */ } }}>{L("Load the newer copy")}</button>{' '}
@@ -536,13 +539,13 @@ function InspectionCard({ report, lang, score, appDate = null, example, plain, l
   // r4cold-02: a "Likely yes" plain answer must not sit under a "Some answers are missing" headline.
   const v = likelyYes && report.overall === 'INCOMPLETE' ? (es ? `Probablemente sí · quedan ${report.counts.UNKNOWN} preguntas` : `Likely yes · ${report.counts.UNKNOWN} questions left`) : { READY_FOR_PREPARER: es ? 'Listo para su preparador' : 'Ready for your preparer', FIX_ISSUES: es ? 'Hay cosas que corregir' : 'Some things need fixing', INCOMPLETE: es ? 'Falta información' : 'Some answers are missing', NOT_SUPPORTED: es ? 'Dirección no soportada' : 'Address not supported yet' }[report.overall];
   const c = report.counts; const fr = rulesLine(appDate, report.pack, es);
-  return <section className="card" aria-live="polite">
+  return <section className="card" aria-live="polite" tabIndex={-1}>
     {example ? <h2 className="card-h">{es ? 'Resultado de ejemplo (lote de demostración, no es su proyecto)' : 'Example result (demo lot, not your project)'}</h2> : <h3>{es ? 'Tarjeta de revisión' : 'Check card'}</h3>}
     <div className="verdict">{v}</div>
     {plain && <p className="sub" data-testid="plain-answer"><strong>{plain}</strong></p>}
     <div className="sub">{es ? 'Revisión por software, no de la ciudad' : 'Software check, not a city review'} · {example ? (es ? `reglas de LA al ${PACK.verifiedOn}` : `LA rules as of ${PACK.verifiedOn}`) /* r4cold-07 */ : fr.text}</div>
     {score && <div className="sub">{es ? 'Puntos de la hoja: ' : 'Sheet items: '}{score}</div>}
-    <div className="sub" style={{ marginBottom: 4 }}>{es ? 'Revisiones de reglas' : 'Rule checks'}</div>
+    <div className="sub" style={{ marginBottom: 4 }}>{es ? 'Revisiones de reglas (una revisión de reglas puede cubrir varios puntos de la hoja)' : 'Rule checks (one rule check can cover several sheet items)'}</div>
     <div className="punch"><div><b>{c.FAIL}</b>{es ? 'Corregir' : 'Fix'}</div><div><b>{c.UNKNOWN}</b>{es ? 'Falta info' : 'Need info'}</div><div><b>{c.PASS}</b>{es ? 'Cumple' : 'Pass'}</div><div><b>{c.NOT_CHECKED}</b>{es ? 'Apagado' : 'Off'}</div></div>
   </section>;
 }

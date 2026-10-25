@@ -7,7 +7,7 @@ import { readiness } from '../rules/readiness';
 import { RULE_ITEMS } from '../rules/ladbs-adu-2025';
 
 export type InspStatus = 'pass' | 'fail' | 'na';
-export interface InspResult { s: InspStatus | null; note: string; /** Photo id (the photo itself is kept on this device, not in the project). */ photo: string | null; at: string }
+export interface InspResult { s: InspStatus | null; note: string; /** Photo id (the photo itself is kept on this device, not in the project). */ photo: string | null; at: string; /** r6ux-04: why a Pass/N/A overrides a failing app check (own field, cleared when the result changes). */ reason?: string }
 export interface Inspection { inspector: string; date: string; general: string; items: Record<string, InspResult> }
 /** Inspection stage, in the order of the city's inspection card (r5field-01). */
 export type InspStage = 'foundation' | 'frame' | 'insulation' | 'drywall' | 'final';
@@ -74,7 +74,7 @@ export function sanitizeInspection(raw: unknown): Inspection | undefined {
   const items: Record<string, InspResult> = {};
   const src = r.items && typeof r.items === 'object' ? r.items : {};
   for (const x of INSP_ITEMS) { const v = src[x.id]; if (!v || typeof v !== 'object') continue;
-    items[x.id] = { s: v.s === 'pass' || v.s === 'fail' || v.s === 'na' ? v.s : null, note: str(v.note, MAX_NOTE), photo: typeof v.photo === 'string' && PHOTO_ID.test(v.photo) ? v.photo : null, at: str(v.at, 40) }; }
+    items[x.id] = { s: v.s === 'pass' || v.s === 'fail' || v.s === 'na' ? v.s : null, note: str(v.note, MAX_NOTE), photo: typeof v.photo === 'string' && PHOTO_ID.test(v.photo) ? v.photo : null, at: str(v.at, 40), ...(typeof v.reason === 'string' && v.reason.trim() ? { reason: str(v.reason, 300) } : {}) }; }
   return { inspector: str(r.inspector, 80), date: /^\d{4}-\d{2}-\d{2}$/.test(r.date) ? r.date : today(), general: str(r.general, MAX_NOTE * 2), items };
 }
 const DATA_JPEG = /^data:image\/jpeg;base64,[A-Za-z0-9+/]+={0,2}$/;
@@ -95,10 +95,18 @@ export function inspectionPack(base: string, photos: Record<string, string>, max
 }
 export const hasInspection = (p: Project) => !!p.inspection && (Object.keys(p.inspection.items).length > 0 || !!p.inspection.inspector || !!p.inspection.general);
 
-/** r5whole-02: items marked Pass in the field whose sheet items the app's checks fail (the field result overrides a failing check). */
+/** r5whole-02 / r6logic-05: items marked Pass or N/A in the field whose sheet items the app's checks fail (the field result overrides a failing check). */
 export function fieldConflicts(p: Project, rep: Report): string[] {
   const failing = new Set(readiness(p, rep).items.filter(x => x.state === 'failing').map(x => x.item.id));
-  return INSP_ITEMS.filter(x => result(p.inspection, x.id).s === 'pass' && x.sheet.some(id => failing.has(id))).map(x => x.id);
+  return INSP_ITEMS.filter(x => { const s = result(p.inspection, x.id).s; return (s === 'pass' || s === 'na') && x.sheet.some(id => failing.has(id)); }).map(x => x.id);
+}
+/** r6ux-02: every field item's failing-check messages in one pass (one readiness() call), for the render and the PDF. */
+export function appFailMap(p: Project, rep: Report, lang: 'en' | 'es'): Map<string, string[]> {
+  const bad = new Set(readiness(p, rep).items.filter(i => i.state === 'failing').map(i => i.item.id)); const out = new Map<string, string[]>();
+  const fails = rep.results.filter(r => r.status === 'FAIL' && !r.dismissed);
+  for (const x of INSP_ITEMS) { if (!x.sheet.some(id => bad.has(id))) continue;
+    const m = [...new Set(fails.filter(r => RULE_ITEMS_OF(r.rule.id).some(id => x.sheet.includes(id))).map(r => r.msg[lang]))]; if (m.length) out.set(x.id, m); }
+  return out;
 }
 /** The app's own result for one field item: the failing rule messages behind its sheet items (empty when nothing fails). */
 export function appFails(p: Project, rep: Report, itemId: string, lang: 'en' | 'es'): string[] {

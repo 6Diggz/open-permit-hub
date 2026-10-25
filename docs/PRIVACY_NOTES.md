@@ -4,7 +4,7 @@ These are engineering facts for the attorney who will write the privacy notice (
 
 - **No server of ours.** The app is static files on GitHub Pages. It has no accounts, no analytics, no telemetry and no error upload.
 - **Project data stays in the browser** (`localStorage` keys `opa.index` and `opa.p.<id>`). It leaves the device only when the user saves or shares a file.
-- **Network requests**: only to the site's own origin (checked in CI by `app/e2e/e2e.mjs`, test "appsec-12"). A Content-Security-Policy limits connections to the same origin.
+- **Network requests**: to the site's own origin, plus the two City of LA map hosts (`maps.lacity.org`, `zimas.lacity.org`) only when the user taps Look up (see Parcel lookup below). The Content-Security-Policy `connect-src` lists exactly these: `'self'`, `blob:`, `data:`, `https://maps.lacity.org`, `https://zimas.lacity.org`. Checked in CI by `app/e2e/e2e.mjs` (test "appsec-12").
 - **Site-visit photos** (inspector field mode) are compressed on the phone and kept in the browser's IndexedDB, not in the project record. They leave the device only inside a site-visit `.permitpack` or the visit PDF that the user saves or shares, and in the handoff ZIP's `site-visit.pdf`.
 - **Parcel lookup** sends the typed address to the City of LA's public map services (`maps.lacity.org`, `zimas.lacity.org`) only when the user taps Look up.
 - **Error reports** are built on the device and copied by the user; they hold app version, rule pack, error text and stack, no project data (`app/src/core/errorreport.ts`).
