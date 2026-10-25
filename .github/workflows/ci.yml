@@ -1,0 +1,37 @@
+name: CI
+on: [push, pull_request]
+permissions: { contents: read }
+jobs:
+  app:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+        with: { targets: wasm32-unknown-unknown }
+      - uses: Swatinem/rust-cache@v2
+        with: { workspaces: clean }
+      - run: cargo install wasm-pack --locked
+      - run: cd clean && cargo test --release && wasm-pack build --release --target web --out-dir ../app/src/clean-wasm
+      - uses: actions/setup-node@v4
+        with: { node-version: 22 }
+      - run: cd app && npm ci && npx vitest run && npm run build
+      - name: No GPL code in the web bundle
+        run: cd app && npx --yes license-checker --production --failOn "GPL;AGPL;LGPL" --summary
+      - name: Bundle size budget (main JS under 3 MB)
+        run: cd app && test $(du -cb dist/assets/index-*.js | tail -1 | cut -f1) -lt 3000000
+      - run: cd mcp && npm ci && npx esbuild src/server.ts --bundle --platform=node --format=esm --outfile=dist/server.mjs --banner:js="import{createRequire}from'module';const require=createRequire(import.meta.url);" && npx esbuild src/selftest.ts --bundle --platform=node --format=esm --outfile=dist/selftest.mjs --banner:js="import{createRequire}from'module';const require=createRequire(import.meta.url);" && node dist/selftest.mjs
+      - uses: actions/upload-artifact@v4
+        with: { name: web-build, path: app/dist }
+  deploy:
+    needs: app
+    if: github.ref == 'refs/heads/main' && github.event_name == 'push'
+    runs-on: ubuntu-latest
+    permissions: { pages: write, id-token: write }
+    environment: { name: github-pages, url: "${{ steps.d.outputs.page_url }}" }
+    steps:
+      - uses: actions/download-artifact@v4
+        with: { name: web-build, path: dist }
+      - uses: actions/upload-pages-artifact@v3
+        with: { path: dist }
+      - id: d
+        uses: actions/deploy-pages@v4

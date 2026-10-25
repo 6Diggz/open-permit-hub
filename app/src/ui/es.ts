@@ -136,4 +136,15 @@ export const ES = {
 "Distance from the rear line": "Distancia a la línea trasera",
 "The 10-digit number on your property tax bill.": "El número de 10 dígitos en su recibo de impuestos.",
 "HPOZ = Historic Preservation Overlay Zone.": "HPOZ = zona histórica protegida."
+,
+"Close this project?": "¿Cerrar este proyecto?",
+"It stays saved on this device until you start a new one.": "Queda guardado en este dispositivo hasta que empiece uno nuevo.",
+"Dismiss this item?": "¿Descartar este punto?",
+"Your reason prints on the report.": "Su razón aparece en el informe.",
+"Saved to your downloads.": "Guardado en sus descargas.",
+"Lock a copy to share": "Bloquear una copia para compartir",
+"Pick a passphrase of 8 or more characters. Send it separately from the file, for example by text message.": "Elija una contraseña de 8 o más caracteres. Envíela aparte del archivo, por ejemplo por mensaje de texto.",
+"Save locked copy": "Guardar copia bloqueada"
+,
+"All projects": "Todos los proyectos"
 } as const;

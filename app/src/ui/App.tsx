@@ -8,25 +8,20 @@ import { fmtFtIn, fmtSqFt, ft, parseLength, toFt } from '../core/units';
 import { area } from '../core/geom';
 import { Plan } from './Plan';
 import { CleanFix } from './CleanFix';
+import { ask, AskHost } from './Ask';
 import { autoFit } from '../rules/fit';
 import { tr, type Lang } from './i18n';
 import { ES } from './es';
 let LANG: Lang = 'en';
 const L = (en: string) => (LANG === 'es' ? (ES as Record<string, string>)[en] ?? en : en);
-import { encryptPack, migrate, openPack, serialize } from '../core/permitpack';
+import { encryptPack, openPack, serialize } from '../core/permitpack';
 import { takeoff, takeoffCSV } from '../out/takeoff';
 import { fromGLTF, fromRoomPlanJSON, tapeCheck } from '../io/scan';
 
-const KEY = 'opa.project.v1';
+import * as store from '../core/store';
 let loadError = '';
-const load = (): Project | null => {
-  let raw: string | null = null;
-  try { raw = localStorage.getItem(KEY); } catch { return null; }
-  if (!raw) return null;
-  try { return migrate(JSON.parse(raw)); }
-  catch (e) { loadError = (e as Error).message; try { localStorage.setItem(KEY + '.broken', raw); localStorage.removeItem(KEY); } catch { /* blocked */ } return null; }
-};
-const persist = (p: Project) => { try { localStorage.setItem(KEY, serialize(p)); return true; } catch { return false; } };
+const load = (): Project | null => { try { const id = store.lastId(); return id ? store.open(id) : null; } catch (e) { loadError = (e as Error).message; return null; } };
+const persist = (p: Project) => store.save(p);
 function download(name: string, data: BlobPart, type: string) {
   const url = URL.createObjectURL(new Blob([data], { type })); const a = document.createElement('a'); a.href = url; a.download = name; a.click(); setTimeout(() => URL.revokeObjectURL(url), 2000);
 }
@@ -56,14 +51,14 @@ export default function App() {
     window.addEventListener('keydown', k); return () => window.removeEventListener('keydown', k);
   });
 
-  if (tool === 'clean') return <CleanFix onBack={() => setTool('adu')} />;
-  if (!p || !report) return <Welcome onClean={() => setTool('clean')} lang={lang} setLang={setLang} onStart={(d) => { const x = d ? demoProject() : blankProject(); x.people.language = lang; if (!d && lang === 'es') x.name = 'Mi conversión de garaje'; hist.current = new History(x); setP(x); setStep(0); }} onOpen={x => { hist.current = new History(x); setP(x); setStep(3); }} />;
+  if (tool === 'clean') return <><CleanFix onBack={() => setTool('adu')} /><AskHost /></>;
+  if (!p || !report) return <><AskHost /><Welcome onPick={id => { try { const x = store.open(id); hist.current = new History(x); setP(x); setStep(0); } catch (e) { loadError = (e as Error).message; } }} onClean={() => setTool('clean')} lang={lang} setLang={setLang} onStart={(d) => { const x = d ? demoProject() : blankProject(); x.people.language = lang; if (!d && lang === 'es') x.name = 'Mi conversión de garaje'; hist.current = new History(x); setP(x); setStep(0); }} onOpen={x => { hist.current = new History(x); setP(x); setStep(3); }} /></>;
 
   const steps: string[] = tr(lang, 'steps');
   const stepDot = (i: number) => { const mod = [['core', 'zoning', 'hazards'], ['zoning', 'fire', 'structural', 'fees'], ['egress'], [], []][i]; const rs = report.results.filter(r => mod.includes(r.rule.module)); return rs.some(r => r.status === 'FAIL') ? 'var(--fix)' : rs.some(r => r.status === 'UNKNOWN') ? 'var(--info-need)' : rs.some(r => r.status === 'NOT_CHECKED') ? 'var(--off)' : rs.some(r => r.status === 'PASS') ? 'var(--pass)' : 'transparent'; };
 
   return (
-    <div className="app">
+    <div className="app"><AskHost />
       <nav className="rail" aria-label={L("Steps")}>
         <p className="brand">{tr(lang, 'app')}</p>
         <p className="brand-sub">LA City · {PACK_ID.split('@')[1]}</p>
@@ -74,7 +69,7 @@ export default function App() {
         ))}
         <div className="rail-foot">
           <span>{savedOk ? tr(lang, 'saved') : L("Not saved: storage is blocked. Export a backup.")}</span>
-          <button className="btn quiet" onClick={() => { if (confirm('Close this project? It stays saved on this device until you start a new one.')) { setP(null); hist.current = null; } }}>{L("Close project")}</button>
+          <button className="btn quiet" onClick={async () => { setP(null); hist.current = null; }}>{L("All projects")}</button>
         </div>
       </nav>
 
@@ -120,7 +115,7 @@ export default function App() {
   );
 }
 
-function Welcome({ lang, setLang, onStart, onOpen, onClean }: { onClean: () => void; lang: Lang; setLang: (l: Lang) => void; onStart: (demo: boolean) => void; onOpen: (p: Project) => void }) {
+function Welcome({ lang, setLang, onStart, onOpen, onClean, onPick }: { onPick: (id: string) => void; onClean: () => void; lang: Lang; setLang: (l: Lang) => void; onStart: (demo: boolean) => void; onOpen: (p: Project) => void }) {
   const [err, setErr] = useState('');
   const sample = evaluate(demoProject(), RULES, PACK_ID);
   return (
@@ -135,10 +130,11 @@ function Welcome({ lang, setLang, onStart, onOpen, onClean }: { onClean: () => v
         <label className="btn quiet">{lang === 'es' ? 'Abrir un archivo' : 'Open a saved pack'}
           <input type="file" accept=".permitpack,.json" className="sr" onChange={async e => {
             const f = e.target.files?.[0]; if (!f) return; const text = await f.text();
-            try { let pass: string | undefined; if (text.includes('permitpack-encrypted')) pass = prompt('This pack is locked. Passphrase:') ?? undefined; onOpen(await openPack(text, pass)); } catch (x) { setErr((x as Error).message); }
+            try { let pass: string | undefined; if (text.includes('permitpack-encrypted')) pass = ((await ask({ title: 'This pack is locked', body: 'Enter the passphrase you were given with the file.', input: 'password', minLength: 1, confirm: 'Open' })) as string | null) ?? undefined; if (!pass) return; onOpen(await openPack(text, pass)); } catch (x) { setErr((x as Error).message); }
           }} />
         </label>
       </div>
+      <Projects lang={lang} onPick={onPick} />
       <p style={{ marginTop: 28 }}><button className="btn quiet" onClick={onClean}>{lang === 'es' ? 'Para dibujantes: limpiar un archivo DWG o DXF' : 'For drafters: clean and fix a DWG or DXF file'}</button></p>
       {(err || loadError) && <p role="alert" style={{ color: 'var(--fix)' }}>{err || `We couldn't open your saved project (${loadError}). A raw copy was kept in this browser; open a backup file instead.`}</p>}
     </div>
@@ -289,13 +285,13 @@ function ChecksStep({ p, update, report, lang }: { p: Project; update: U; report
     {p.dismissed.length === 0 ? <p className="lead">{L("None. You can dismiss a minor or major item with a reason. Critical items can't be dismissed.")}</p> :
       <ul>{p.dismissed.map(x => <li key={x.ruleId}>{x.ruleId}: {x.reason} <button className="btn quiet" onClick={() => update(d => { d.dismissed = d.dismissed.filter(y => y.ruleId !== x.ruleId); })}>{L("Restore")}</button></li>)}</ul>}
     <div className="mods">{report.results.filter(r => (r.status === 'FAIL' || r.status === 'UNKNOWN') && r.rule.severity !== 'critical' && !r.dismissed).map(r =>
-      <label key={r.rule.id}><button className="btn quiet" onClick={() => { const reason = prompt(`Why dismiss "${r.rule.title[lang]}"? This prints on the report.`); if (reason?.trim()) update(d => { d.dismissed.push({ ruleId: r.rule.id, reason: reason.trim(), at: new Date().toISOString(), ruleVersion: r.rule.version }); }); }}>{L("Dismiss")}</button> {r.rule.id} {r.rule.title[lang]}</label>)}</div>
+      <label key={r.rule.id}><button className="btn quiet" onClick={async () => { const reason = await ask({ title: L('Dismiss this item?'), body: `${r.rule.title[lang]}. ${L('Your reason prints on the report.')}`, input: 'text', minLength: 3, confirm: L('Dismiss') }) as string | null; if (reason) update(d => { d.dismissed.push({ ruleId: r.rule.id, reason, at: new Date().toISOString(), ruleVersion: r.rule.version }); }); }}>{L("Dismiss")}</button> {r.rule.id} {r.rule.title[lang]}</label>)}</div>
   </>;
 }
 
 function ExportStep({ p, update, report, lang }: { p: Project; update: U; report: Report; lang: Lang }) {
-  const blockers = exportBlockers(p, report); const [busy, setBusy] = useState(''); const [filed, setFiled] = useState('');
-  const run = async (label: string, fn: () => Promise<void>) => { setBusy(label); try { await fn(); } catch (e) { alert((e as Error).message); } setBusy(''); };
+  const blockers = exportBlockers(p, report); const [busy, setBusy] = useState(''); const [note, setNote] = useState(''); const [filed, setFiled] = useState('');
+  const run = async (label: string, fn: () => Promise<void>) => { setBusy(label); setNote(''); try { await fn(); setNote(L('Saved to your downloads.')); } catch (e) { setNote((e as Error).message); } setBusy(''); };
   const t = takeoff(p);
   return <>
     <h2>{L("People on the plans")}</h2>
@@ -317,6 +313,7 @@ function ExportStep({ p, update, report, lang }: { p: Project; update: U; report
       <button className="btn" disabled={!!busy} onClick={() => run('dxf', async () => { const { toDXF } = await import('../out/dxf'); download(`${slug(p)}-site-plan.dxf`, toDXF(p), 'application/dxf'); })}>{L("Site plan for CAD (DXF)")}</button>
       <button className="btn" onClick={() => download(`${slug(p)}-materials.csv`, takeoffCSV(t), 'text/csv')}>{L("Materials list (CSV)")}</button>
     </div>
+    {note && !busy && <p role="status">{note}</p>}
     {busy && <p role="status">{L('Making')} {busy}...</p>}
     <h2>{L("Materials estimate")}</h2>
     <table className="take"><thead><tr><th>{L("Item")}</th><th>Qty</th><th>{L("Unit")}</th></tr></thead><tbody>{t.map(r => <tr key={r.item}><td>{r.item}<br /><span className="help" style={{ color: 'var(--pencil)', fontSize: '.8rem' }}>{r.basis}</span></td><td className="q">{r.qty}</td><td>{r.unit}</td></tr>)}</tbody></table>
@@ -327,7 +324,7 @@ function ExportStep({ p, update, report, lang }: { p: Project; update: U; report
     <p className="lead">{L("Your project lives only on this device. On iPhone, save a backup to Files every week.")}</p>
     <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap' }}>
       <button className="btn" onClick={() => download(`${slug(p)}.permitpack`, serialize(p), 'application/json')}>{L("Save backup")}</button>
-      <button className="btn" onClick={async () => { const pass = prompt('Pick a passphrase (8+ characters). Send it separately from the file.'); if (!pass) return; try { download(`${slug(p)}-locked.permitpack`, await encryptPack(p, pass), 'application/json'); } catch (e) { alert((e as Error).message); } }}>{L("Save locked copy to share")}</button>
+      <button className="btn" onClick={async () => { const pass = await ask({ title: L('Lock a copy to share'), body: L('Pick a passphrase of 8 or more characters. Send it separately from the file, for example by text message.'), input: 'password', minLength: 8, confirm: L('Save locked copy') }) as string | null; if (!pass) return; try { download(`${slug(p)}-locked.permitpack`, await encryptPack(p, pass), 'application/json'); setNote(L('Saved to your downloads.')); } catch (e) { setNote((e as Error).message); } }}>{L("Save locked copy to share")}</button>
     </div>
     <p className="help" style={{ color: 'var(--pencil)', fontSize: '.82rem' }}>{L("This tool is free. If anyone charges you for \"guaranteed permits\" made with it, that's a scam.")}</p>
   </>;
@@ -356,3 +353,20 @@ function ResultList({ results, lang }: { results: Result[]; lang: Lang }) {
 }
 
 export { SAFETY_MODULES, toFt };
+
+function Projects({ lang, onPick }: { lang: Lang; onPick: (id: string) => void }) {
+  const [items, setItems] = useState(store.list); const es = lang === 'es';
+  const [renaming, setRenaming] = useState<string | null>(null); const [name, setName] = useState('');
+  if (!items.length) return null;
+  return <section aria-label={es ? 'Sus proyectos' : 'Your projects'} style={{ marginTop: 28 }}>
+    <h2 style={{ fontSize: '1.05rem', margin: '0 0 8px' }}>{es ? 'Sus proyectos en este dispositivo' : 'Your projects on this device'}</h2>
+    <ul className="results" style={{ padding: 0 }}>{items.map(e => <li key={e.id} className="res" style={{ display: 'flex', gap: 8, alignItems: 'center', flexWrap: 'wrap' }}>
+      {renaming === e.id ? <form style={{ display: 'flex', gap: 6, flex: 1 }} onSubmit={ev => { ev.preventDefault(); try { const x = store.open(e.id); x.name = name.trim() || x.name; store.save(x); } catch { /* gone */ } setRenaming(null); setItems(store.list()); }}>
+        <label className="sr" htmlFor={'rn-' + e.id}>Name</label><input id={'rn-' + e.id} autoFocus value={name} onChange={ev => setName(ev.target.value)} style={{ flex: 1, padding: 6 }} /><button className="btn">{es ? 'Guardar' : 'Save'}</button></form>
+        : <button className="btn quiet" style={{ flex: 1, textAlign: 'left', border: 0 }} onClick={() => onPick(e.id)}><strong>{e.name}</strong>{e.demo ? (es ? ' (ejemplo)' : ' (demo)') : ''}<br /><span style={{ fontSize: '.82rem', color: 'var(--pencil)' }}>{e.address || (es ? 'Sin dirección' : 'No address yet')} · {new Date(e.updatedAt).toLocaleDateString()}</span></button>}
+      <button className="btn quiet" onClick={() => { setRenaming(e.id); setName(e.name); }}>{es ? 'Renombrar' : 'Rename'}</button>
+      <button className="btn quiet" onClick={() => { store.duplicate(e.id); setItems(store.list()); }}>{es ? 'Duplicar' : 'Duplicate'}</button>
+      <button className="btn quiet" onClick={async () => { if (await ask({ title: es ? '¿Borrar este proyecto?' : 'Delete this project?', body: es ? `"${e.name}" se borra de este dispositivo. Guarde una copia antes si la necesita.` : `"${e.name}" is removed from this device. Save a backup first if you need it.`, confirm: es ? 'Borrar' : 'Delete', danger: true })) { store.remove(e.id); setItems(store.list()); } }}>{es ? 'Borrar' : 'Delete'}</button>
+    </li>)}</ul>
+  </section>;
+}
