@@ -1,0 +1,28 @@
+// Static, indexable pages: one per rule (English and Spanish) plus an index and a sitemap, built from the same rule pack the app runs.
+import { RULES } from './src/rules/la-city.ts';
+import { PACK, PACK_ID } from './src/rules/pack.ts';
+import { RULE_ITEMS } from './src/rules/ladbs-adu-2025.ts';
+import { citeEs } from './src/rules/cites-es.ts';
+
+const SITE = 'https://6diggz.github.io/open-permit-hub/';
+const esc = (s: string) => s.replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]!));
+const page = (lang: 'en' | 'es', title: string, body: string, depth: number) => `<!doctype html><html lang="${lang}"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1"><title>${esc(title)}</title><meta name="description" content="${esc(title)}"><link rel="icon" href="${'../'.repeat(depth)}icon.svg"><style>body{font-family:system-ui,sans-serif;max-width:46rem;margin:2rem auto;padding:0 1rem;line-height:1.55;color:#1e2228;background:#fff}a{color:#1d4ed8}small{color:#4a515c}@media(prefers-color-scheme:dark){body{background:#111316;color:#e8eaed}a{color:#8ab4ff}small{color:#a2a9b4}}</style></head><body><main>${body}</main></body></html>`;
+
+export function rulePages(): Record<string, string> {
+  const out: Record<string, string> = {}; const urls: string[] = [];
+  for (const lang of ['en', 'es'] as const) {
+    const es = lang === 'es'; const dir = es ? 'rules/es/' : 'rules/'; const depth = es ? 2 : 1; const app = '../'.repeat(depth);
+    const list = RULES.map(r => `<li><a href="${r.id}.html">${esc(r.id)}: ${esc(r.title[lang])}</a></li>`).join('');
+    out[dir + 'index.html'] = page(lang, es ? 'Reglas de conversión de garaje a ADU en Los Ángeles' : 'LA garage-to-ADU conversion rules', `<h1>${es ? 'Reglas de conversión de garaje a ADU en la Ciudad de Los Ángeles' : 'City of Los Angeles garage-to-ADU conversion rules'}</h1><p>${es ? 'Lo que revisa Open Permit Hub, con su fuente. Resúmenes propios, no el texto del código.' : 'What Open Permit Hub checks, with the source for each. Our own summaries, not code text.'} ${esc(PACK_ID)}, ${es ? 'revisadas el' : 'checked'} ${PACK.verifiedOn}.</p><ul>${list}</ul><p><a href="${app}">${es ? 'Revise su garaje gratis' : 'Check your garage for free'}</a> · <a href="${es ? '../' : 'es/'}">${es ? 'English' : 'Español'}</a></p>`, depth);
+    urls.push(SITE + dir);
+    for (const r of RULES) {
+      const cites = r.cites.map(c => `<li>${c.edition ? `[${esc(c.edition)}] ` : ''}${c.url ? `<a href="${esc(c.url)}" rel="noopener">${esc(es ? citeEs(c.code) : c.code)}</a>` : esc(es ? citeEs(c.code) : c.code)}${c.verified ? '' : es ? ' <small>(cita en verificación)</small>' : ' <small>(citation being verified)</small>'}</li>`).join('');
+      const items = RULE_ITEMS[r.id]?.length ? `<p>${es ? 'Puntos de la hoja de correcciones LADBS' : 'LADBS correction sheet items'} (${esc(PACK.sheet.form)} Rev ${esc(PACK.sheet.rev)}): ${esc(RULE_ITEMS[r.id].join(', '))}</p>` : '';
+      out[`${dir}${r.id}.html`] = page(lang, `${r.id}: ${r.title[lang]} (${es ? 'ADU en LA' : 'LA ADU'})`, `<p><a href="./">${es ? 'Todas las reglas' : 'All rules'}</a></p><h1>${esc(r.title[lang])}</h1><p><small>${esc(r.id)} · ${es ? 'versión' : 'version'} ${esc(r.version)} · ${es ? 'vigente desde' : 'effective from'} ${esc(r.effectiveFrom)} · ${r.hs ? (es ? 'salud y seguridad' : 'health and safety') : ''}</small></p><h2>${es ? 'Fuentes' : 'Sources'}</h2><ul>${cites}</ul>${items}<p><a href="${app}">${es ? 'Revise su garaje contra esta regla, gratis' : 'Check your garage against this rule, free'}</a></p><p><small>${es ? 'Revisión por software, no una revisión de la ciudad.' : 'Software check, not a city review.'}</small></p>`, depth);
+      urls.push(`${SITE}${dir}${r.id}.html`);
+    }
+  }
+  out['sitemap.xml'] = `<?xml version="1.0" encoding="UTF-8"?>\n<urlset xmlns="http://www.sitemaps.org/schemas/sitemap/0.9">\n${[SITE, ...urls].map(u => `<url><loc>${u}</loc><lastmod>${PACK.verifiedOn}</lastmod></url>`).join('\n')}\n</urlset>\n`;
+  out['robots.txt'] = `User-agent: *\nAllow: /\nSitemap: ${SITE}sitemap.xml\n`;
+  return out;
+}
