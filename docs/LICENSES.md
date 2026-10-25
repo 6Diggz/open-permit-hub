@@ -3,6 +3,7 @@
 |---|---|---|
 | acadrust 0.6.7 | MPL-2.0 (single license, checked in its LICENSE file) | Unmodified dependency of `clean/`. If we ever change its files, those files stay MPL-2.0 and their source is published. |
 | pdf-lib | MIT | PDF export |
+| pdf.js (pdfjs-dist) | Apache-2.0 | Plan-set pre-check: reads the text of a PDF on the device |
 | three.js | MIT | Scan (GLTF) import |
 | fflate | MIT | ZIP export |
 | React, Vite | MIT | App |

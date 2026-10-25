@@ -33,4 +33,6 @@ function serviceWorker(): Plugin {
 // https://vite.dev/config/
 export default defineConfig({
   plugins: [react(), serviceWorker()], base: './',
+  // The pdf.js worker ships as .mjs; emit it as .js so every static host sends a JavaScript MIME type (module workers require one).
+  build: { rolldownOptions: { output: { assetFileNames: (a: { names?: string[]; name?: string }) => ((a.names?.[0] ?? a.name ?? '').endsWith('.mjs') ? 'assets/[name]-[hash].js' : 'assets/[name]-[hash][extname]') } } },
 })
