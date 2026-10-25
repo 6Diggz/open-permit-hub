@@ -1,8 +1,8 @@
 // r3data-01: a v0.1 save (opa.project.v1) must migrate once, cleanly: no ".broken" copy, no recursion.
 import { it, expect } from 'vitest';
 import { makeStore } from '../../core/store';
-import * as v01 from '/home/claude/stress/r3/tests/fixtures/r3data-v01/model';
-import * as v01p from '/home/claude/stress/r3/tests/fixtures/r3data-v01/permitpack';
+import * as v01 from './fixtures/r3data-v01/model';
+import * as v01p from './fixtures/r3data-v01/permitpack';
 it('v0.1 legacy save migrates without leaving a broken copy', () => {
   const m = new Map<string, string>(); let sets = 0;
   const kv = { getItem: (k: string) => m.get(k) ?? null, setItem: (k: string, v: string) => { sets++; m.set(k, v); }, removeItem: (k: string) => { m.delete(k); } };
