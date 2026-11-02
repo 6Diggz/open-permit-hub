@@ -100,8 +100,8 @@
  "lacounty-rebuild": {
   "url": "https://recovery.lacounty.gov/rebuilding/policies-interpretations-exemptions",
   "type": "html",
-  "sha256": null,
-  "checked": null
+  "sha256": "dd6d231b566ec63e1a676fca96bb2443791a1bed860ba3edfd0724981effed30",
+  "checked": "2026-11-02"
  },
  "aalrr-sb543": {
   "url": "https://www.aalrr.com/newsroom-alerts-4196",
